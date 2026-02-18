@@ -1,0 +1,431 @@
+{% extends "base.html" %}
+
+{% block title %}{% if emp %}Edit{% else %}Add{% endif %} Employee - HRMS{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="header-bar">
+        <div class="header-content">
+            <span class="logo-text">HRMS</span>
+            <nav class="main-nav">
+                <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Settings <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
+                        <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
+                        <a href="#" class="dropdown-item">Salary Grade</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link nav-link-active">Employee Management <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Employees</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Attendance <span class="dropdown-arrow">▼</span></a>
+                </div>
+                <a href="#" class="nav-link">Leave Requests</a>
+                <a href="#" class="nav-link">Reports</a>
+            </nav>
+            <div class="user-dropdown">
+                <a href="#" class="user-info">
+                    {% if employee %}
+                        {{ employee.full_name }} ({{ current_user.role|title }})
+                    {% else %}
+                        {{ current_user.username }} ({{ current_user.role|title }})
+                    {% endif %}
+                    <span class="dropdown-arrow">▼</span>
+                </a>
+                <div class="dropdown-menu dropdown-menu-right">
+                    <a href="{{ url_for('routes.logout') }}" class="dropdown-item">Logout</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="dashboard-content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible">
+                        <span>{{ message }}</span>
+                        <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <div class="page-header">
+            <h1 class="page-title">{% if emp %}Edit{% else %}Add{% endif %} Employee</h1>
+            <a href="{{ url_for('routes.employees_list') }}" class="btn-secondary">Back to List</a>
+        </div>
+        
+        <div class="form-section">
+            <form method="POST" class="employee-form">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="employee_id">Employee ID *</label>
+                        <input type="text" id="employee_id" name="employee_id" class="form-control" 
+                               value="{{ emp.employee_id if emp else '' }}" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="status">Status *</label>
+                        <select id="status" name="status" class="form-control" required>
+                            <option value="active" {% if emp and emp.status == 'active' %}selected{% endif %}>Active</option>
+                            <option value="on_leave" {% if emp and emp.status == 'on_leave' %}selected{% endif %}>On Leave</option>
+                            <option value="terminated" {% if emp and emp.status == 'terminated' %}selected{% endif %}>Terminated</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="first_name">First Name *</label>
+                        <input type="text" id="first_name" name="first_name" class="form-control" 
+                               value="{{ emp.first_name if emp else '' }}" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="middle_name">Middle Name</label>
+                        <input type="text" id="middle_name" name="middle_name" class="form-control" 
+                               value="{{ emp.middle_name if emp else '' }}">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="last_name">Last Name *</label>
+                        <input type="text" id="last_name" name="last_name" class="form-control" 
+                               value="{{ emp.last_name if emp else '' }}" required>
+                    </div>
+                </div>
+                
+                <div style="border-top: 1px solid var(--light-gray); margin: 1.5rem 0; padding-top: 1.5rem;"></div>
+                
+                <div class="form-grid" style="grid-template-columns: minmax(140px, 200px) 1fr;">
+                    <div class="form-group">
+                        <label for="department_id">Department</label>
+                        <select id="department_id" name="department_id" class="form-control">
+                            <option value="">Select Department</option>
+                            {% for dept in departments %}
+                                <option value="{{ dept.id }}" {% if emp and emp.department_id == dept.id %}selected{% endif %}>
+                                    {{ dept.name }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="position">Current Position</label>
+                        <select id="position" name="position" class="form-control">
+                            <option value="">Select position</option>
+                            {% if emp and emp.position and positions and emp.position not in (positions|map(attribute='title')|list) %}
+                                <option value="{{ emp.position }}" selected>{{ emp.position }}</option>
+                            {% endif %}
+                            {% for pos in positions %}
+                                <option value="{{ pos.title }}" {% if emp and emp.position == pos.title %}selected{% endif %}>{{ pos.title }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="appointment_date">Appointment Date</label>
+                        <input type="date" id="appointment_date" name="appointment_date" class="form-control" 
+                               value="{{ emp.appointment_date.strftime('%Y-%m-%d') if emp and emp.appointment_date else '' }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="status_of_appointment">Status of Appointment</label>
+                        <select id="status_of_appointment" name="status_of_appointment" class="form-control">
+                            <option value="">Select</option>
+                            <option value="Permanent" {% if emp and emp.status_of_appointment == 'Permanent' %}selected{% endif %}>Permanent</option>
+                            <option value="Casual" {% if emp and emp.status_of_appointment == 'Casual' %}selected{% endif %}>Casual</option>
+                            <option value="Contractual" {% if emp and emp.status_of_appointment == 'Contractual' %}selected{% endif %}>Contractual</option>
+                            <option value="Temporary" {% if emp and emp.status_of_appointment == 'Temporary' %}selected{% endif %}>Temporary</option>
+                            <option value="Coterminus" {% if emp and emp.status_of_appointment == 'Coterminus' %}selected{% endif %}>Coterminus</option>
+                            <option value="Provisional" {% if emp and emp.status_of_appointment == 'Provisional' %}selected{% endif %}>Provisional</option>
+                            <option value="Elective" {% if emp and emp.status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
+                            <option value="Contract of Service" {% if emp and emp.status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
+                            <option value="Job Order" {% if emp and emp.status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="nature_of_appointment">Nature of Appointment</label>
+                        <select id="nature_of_appointment" name="nature_of_appointment" class="form-control">
+                            <option value="">Select</option>
+                            <option value="Original" {% if emp and emp.nature_of_appointment == 'Original' %}selected{% endif %}>Original</option>
+                            <option value="Reemployment" {% if emp and emp.nature_of_appointment == 'Reemployment' %}selected{% endif %}>Reemployment</option>
+                            <option value="Transfer" {% if emp and emp.nature_of_appointment == 'Transfer' %}selected{% endif %}>Transfer</option>
+                            <option value="Promotion" {% if emp and emp.nature_of_appointment == 'Promotion' %}selected{% endif %}>Promotion</option>
+                            <option value="Demotion" {% if emp and emp.nature_of_appointment == 'Demotion' %}selected{% endif %}>Demotion</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div style="border-top: 1px solid var(--light-gray); margin: 1.5rem 0; padding-top: 1.5rem;"></div>
+                
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="phone">Phone</label>
+                        <input type="text" id="phone" name="phone" class="form-control" 
+                               value="{{ emp.phone if emp else '' }}">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="mobile_no">Mobile</label>
+                        <input type="text" id="mobile_no" name="mobile_no" class="form-control" 
+                               value="{{ emp.mobile_no if emp and emp.mobile_no else '' }}">
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>RESIDENTIAL ADDRESS</label>
+                    <div class="address-fields">
+                        <div class="form-grid" style="grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 0.75rem;">
+                            <input type="text" id="residential_province" name="residential_province" 
+                                   value="{{ emp.residential_province if emp and emp.residential_province else '' }}" 
+                                   placeholder="Province" class="form-control">
+                            <div id="cityContainer">
+                                <input type="text" id="residential_city" name="residential_city" 
+                                       value="{{ emp.residential_city if emp and emp.residential_city else '' }}" 
+                                       placeholder="City/Municipality" class="form-control">
+                            </div>
+                        </div>
+                        <div class="form-grid" style="grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 0.75rem;">
+                            <div id="barangayContainer">
+                                <input type="text" id="residential_barangay" name="residential_barangay" 
+                                       value="{{ emp.residential_barangay if emp and emp.residential_barangay else '' }}" 
+                                       placeholder="Barangay" class="form-control">
+                            </div>
+                            <input type="text" id="residential_subdivision" name="residential_subdivision" 
+                                   value="{{ emp.residential_subdivision if emp and emp.residential_subdivision else '' }}" 
+                                   placeholder="Purok/Subdivision" class="form-control">
+                        </div>
+                        <div class="form-grid" style="grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 0.75rem;">
+                            <input type="text" id="residential_street" name="residential_street" 
+                                   value="{{ emp.residential_street if emp and emp.residential_street else '' }}" 
+                                   placeholder="Street" class="form-control">
+                            <input type="text" id="residential_house_no" name="residential_house_no" 
+                                   value="{{ emp.residential_house_no if emp and emp.residential_house_no else '' }}" 
+                                   placeholder="House/Block/Lot No" class="form-control">
+                        </div>
+                        <div class="form-grid" style="grid-template-columns: auto 1fr; gap: 1rem; align-items: center;">
+                            <label for="residential_zip_code" style="font-size: 0.9rem; font-weight: 600;">ZIP CODE</label>
+                            <input type="text" id="residential_zip_code" name="residential_zip_code" 
+                                   value="{{ emp.residential_zip_code if emp and emp.residential_zip_code else '' }}" 
+                                   placeholder="" class="form-control">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">{% if emp %}Update{% else %}Add{% endif %} Employee</button>
+                    <a href="{{ url_for('routes.employees_list') }}" class="btn-secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Bohol municipalities list (alphabetically sorted)
+    const boholMunicipalities = [
+        'Alburquerque', 'Alicia', 'Anda', 'Antequera', 'Baclayon', 'Balilihan', 'Batuan', 
+        'Bien Unido', 'Bilar', 'Buenavista', 'Calape', 'Candijay', 'Carmen', 'Catigbian', 
+        'Clarin', 'Corella', 'Cortes', 'Dagohoy', 'Danao', 'Dauis', 'Dimiao', 'Duero', 
+        'Garcia Hernandez', 'Getafe', 'Guindulman', 'Inabanga', 'Jagna', 'Lila', 'Loay', 
+        'Loboc', 'Loon', 'Mabini', 'Maribojoc', 'Panglao', 'Pilar', 'Pres. Carlos P. Garcia', 
+        'Sagbayan', 'San Isidro', 'San Miguel', 'Sevilla', 'Sierra Bullones', 'Tagbilaran City', 
+        'Talibon', 'Trinidad', 'Tubigon', 'Ubay', 'Valencia'
+    ].sort();
+    
+    // Jagna barangays list (alphabetically sorted)
+    const jagnaBarangays = [
+        'Alejawan', 'Balili', 'Boctol', 'Buyog', 'Bunga Ilaya', 'Bunga Mar', 'Cabunga-an', 
+        'Calabacita', 'Cambugason', 'Can-ipol', 'Canjulao', 'Cantagay', 'Cantuyoc', 'Can-uba', 
+        'Can-upao', 'Faraon', 'Ipil', 'Kinagbaan', 'Laca', 'Larapan', 'Lonoy', 'Looc', 
+        'Malbog', 'Mayana', 'Naatang', 'Nausok', 'Odiong', 'Pagina', 'Pangdan', 'Poblacion', 
+        'Tejero', 'Tubod Mar', 'Tubod Monte'
+    ].sort();
+    
+    const provinceInput = document.getElementById('residential_province');
+    const cityContainerDiv = document.getElementById('cityContainer');
+    const barangayContainerDiv = document.getElementById('barangayContainer');
+    
+    function toggleCityField(isBohol) {
+        if (!cityContainerDiv) return;
+        
+        const currentElement = cityContainerDiv.querySelector('#residential_city');
+        const currentValue = currentElement ? currentElement.value : '';
+        
+        if (isBohol) {
+            // Create select dropdown
+            const select = document.createElement('select');
+            select.id = 'residential_city';
+            select.name = 'residential_city';
+            select.className = 'form-control';
+            
+            // Add empty option
+            const emptyOption = document.createElement('option');
+            emptyOption.value = '';
+            emptyOption.textContent = 'Select City/Municipality';
+            select.appendChild(emptyOption);
+            
+            // Add all Bohol municipalities
+            boholMunicipalities.forEach(municipality => {
+                const option = document.createElement('option');
+                option.value = municipality;
+                option.textContent = municipality;
+                // Handle both old "Tagbilaran" and new "Tagbilaran City" values
+                if (municipality === currentValue || 
+                    (municipality === 'Tagbilaran City' && currentValue === 'Tagbilaran')) {
+                    option.selected = true;
+                }
+                select.appendChild(option);
+            });
+            
+            // Replace input with select
+            cityContainerDiv.innerHTML = '';
+            cityContainerDiv.appendChild(select);
+        } else {
+            // Create text input
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.id = 'residential_city';
+            input.name = 'residential_city';
+            input.className = 'form-control';
+            input.placeholder = 'City/Municipality';
+            input.value = currentValue;
+            
+            // Replace select with input
+            cityContainerDiv.innerHTML = '';
+            cityContainerDiv.appendChild(input);
+        }
+    }
+    
+    function toggleBarangayField(isJagna) {
+        if (!barangayContainerDiv) return;
+        
+        const currentElement = barangayContainerDiv.querySelector('#residential_barangay');
+        const currentValue = currentElement ? currentElement.value : '';
+        
+        if (isJagna) {
+            // Create select dropdown
+            const select = document.createElement('select');
+            select.id = 'residential_barangay';
+            select.name = 'residential_barangay';
+            select.className = 'form-control';
+            
+            // Add empty option
+            const emptyOption = document.createElement('option');
+            emptyOption.value = '';
+            emptyOption.textContent = 'Select Barangay';
+            select.appendChild(emptyOption);
+            
+            // Add all Jagna barangays
+            jagnaBarangays.forEach(barangay => {
+                const option = document.createElement('option');
+                option.value = barangay;
+                option.textContent = barangay;
+                if (barangay === currentValue) {
+                    option.selected = true;
+                }
+                select.appendChild(option);
+            });
+            
+            // Replace input with select
+            barangayContainerDiv.innerHTML = '';
+            barangayContainerDiv.appendChild(select);
+        } else {
+            // Create text input
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.id = 'residential_barangay';
+            input.name = 'residential_barangay';
+            input.className = 'form-control';
+            input.placeholder = 'Barangay';
+            input.value = currentValue;
+            
+            // Replace select with input
+            barangayContainerDiv.innerHTML = '';
+            barangayContainerDiv.appendChild(input);
+        }
+    }
+    
+    function updateBarangayField() {
+        const cityElement = cityContainerDiv.querySelector('#residential_city');
+        if (cityElement) {
+            const cityValue = cityElement.value.trim();
+            if (cityValue === 'Jagna') {
+                toggleBarangayField(true);
+            } else {
+                toggleBarangayField(false);
+            }
+        }
+    }
+    
+    // Check initial province value
+    if (provinceInput && cityContainerDiv) {
+        const initialProvince = provinceInput.value.trim();
+        if (initialProvince.toLowerCase() === 'bohol') {
+            toggleCityField(true);
+            // Check if city is Jagna after toggling
+            setTimeout(updateBarangayField, 100);
+        }
+        
+        // Listen for province changes
+        provinceInput.addEventListener('input', function() {
+            const province = this.value.trim().toLowerCase();
+            if (province === 'bohol') {
+                toggleCityField(true);
+                // Check if city is Jagna after toggling
+                setTimeout(updateBarangayField, 100);
+            } else {
+                toggleCityField(false);
+                toggleBarangayField(false);
+            }
+        });
+        
+        // Also listen for blur event in case user types and moves away
+        provinceInput.addEventListener('blur', function() {
+            const province = this.value.trim().toLowerCase();
+            if (province === 'bohol') {
+                toggleCityField(true);
+                // Check if city is Jagna after toggling
+                setTimeout(updateBarangayField, 100);
+            } else {
+                toggleCityField(false);
+                toggleBarangayField(false);
+            }
+        });
+    }
+    
+    // Listen for city/municipality changes
+    if (cityContainerDiv && barangayContainerDiv) {
+        // Use event delegation since the city field might be dynamically created
+        document.addEventListener('change', function(e) {
+            if (e.target && e.target.id === 'residential_city') {
+                const cityValue = e.target.value.trim();
+                if (cityValue === 'Jagna') {
+                    toggleBarangayField(true);
+                } else {
+                    toggleBarangayField(false);
+                }
+            }
+        });
+        
+        // Also check on page load if city is already Jagna
+        setTimeout(function() {
+            const cityElement = cityContainerDiv.querySelector('#residential_city');
+            if (cityElement && cityElement.value.trim() === 'Jagna') {
+                toggleBarangayField(true);
+            }
+        }, 200);
+    }
+});
+</script>
+{% endblock %}

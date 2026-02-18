@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block title %}Positions - HRMS{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="header-bar">
+        <div class="header-content">
+            <span class="logo-text">HRMS</span>
+            <nav class="main-nav">
+                <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link nav-link-active">Settings <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
+                        <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
+                        <a href="#" class="dropdown-item">Salary Grade</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Employee Management <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Employees</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Attendance <span class="dropdown-arrow">▼</span></a>
+                </div>
+                <a href="#" class="nav-link">Leave Requests</a>
+                <a href="#" class="nav-link">Reports</a>
+            </nav>
+            <div class="user-dropdown">
+                <a href="#" class="user-info">
+                    {% if employee %}
+                        {{ employee.full_name }} ({{ current_user.role|title }})
+                    {% else %}
+                        {{ current_user.username }} ({{ current_user.role|title }})
+                    {% endif %}
+                    <span class="dropdown-arrow">▼</span>
+                </a>
+                <div class="dropdown-menu dropdown-menu-right">
+                    <a href="{{ url_for('routes.logout') }}" class="dropdown-item">Logout</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="dashboard-content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible">
+                        <span>{{ message }}</span>
+                        <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <div class="page-header">
+            <h1 class="page-title">Positions</h1>
+            <a href="{{ url_for('routes.position_add') }}" class="btn-primary">+ Add Position</a>
+        </div>
+        
+        <div class="table-section">
+            <div class="search-bar">
+                <input type="text" id="searchInputPositions" class="search-input" placeholder="Search positions by title...">
+                <span class="search-icon">🔍</span>
+            </div>
+            <div class="table-container">
+                <table class="data-table" id="positionsTable">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="positionsTableBody">
+                        {% if positions %}
+                            {% for pos in positions %}
+                            <tr class="table-row" data-search="{{ pos.title|lower }}">
+                                <td>{{ pos.title }}</td>
+                                <td>
+                                    <a href="{{ url_for('routes.position_edit', id=pos.id) }}" class="btn-action">Edit</a>
+                                    <form method="POST" action="{{ url_for('routes.position_delete', id=pos.id) }}" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this position?');">
+                                        <button type="submit" class="btn-action btn-danger">Delete</button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="2" class="no-data">No positions found</td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('searchInputPositions');
+    const tableBody = document.getElementById('positionsTableBody');
+    if (searchInput && tableBody) {
+        searchInput.addEventListener('input', function() {
+            const query = this.value.toLowerCase().trim();
+            const rows = tableBody.querySelectorAll('tr[data-search]');
+            rows.forEach(function(row) {
+                const text = row.getAttribute('data-search') || '';
+                row.style.display = text.indexOf(query) !== -1 ? '' : 'none';
+            });
+        });
+    }
+});
+</script>
+{% endblock %}

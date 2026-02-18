@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Login - HRMS{% endblock %}
+
+{% block content %}
+<div class="login-container">
+    <div class="header-bar">
+        <div class="header-content">
+            <span class="logo-text">HRMS</span>
+        </div>
+    </div>
+    
+    <div class="login-wrapper">
+        <div class="login-card">
+            <div class="login-header">
+                <div class="login-header-content">
+                    <img src="{{ url_for('static', filename='favicon.ico') }}" alt="HRMS Icon" class="login-icon">
+                    <h1>Human Resource Management System</h1>
+                </div>
+            </div>
+            
+            <div class="login-body">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ category }}">
+                                {{ message }}
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+                
+                <form method="POST" action="{{ url_for('routes.login') }}" class="login-form">
+                    <div class="form-group">
+                        <label for="employee_id">ID Number</label>
+                        <input 
+                            type="text" 
+                            id="employee_id" 
+                            name="employee_id" 
+                            class="form-control" 
+                            placeholder="Enter your ID Number"
+                            required 
+                            autofocus
+                        >
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="password">Password</label>
+                        <input 
+                            type="password" 
+                            id="password" 
+                            name="password" 
+                            class="form-control" 
+                            placeholder="Enter your password"
+                            required
+                        >
+                    </div>
+                    
+                    <button type="submit" class="btn-login">Login</button>
+                </form>
+            </div>
+            
+            <div class="login-footer">
+                <p>MUNICIPALITY OF JAGNA</p>
+                <p>2026 All rights reserved.</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

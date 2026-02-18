@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - HRMS{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="header-bar">
+        <div class="header-content">
+            <span class="logo-text">HRMS</span>
+            <nav class="main-nav">
+                <a href="{{ url_for('routes.dashboard') }}" class="nav-link active">Dashboard</a>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Settings <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
+                        <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
+                        <a href="#" class="dropdown-item">Salary Grade</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Employee Management <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Employees</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Attendance <span class="dropdown-arrow">▼</span></a>
+                </div>
+                <a href="#" class="nav-link">Leave Requests</a>
+                <a href="#" class="nav-link">Reports</a>
+            </nav>
+            <div class="user-dropdown">
+                <a href="#" class="user-info">
+                    {% if employee %}
+                        {{ employee.full_name }} ({{ current_user.role|title }})
+                    {% else %}
+                        {{ current_user.username }} ({{ current_user.role|title }})
+                    {% endif %}
+                    <span class="dropdown-arrow">▼</span>
+                </a>
+                <div class="dropdown-menu dropdown-menu-right">
+                    <a href="{{ url_for('routes.logout') }}" class="dropdown-item">Logout</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="dashboard-content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible">
+                        <span>{{ message }}</span>
+                        <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <div class="dashboard-header">
+            <h1 class="dashboard-title">
+                <span class="dashboard-icon">📊</span>
+                Dashboard
+            </h1>
+        </div>
+        
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Total Employees</div>
+                <div class="stat-value">{{ total_employees }}</div>
+            </div>
+            
+            <div class="stat-card stat-card-active">
+                <div class="stat-label">Active Users</div>
+                <div class="stat-value">{{ total_users }}</div>
+            </div>
+            
+            <div class="stat-card stat-card-warning">
+                <div class="stat-label">Pending Leaves</div>
+                <div class="stat-value">{{ pending_leaves }}</div>
+            </div>
+            
+            <div class="stat-card stat-card-danger">
+                <div class="stat-label">On Leave Today</div>
+                <div class="stat-value">{{ on_leave_today }}</div>
+            </div>
+        </div>
+        
+        <div class="recent-section">
+            <h2 class="section-title">Recent Leave Requests</h2>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Employee</th>
+                            <th>Leave Type</th>
+                            <th>Start Date</th>
+                            <th>End Date</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if recent_leaves %}
+                            {% for leave in recent_leaves %}
+                            <tr>
+                                <td>{{ leave.id }}</td>
+                                <td>{{ leave.employee.full_name if leave.employee else 'N/A' }}</td>
+                                <td>{{ leave.leave_type|title }}</td>
+                                <td>{{ leave.start_date.strftime('%Y-%m-%d') }}</td>
+                                <td>{{ leave.end_date.strftime('%Y-%m-%d') }}</td>
+                                <td>
+                                    <span class="status-badge status-{{ leave.status }}">
+                                        {{ leave.status|title }}
+                                    </span>
+                                </td>
+                                <td>
+                                    <a href="#" class="btn-action">View</a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="7" class="no-data">No recent leave requests</td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

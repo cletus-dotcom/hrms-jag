@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+
+{% block title %}{% if user %}Edit{% else %}Add{% endif %} User - HRMS{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="header-bar">
+        <div class="header-content">
+            <span class="logo-text">HRMS</span>
+            <nav class="main-nav">
+                <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link nav-link-active">Settings <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
+                        <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
+                        <a href="#" class="dropdown-item">Salary Grade</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Employee Management <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Employees</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Attendance <span class="dropdown-arrow">▼</span></a>
+                </div>
+                <a href="#" class="nav-link">Leave Requests</a>
+                <a href="#" class="nav-link">Reports</a>
+            </nav>
+            <div class="user-dropdown">
+                <a href="#" class="user-info">
+                    {% if employee %}
+                        {{ employee.full_name }} ({{ current_user.role|title }})
+                    {% else %}
+                        {{ current_user.username }} ({{ current_user.role|title }})
+                    {% endif %}
+                    <span class="dropdown-arrow">▼</span>
+                </a>
+                <div class="dropdown-menu dropdown-menu-right">
+                    <a href="{{ url_for('routes.logout') }}" class="dropdown-item">Logout</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="dashboard-content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible">
+                        <span>{{ message }}</span>
+                        <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <div class="page-header">
+            <h1 class="page-title">{% if user %}Edit{% else %}Add{% endif %} User</h1>
+            <a href="{{ url_for('routes.users_list') }}" class="btn-secondary">Back to List</a>
+        </div>
+        
+        <div class="form-section">
+            <form method="POST" class="employee-form">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="username">Username *</label>
+                        <input type="text" id="username" name="username" class="form-control" 
+                               value="{{ user.username if user else '' }}" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="email">Email *</label>
+                        <input type="email" id="email" name="email" class="form-control" 
+                               value="{{ user.email if user else '' }}" required>
+                    </div>
+                </div>
+                
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="password">Password {% if user %}(leave blank to keep current){% else %}*{% endif %}</label>
+                        <input type="password" id="password" name="password" class="form-control" 
+                               {% if not user %}required{% endif %}>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="employee_id">Employee ID *</label>
+                        <select id="employee_id" name="employee_id" class="form-control" required>
+                            <option value="">Select Employee ID</option>
+                            {% for emp in employees %}
+                                <option value="{{ emp.employee_id }}" 
+                                        {% if user and user.employee_id == emp.employee_id %}selected{% endif %}
+                                        {% if not user and emp.user_id %}disabled{% endif %}>
+                                    {{ emp.employee_id }} - {{ emp.full_name }}
+                                    {% if emp.user_id and not user %}(Already has account){% endif %}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="role">Role *</label>
+                        <select id="role" name="role" class="form-control" required>
+                            <option value="employee" {% if user and user.role == 'employee' %}selected{% endif %}>Employee</option>
+                            <option value="manager" {% if user and user.role == 'manager' %}selected{% endif %}>Manager</option>
+                            <option value="hr" {% if user and user.role == 'hr' %}selected{% endif %}>HR</option>
+                            <option value="admin" {% if user and user.role == 'admin' %}selected{% endif %}>Admin</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="is_active" style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                            <input type="checkbox" id="is_active" name="is_active" 
+                                   {% if user and user.is_active or not user %}checked{% endif %}>
+                            <span>Active</span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">{% if user %}Update{% else %}Add{% endif %} User</button>
+                    <a href="{{ url_for('routes.users_list') }}" class="btn-secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
