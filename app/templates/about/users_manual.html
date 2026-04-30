@@ -1,0 +1,387 @@
+{% extends "base.html" %}
+
+{% block title %}User's Manual - HRMS{% endblock %}
+
+{% block extra_css %}
+<style>
+  .manual-doc {
+    max-width: 980px;
+    margin: 0 auto;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .manual-doc .title {
+    margin: 0;
+    font-size: 1.35rem;
+    font-weight: 900;
+    color: #0f172a;
+    letter-spacing: 0.01em;
+  }
+  .manual-doc .subtitle {
+    margin: 0.35rem 0 1.1rem;
+    color: #475569;
+    line-height: 1.55;
+    font-size: 0.98rem;
+  }
+  .manual-doc .callout {
+    background: #f8fafc;
+    border: 1px solid #e5e7eb;
+    border-left: 4px solid #1f4aa5;
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+    margin: 0.9rem 0 1.1rem;
+  }
+  .manual-doc .callout strong { color: #0f172a; }
+  .manual-doc .toc {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 0.9rem 1rem;
+    background: #f8fafc;
+    margin: 0 0 1.1rem;
+  }
+  .manual-doc .toc h2 { margin: 0 0 0.5rem; font-size: 1rem; font-weight: 800; }
+  .manual-doc .toc a { color: #1f4aa5; text-decoration: none; }
+  .manual-doc .toc a:hover { text-decoration: underline; }
+  .manual-doc h2.section {
+    margin: 1.25rem 0 0.55rem;
+    font-size: 1.05rem;
+    font-weight: 900;
+    color: #0f172a;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    border-top: 1px solid #eef2f7;
+    padding-top: 0.75rem;
+  }
+  .manual-doc h3.sub {
+    margin: 0.85rem 0 0.25rem;
+    font-size: 1rem;
+    font-weight: 800;
+    color: #111827;
+  }
+  .manual-doc p, .manual-doc li {
+    color: #111827;
+    line-height: 1.65;
+    font-size: 0.98rem;
+  }
+  .manual-doc ul, .manual-doc ol { margin: 0.35rem 0 0.75rem; padding-left: 1.35rem; }
+  .manual-doc li { margin: 0.22rem 0; }
+  .manual-doc code {
+    background: #eef2ff;
+    border: 1px solid #e0e7ff;
+    padding: 0.05rem 0.35rem;
+    border-radius: 6px;
+    font-size: 0.92em;
+  }
+  .manual-doc .grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(240px, 1fr));
+    gap: 0.9rem;
+    margin: 0.65rem 0 0.35rem;
+  }
+  .manual-doc .card {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+    background: #fff;
+  }
+  .manual-doc .card-title { font-weight: 900; margin: 0 0 0.25rem; color: #0f172a; }
+  .manual-doc .muted { color: #64748b; }
+  .manual-doc .steps > li { margin: 0.35rem 0; }
+  @media (max-width: 920px) {
+    .manual-doc .grid { grid-template-columns: 1fr; }
+  }
+  @media print {
+    .header-bar { display: none !important; }
+    .dashboard-content { padding: 0 !important; }
+    .manual-doc { border: none; box-shadow: none; padding: 0; }
+    @page { size: A4; margin: 14mm; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="header-bar">
+        <div class="header-content">
+            {% include 'includes/navbar_brand.html' %}
+            <nav class="main-nav">
+                <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+                {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Settings <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
+                        <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
+                        <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
+                    </div>
+                </div>
+                {% endif %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Employee Management <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Employees</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
+                        <a href="{{ url_for('routes.dtr_upload') }}" class="dropdown-item">Upload DTR Log</a>
+                        <a href="{{ url_for('routes.dtr_justifications') }}" class="dropdown-item">DTR Justifications</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Leave Management <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+                        <a href="{{ url_for('routes.leave_settings_list') }}" class="dropdown-item">Leave Settings</a>
+                        <a href="{{ url_for('routes.leave_credits_list') }}" class="dropdown-item">Leave Credits</a>
+                        <hr class="dropdown-separator">
+                        {% endif %}
+                        <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply for Leave</a>
+                        <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
+                        {% if (current_user.role or '')|lower == 'manager' %}
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.leave_approvals') }}" class="dropdown-item">Leave Approvals</a>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link nav-link-active">ABOUT <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.users_manual') }}" class="dropdown-item">User's Manual</a>
+                        <a href="{{ url_for('routes.hrmdo_manual') }}" class="dropdown-item">HRMDO Manual</a>
+                    </div>
+                </div>
+                {% if (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.payroll_summary') }}" class="dropdown-item">Payroll Summary Report</a>
+                        <a href="{{ url_for('routes.payroll_submissions') }}" class="dropdown-item">Submitted Payroll History</a>
+                    </div>
+                </div>
+                {% else %}
+                <a href="#" class="nav-link">Reports</a>
+                {% endif %}
+            </nav>
+            <div class="user-dropdown">
+                <a href="#" class="user-info">
+                    {% if employee %}
+                        {{ employee.full_name }} ({{ current_user.role|title }})
+                    {% else %}
+                        {{ current_user.username }} ({{ current_user.role|title }})
+                    {% endif %}
+                    <span class="dropdown-arrow">▼</span>
+                </a>
+                <div class="dropdown-menu dropdown-menu-right">
+                    <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
+                    <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
+                    <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
+                </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="dashboard-content">
+        <div class="page-header">
+            <h1 class="page-title">User's Manual</h1>
+        </div>
+        <div class="manual-doc" style="font-family: Calibri, Arial, sans-serif;">
+            <h2 class="title">HRMS User’s Manual</h2>
+            <p class="subtitle">
+                Welcome! This guide shows you how to use the HRMS app in simple steps—whether you’re filing leave,
+                managing employees, uploading DTR logs, or generating payroll reports.
+            </p>
+
+            <div class="callout">
+                <strong>Tip:</strong> If you ever get stuck, open this page again from
+                <code>ABOUT → User’s Manual</code>.
+                You can also use <strong>Change password</strong> under your name at the top-right.
+            </div>
+
+            <div class="toc">
+                <h2>Contents</h2>
+                <ol>
+                    <li><a href="#um-quick-start">Quick start</a></li>
+                    <li><a href="#um-navigation">Navigation & menus</a></li>
+                    <li><a href="#um-common-tasks">Common tasks (step-by-step)</a></li>
+                    <li><a href="#um-roles">What each role can do</a></li>
+                    <li><a href="#um-best-practices">Best practices</a></li>
+                    <li><a href="#um-troubleshooting">Troubleshooting</a></li>
+                </ol>
+            </div>
+
+            <h2 class="section" id="um-quick-start">Quick start</h2>
+            <ol class="steps">
+                <li><strong>Log in</strong> using your assigned Employee ID and password.</li>
+                <li><strong>Check your dashboard</strong> for shortcuts and status counts.</li>
+                <li><strong>Do your task</strong> (apply leave, upload DTR, manage employees, etc.).</li>
+                <li><strong>Log out</strong> when you’re done—especially on shared computers.</li>
+            </ol>
+
+            <h2 class="section" id="um-navigation">Navigation & menus</h2>
+            <p class="muted">
+                Your menu may look slightly different depending on your role (Admin/HR, Manager, Employee, DTR Uploader, Payroll Maker).
+            </p>
+
+            <div class="grid">
+                <div class="card">
+                    <div class="card-title">Dashboard</div>
+                    <p class="muted" style="margin:0;">Home screen with quick stats and recent activity.</p>
+                </div>
+                <div class="card">
+                    <div class="card-title">Settings (Admin/HR)</div>
+                    <p class="muted" style="margin:0;">Manage users, departments, positions, salary grades, and status of appointment.</p>
+                </div>
+                <div class="card">
+                    <div class="card-title">Employee Management</div>
+                    <p class="muted" style="margin:0;">View employees, add new employees, edit details, and open PDS records.</p>
+                </div>
+                <div class="card">
+                    <div class="card-title">Daily Time Records (DTR)</div>
+                    <p class="muted" style="margin:0;">View DTR records, upload logs (if allowed), and manage justifications.</p>
+                </div>
+                <div class="card">
+                    <div class="card-title">Leave Management</div>
+                    <p class="muted" style="margin:0;">Apply for leave, view leave history, approve leave (Managers/Admin).</p>
+                </div>
+                <div class="card">
+                    <div class="card-title">Reports (Payroll Maker/Admin/HR)</div>
+                    <p class="muted" style="margin:0;">Generate payroll summary and view submitted payroll history.</p>
+                </div>
+            </div>
+
+            <h2 class="section" id="um-common-tasks">Common tasks (step-by-step)</h2>
+
+            <h3 class="sub">A) Change your password</h3>
+            <ol class="steps">
+                <li>Click your name at the top-right.</li>
+                <li>Select <strong>Change password</strong>.</li>
+                <li>Enter your current password and your new password.</li>
+                <li>Click <strong>Change password</strong>.</li>
+            </ol>
+
+            <h3 class="sub">B) Add a new employee (Admin/HR)</h3>
+            <ol class="steps">
+                <li>Go to <code>Employee Management → Employees</code>.</li>
+                <li>Click <strong>+ Add Employee</strong>.</li>
+                <li>The <strong>Employee ID</strong> is automatically generated. Fill in the rest of the form.</li>
+                <li>Click <strong>Add Employee</strong>.</li>
+            </ol>
+            <p class="muted" style="margin-top:-0.25rem;">
+                Note: If you see a duplicate/invalid ID, refresh the page and try again.
+            </p>
+
+            <h3 class="sub">C) Open and update an employee PDS</h3>
+            <ol class="steps">
+                <li>Open <code>Employees</code> list.</li>
+                <li>Click an employee row to open the PDS.</li>
+                <li>Update fields as needed and save.</li>
+            </ol>
+
+            <h3 class="sub">D) Apply for leave</h3>
+            <ol class="steps">
+                <li>Open <code>Leave Management → Apply for Leave</code>.</li>
+                <li>Select the leave type and dates.</li>
+                <li>Add details (reason, where required).</li>
+                <li>Submit your application.</li>
+                <li>Check status in <code>Leave Management → View Leave</code>.</li>
+            </ol>
+
+            <h3 class="sub">E) Approve leave (Manager/Admin)</h3>
+            <ol class="steps">
+                <li>Open <code>Leave Management → Leave Approvals</code>.</li>
+                <li>Review the request details carefully.</li>
+                <li>Approve or reject (when available).</li>
+            </ol>
+
+            <h3 class="sub">F) Upload DTR log (DTR Uploader / authorized roles)</h3>
+            <ol class="steps">
+                <li>Open <code>Daily Time Records → Upload DTR Log</code>.</li>
+                <li>Pick the correct <strong>quincena</strong>.</li>
+                <li>Select the <code>.dat</code> file and upload.</li>
+                <li>Review parsed rows before saving.</li>
+            </ol>
+
+            <h3 class="sub">G) Submit DTR justification</h3>
+            <ol class="steps">
+                <li>Open <code>Daily Time Records → DTR Justifications</code>.</li>
+                <li>Choose the date, add a clear reason, and attach proof if needed.</li>
+                <li>Submit and monitor the status.</li>
+            </ol>
+
+            <h3 class="sub">H) Generate payroll summary (Payroll Maker/Admin/HR)</h3>
+            <ol class="steps">
+                <li>Open <code>Reports → Payroll Summary Report</code>.</li>
+                <li>Select mode (quincena/month), month, year, and quincena if applicable.</li>
+                <li>Click <strong>Generate List</strong>.</li>
+                <li>Use <strong>Export CSV</strong> or <strong>Export PDF</strong> if needed.</li>
+            </ol>
+
+            <h2 class="section" id="um-roles">What each role can do</h2>
+            <ul>
+                <li><strong>Admin</strong>: Full access (settings, employees, leave approvals, reports).</li>
+                <li><strong>HR</strong>: Similar to Admin for HR operations (users/departments/employees/leave settings/reports).</li>
+                <li><strong>Manager</strong>: Can review/approve leave within scope and view relevant employee data.</li>
+                <li><strong>Employee</strong>: Applies leave, views own leave, views personal dashboard/PDS (if enabled).</li>
+                <li><strong>DTR Uploader</strong>: Uploads DTR logs and may view DTR-related pages.</li>
+                <li><strong>Payroll Maker</strong>: Access to payroll reports and submission history.</li>
+            </ul>
+
+            <h2 class="section" id="um-best-practices">Best practices</h2>
+            <ul>
+                <li><strong>Be consistent</strong>: Use complete names and correct departments to keep reports accurate.</li>
+                <li><strong>Double-check dates</strong>: Leave and DTR are date-sensitive; wrong dates cause payroll issues.</li>
+                <li><strong>Attach proof when needed</strong>: Justifications are faster to review with supporting files.</li>
+                <li><strong>Use search</strong>: Most lists support searching—use it instead of scrolling.</li>
+                <li><strong>Log out</strong>: Always log out after using the system on shared devices.</li>
+            </ul>
+
+            <h2 class="section" id="um-troubleshooting">Troubleshooting</h2>
+
+            <h3 class="sub">Login problems</h3>
+            <ul>
+                <li><strong>“Invalid credentials”</strong>: Check your Employee ID and password. Make sure Caps Lock is off.</li>
+                <li><strong>Forgot password</strong>: Ask Admin/HR to reset your account password.</li>
+                <li><strong>Stuck on login</strong>: Refresh the page. If it persists, restart the browser and try again.</li>
+            </ul>
+
+            <h3 class="sub">Pages not showing / missing menus</h3>
+            <ul>
+                <li>Your role may not have permission for that page. Confirm your role with Admin/HR.</li>
+                <li>Try logging out and logging back in after role changes.</li>
+            </ul>
+
+            <h3 class="sub">DTR upload issues</h3>
+            <ul>
+                <li><strong>Wrong quincena</strong>: Select the correct quincena before uploading.</li>
+                <li><strong>Missing dates warning</strong>: Upload a complete file for the selected range before saving.</li>
+                <li><strong>Employee ID not found</strong>: Make sure the employee exists and the ID in the file matches the employee record.</li>
+            </ul>
+
+            <h3 class="sub">Leave printing / export issues</h3>
+            <ul>
+                <li>Some print/export options may only work when a leave request is <strong>Approved</strong>.</li>
+                <li>If PDF export looks clipped, try browser print settings: set paper to A4 and margins to “Default”.</li>
+            </ul>
+
+            <h3 class="sub">If something looks wrong</h3>
+            <ul>
+                <li>Refresh the page first (sometimes data updates after saving).</li>
+                <li>Check if you’re on the correct page/menu.</li>
+                <li>If the error message mentions “database” or “constraint”, contact Admin/HR and include a screenshot of the message.</li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}
+

@@ -1,0 +1,443 @@
+{% extends "base.html" %}
+
+{% block title %}HRMDO Manual - HRMS{% endblock %}
+
+{% block extra_css %}
+<style>
+  .gov-doc {
+    max-width: 920px;
+    margin: 0 auto;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .gov-doc .doc-title {
+    text-align: center;
+    letter-spacing: 0.02em;
+    margin: 0.25rem 0 0.25rem;
+    font-weight: 800;
+  }
+  .gov-doc .doc-subtitle {
+    text-align: center;
+    margin: 0 0 1.25rem;
+    color: #374151;
+    font-size: 0.95rem;
+    line-height: 1.4;
+  }
+  .gov-doc .doc-meta {
+    text-align: center;
+    color: #6b7280;
+    font-size: 0.9rem;
+    margin: 0 0 1.25rem;
+  }
+  .gov-doc .toc {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 0.9rem 1rem;
+    background: #f8fafc;
+    margin: 0 0 1.25rem;
+  }
+  .gov-doc .toc h2 {
+    margin: 0 0 0.5rem;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #111827;
+  }
+  .gov-doc .toc a { color: #1f4aa5; text-decoration: none; }
+  .gov-doc .toc a:hover { text-decoration: underline; }
+  .gov-doc .toc ol { margin: 0; padding-left: 1.25rem; }
+  .gov-doc .sec {
+    margin: 1.25rem 0 0.85rem;
+    padding-top: 0.35rem;
+    border-top: 1px solid #eef2f7;
+  }
+  .gov-doc .sec h2 {
+    margin: 0 0 0.55rem;
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: #0f172a;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .gov-doc p, .gov-doc li {
+    color: #111827;
+    line-height: 1.6;
+    font-size: 0.98rem;
+  }
+  /* Professional list indentation (hanging indent) */
+  .gov-doc ul,
+  .gov-doc ol {
+    margin: 0.35rem 0 0.75rem;
+    padding-left: 1.35rem;
+  }
+  .gov-doc li { margin: 0.22rem 0; }
+  .gov-doc ul li::marker { color: #111827; }
+  .gov-doc ol li::marker { color: #111827; font-weight: 600; }
+  .gov-doc li > ul,
+  .gov-doc li > ol {
+    margin-top: 0.35rem;
+    margin-bottom: 0.55rem;
+  }
+  .gov-doc .indent { padding-left: 0.75rem; }
+  .gov-doc strong { font-weight: 700; }
+  /* Extra indentation for procedure step numbering (matches PDF hierarchy) */
+  .gov-doc ol.indent {
+    padding-left: 2.1rem;   /* pushes the 1.,2.,3. inwards */
+  }
+  .gov-doc ol.indent > li {
+    padding-left: 0.25rem;  /* small gap between marker and text */
+  }
+  .gov-doc ol.indent > li::marker {
+    font-weight: 700;
+  }
+  @media print {
+    .header-bar { display: none !important; }
+    .dashboard-content { padding: 0 !important; }
+    .gov-doc { border: none; box-shadow: none; padding: 0; }
+    @page { size: A4; margin: 14mm; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="header-bar">
+        <div class="header-content">
+            {% include 'includes/navbar_brand.html' %}
+            <nav class="main-nav">
+                <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+                {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Settings <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
+                        <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
+                        <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
+                    </div>
+                </div>
+                {% endif %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Employee Management <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Employees</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
+                        <a href="{{ url_for('routes.dtr_upload') }}" class="dropdown-item">Upload DTR Log</a>
+                        <a href="{{ url_for('routes.dtr_justifications') }}" class="dropdown-item">DTR Justifications</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Leave Management <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+                        <a href="{{ url_for('routes.leave_settings_list') }}" class="dropdown-item">Leave Settings</a>
+                        <a href="{{ url_for('routes.leave_credits_list') }}" class="dropdown-item">Leave Credits</a>
+                        <hr class="dropdown-separator">
+                        {% endif %}
+                        <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply for Leave</a>
+                        <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
+                        {% if (current_user.role or '')|lower == 'manager' %}
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.leave_approvals') }}" class="dropdown-item">Leave Approvals</a>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link nav-link-active">ABOUT <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.users_manual') }}" class="dropdown-item">User's Manual</a>
+                        <a href="{{ url_for('routes.hrmdo_manual') }}" class="dropdown-item">HRMDO Manual</a>
+                    </div>
+                </div>
+                {% if (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.payroll_summary') }}" class="dropdown-item">Payroll Summary Report</a>
+                        <a href="{{ url_for('routes.payroll_submissions') }}" class="dropdown-item">Submitted Payroll History</a>
+                    </div>
+                </div>
+                {% else %}
+                <a href="#" class="nav-link">Reports</a>
+                {% endif %}
+            </nav>
+            <div class="user-dropdown">
+                <a href="#" class="user-info">
+                    {% if employee %}
+                        {{ employee.full_name }} ({{ current_user.role|title }})
+                    {% else %}
+                        {{ current_user.username }} ({{ current_user.role|title }})
+                    {% endif %}
+                    <span class="dropdown-arrow">▼</span>
+                </a>
+                <div class="dropdown-menu dropdown-menu-right">
+                    <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
+                    <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
+                    <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
+                </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="dashboard-content">
+        <div class="page-header">
+            <h1 class="page-title">HRMDO Manual</h1>
+        </div>
+        <div class="gov-doc" style="font-family: Cambria, Georgia, 'Times New Roman', serif;">
+            <h2 class="doc-title" style="font-size: 1.35rem;">
+                MUNICIPAL HUMAN RESOURCE<br>
+                MANAGEMENT AND DEVELOPMENT<br>
+                MANUAL
+            </h2>
+            <p class="doc-subtitle" style="font-family: Calibri, Arial, sans-serif;">
+                (In accordance with Republic Act No. 7160 and Civil Service Commission Rules)
+            </p>
+            <p class="doc-meta" style="font-family: Calibri, Arial, sans-serif;">
+                Official reference copy (web rendition)
+            </p>
+
+            <div class="toc" style="font-family: Calibri, Arial, sans-serif;">
+                <h2>Contents</h2>
+                <ol>
+                    <li><a href="#sec-legal-basis">Legal Basis</a></li>
+                    <li><a href="#sec-policy">Declaration of Policy</a></li>
+                    <li><a href="#sec-scope">Scope and Coverage</a></li>
+                    <li><a href="#sec-roles">Organizational Roles and Responsibilities</a></li>
+                    <li><a href="#sec-recruitment">Recruitment, Selection, and Appointment Policy</a></li>
+                    <li><a href="#sec-onboarding">Onboarding and Placement Policy</a></li>
+                    <li><a href="#sec-performance">Performance Management Policy</a></li>
+                    <li><a href="#sec-training">Training and Development Policy</a></li>
+                    <li><a href="#sec-leave">Leave Administration Policy</a></li>
+                    <li><a href="#sec-discipline">Discipline and Administrative Cases</a></li>
+                    <li><a href="#sec-promotion">Promotion Policy</a></li>
+                    <li><a href="#sec-records">Records Management Policy</a></li>
+                    <li><a href="#sec-separation">Separation and Exit Policy</a></li>
+                    <li><a href="#sec-compliance">Compliance and Monitoring</a></li>
+                    <li><a href="#sec-final">Final Provisions</a></li>
+                </ol>
+            </div>
+
+            <section class="sec" id="sec-legal-basis">
+                <h2>I. Legal Basis</h2>
+                <p>This Manual is adopted pursuant to:</p>
+                <ul>
+                    <li>Republic Act No. 7160 (Local Government Code of 1991)</li>
+                    <li>Civil Service Law, rules, and issuances of the Civil Service Commission (CSC)</li>
+                    <li>Other relevant laws, rules, and administrative orders governing public service</li>
+                </ul>
+            </section>
+
+            <section class="sec" id="sec-policy">
+                <h2>II. Declaration of Policy</h2>
+                <p>
+                    The Local Government Unit shall promote a professional, responsive, and merit-based human
+                    resource system anchored on:
+                </p>
+                <ul>
+                    <li>Merit and Fitness</li>
+                    <li>Equal Opportunity</li>
+                    <li>Transparency</li>
+                    <li>Accountability</li>
+                    <li>Efficiency and Effectiveness</li>
+                </ul>
+                <p>All personnel actions shall be governed by Civil Service laws and applicable regulations.</p>
+            </section>
+
+            <section class="sec" id="sec-scope">
+                <h2>III. Scope and Coverage</h2>
+                <p>This Manual applies to:</p>
+                <ul>
+                    <li>All officials and employees of the LGU</li>
+                    <li>All plantilla and non-plantilla personnel, unless otherwise specified</li>
+                    <li>All human resource transactions and processes</li>
+                </ul>
+            </section>
+
+            <section class="sec" id="sec-roles">
+                <h2>IV. Organizational Roles and Responsibilities</h2>
+                <ol>
+                    <li>
+                        <strong>Local Chief Executive (LCE)</strong>
+                        <ul>
+                            <li>Exercises authority over all personnel actions: Appointment, Promotion, Discipline, Separation</li>
+                            <li>Ensures compliance with laws and CSC rules</li>
+                        </ul>
+                    </li>
+                    <li>
+                        <strong>Human Resource Management and Development Office (HRMDO)</strong>
+                        <ul>
+                            <li>Implements HR policies, systems, and procedures</li>
+                            <li>Maintains personnel records (201 files)</li>
+                            <li>Facilitates recruitment, training, and performance management</li>
+                            <li>Ensures compliance with Civil Service rules</li>
+                        </ul>
+                    </li>
+                    <li>
+                        <strong>Personnel Selection Board (PSB)</strong>
+                        <ul>
+                            <li>Assists in recruitment and promotion</li>
+                            <li>Evaluates applicants based on merit and fitness</li>
+                            <li>Submits recommendations to the LCE</li>
+                        </ul>
+                    </li>
+                    <li>
+                        <strong>Department Heads</strong>
+                        <ul>
+                            <li>Supervise personnel</li>
+                            <li>Evaluate employee performance</li>
+                            <li>Recommend training and disciplinary actions</li>
+                        </ul>
+                    </li>
+                </ol>
+            </section>
+
+            <section class="sec" id="sec-recruitment">
+                <h2>V. Recruitment, Selection, and Appointment Policy</h2>
+                <p><strong>A. General Policy</strong></p>
+                <ul>
+                    <li>Recruitment shall be based on merit and fitness</li>
+                    <li>Equal opportunity shall be ensured for all qualified applicants</li>
+                    <li>Nepotism is strictly prohibited</li>
+                </ul>
+                <p><strong>B. Procedures</strong></p>
+                <ol class="indent">
+                    <li><strong>Vacancy Identification</strong>
+                        <ul>
+                            <li>Department Head submits request to HRMDO</li>
+                            <li>HRMDO verifies plantilla and budget</li>
+                        </ul>
+                    </li>
+                    <li><strong>Publication of Vacancy</strong>
+                        <ul>
+                            <li>HRMDO posts vacancy for 15 days in at least 3 conspicuous places</li>
+                        </ul>
+                    </li>
+                    <li><strong>Application Processing</strong>
+                        <ul>
+                            <li>HRMDO receives and screens applications</li>
+                        </ul>
+                    </li>
+                    <li><strong>Evaluation</strong>
+                        <ul>
+                            <li>PSB evaluates and ranks candidates</li>
+                        </ul>
+                    </li>
+                    <li><strong>Recommendation</strong>
+                        <ul>
+                            <li>PSB submits shortlist to LCE</li>
+                        </ul>
+                    </li>
+                    <li><strong>Appointment</strong>
+                        <ul>
+                            <li>LCE issues appointment</li>
+                        </ul>
+                    </li>
+                    <li><strong>CSC Submission</strong>
+                        <ul>
+                            <li>HRMDO submits appointment for CSC attestation</li>
+                        </ul>
+                    </li>
+                </ol>
+            </section>
+
+            <section class="sec" id="sec-onboarding">
+                <h2>VI. Onboarding and Placement Policy</h2>
+                <ul>
+                    <li>All newly hired employees shall undergo orientation</li>
+                    <li>Required documents must be submitted prior to assumption</li>
+                    <li>Employees shall be assigned duties based on job description</li>
+                </ul>
+            </section>
+
+            <section class="sec" id="sec-performance">
+                <h2>VII. Performance Management Policy</h2>
+                <ul>
+                    <li>Performance shall be evaluated based on established standards (IPCR/OPCR)</li>
+                    <li>Evaluation shall be conducted semi-annually</li>
+                    <li>Results shall be used for: Promotion, Training, Rewards</li>
+                </ul>
+            </section>
+
+            <section class="sec" id="sec-training">
+                <h2>VIII. Training and Development Policy</h2>
+                <ul>
+                    <li>The LGU shall implement a continuing capability development program</li>
+                    <li>HRMDO shall prepare an annual training plan</li>
+                    <li>Training shall be based on identified competency gaps</li>
+                </ul>
+            </section>
+
+            <section class="sec" id="sec-leave">
+                <h2>IX. Leave Administration Policy</h2>
+                <ul>
+                    <li>Leave benefits shall follow Civil Service rules</li>
+                    <li>Applications must be filed in advance and approved by authorized officials</li>
+                    <li>HRMDO shall maintain leave records</li>
+                </ul>
+            </section>
+
+            <section class="sec" id="sec-discipline">
+                <h2>X. Discipline and Administrative Cases</h2>
+                <ul>
+                    <li>All employees shall adhere to the Code of Conduct</li>
+                    <li>Administrative cases shall follow due process: Filing of complaint, Notice and response, Investigation, Decision by LCE</li>
+                </ul>
+            </section>
+
+            <section class="sec" id="sec-promotion">
+                <h2>XI. Promotion Policy</h2>
+                <ul>
+                    <li>Promotions shall be based on: Merit and fitness, Performance rating, Qualification standards</li>
+                    <li>PSB shall evaluate and recommend candidates</li>
+                </ul>
+            </section>
+
+            <section class="sec" id="sec-records">
+                <h2>XII. Records Management Policy</h2>
+                <ul>
+                    <li>HRMDO shall maintain accurate and updated personnel records</li>
+                    <li>Confidentiality of records shall be strictly observed</li>
+                    <li>Records include: 201 files, Service records, Leave and performance records</li>
+                </ul>
+            </section>
+
+            <section class="sec" id="sec-separation">
+                <h2>XIII. Separation and Exit Policy</h2>
+                <ul>
+                    <li>Separation may be due to: Resignation, Retirement, Dismissal</li>
+                    <li>Clearance is required prior to final separation</li>
+                    <li>HRMDO shall process exit documents</li>
+                </ul>
+            </section>
+
+            <section class="sec" id="sec-compliance">
+                <h2>XIV. Compliance and Monitoring</h2>
+                <ul>
+                    <li>HRMDO shall ensure compliance with all HR policies</li>
+                    <li>Regular audits and reviews shall be conducted</li>
+                    <li>Violations shall be subject to administrative sanctions</li>
+                </ul>
+            </section>
+
+            <section class="sec" id="sec-final">
+                <h2>XV. Final Provisions</h2>
+                <ul>
+                    <li>Amendments may be made as necessary in accordance with laws and CSC issuances</li>
+                </ul>
+            </section>
+        </div>
+    </div>
+</div>
+{% endblock %}
+

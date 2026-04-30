@@ -53,6 +53,13 @@
                         {% endif %}
                     </div>
                 </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">ABOUT <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.users_manual') }}" class="dropdown-item">User's Manual</a>
+                        <a href="{{ url_for('routes.hrmdo_manual') }}" class="dropdown-item">HRMDO Manual</a>
+                    </div>
+                </div>
                 {% if (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') %}
                 <div class="nav-dropdown">
                     <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
@@ -107,7 +114,7 @@
                     <div class="form-group">
                         <label for="employee_id">Employee ID *</label>
                         <input type="text" id="employee_id" name="employee_id" class="form-control" 
-                               value="{{ emp.employee_id if emp else '' }}" required>
+                               value="{{ emp.employee_id if emp else (next_employee_id or '') }}" required {% if not emp %}readonly{% endif %}>
                     </div>
                     
                     <div class="form-group">

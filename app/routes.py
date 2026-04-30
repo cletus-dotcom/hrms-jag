@@ -12,13 +12,35 @@ from app.leave_ledger_service import (
     ensure_appointment_spl_wl_grant,
     record_leave_ledger_deletion,
     recompute_leave_ledger_balances,
+    undo_monthly_accrual_for_month,
 )
 from app.models import User, Employee, Department, Position, SalaryGrade, Attendance, LeaveRequest, LeaveType, LeaveBalance, EmployeePDS, EmployeeAppointmentHistory, DailyTimeRecord, LeaveLedger, DtrWorkArrangementSetting, DtrJustification, PayrollSubmission
 from app.dtr_parse import parse_dtr_dat_file as _parse_dtr_dat_file
 from decimal import Decimal
 from werkzeug.utils import secure_filename
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 
 bp = Blueprint('routes', __name__)
+
+def _next_employee_id_6digit() -> str:
+    """
+    Returns the next 6-digit numeric employee_id, based on the current maximum
+    6-digit numeric employee_id in the database.
+    """
+    from sqlalchemy import text
+
+    # Postgres regex (~) matches only 6-digit numeric IDs (e.g. '000123').
+    max_val = db.session.execute(
+        text(
+            r"SELECT MAX(CAST(employee_id AS INTEGER)) "
+            r"FROM employees "
+            r"WHERE employee_id ~ '^[0-9]{6}$'"
+        )
+    ).scalar()
+    next_val = (int(max_val) if max_val is not None else 0) + 1
+    # Keep 6-digit padding; if it overflows 999999, return the full number.
+    return f"{next_val:06d}" if next_val <= 999999 else str(next_val)
 
 
 def _get_leave_balances_for_employee(emp: Employee) -> dict:
@@ -323,6 +345,65 @@ def _public_landing_stats():
     return stats
 
 
+def _public_personnel_breakdown() -> dict:
+    """
+    Public landing helper: count plantilla vs non-plantilla personnel and provide
+    a per-status breakdown (best-effort).
+
+    We only include employees that are active or on_leave to match the public
+    "NUMBER OF PERSONNEL" card logic.
+    """
+    from sqlalchemy import func, or_
+
+    def norm(col):
+        return func.lower(func.trim(col))
+
+    today = date.today()
+    _ = today  # silence unused in some linters; kept for future date scoping
+
+    plantilla_statuses = [
+        ("Permanent", "permanent"),
+        ("Casual", "casual"),
+        ("Contractual", "contractual"),
+        ("Temporary", "temporary"),
+        ("Coterminus", "coterminus"),
+        ("Provisional", "provisional"),
+        ("Elective", "elective"),
+    ]
+    nonplantilla_statuses = [
+        ("COS", "contract of service"),
+        ("JO", "job order"),
+    ]
+
+    base = Employee.query.filter(or_(Employee.status == 'active', Employee.status == 'on_leave'))
+
+    breakdown_plantilla: list[dict] = []
+    breakdown_nonplantilla: list[dict] = []
+    total_plantilla = 0
+    total_nonplantilla = 0
+
+    try:
+        for label, key in plantilla_statuses:
+            c = base.filter(norm(Employee.status_of_appointment) == key).count()
+            breakdown_plantilla.append({"label": label, "count": int(c)})
+            total_plantilla += int(c)
+
+        for label, key in nonplantilla_statuses:
+            c = base.filter(norm(Employee.status_of_appointment) == key).count()
+            breakdown_nonplantilla.append({"label": label, "count": int(c)})
+            total_nonplantilla += int(c)
+    except Exception:
+        breakdown_plantilla = [{"label": lbl, "count": 0} for (lbl, _) in plantilla_statuses]
+        breakdown_nonplantilla = [{"label": lbl, "count": 0} for (lbl, _) in nonplantilla_statuses]
+        total_plantilla = 0
+        total_nonplantilla = 0
+
+    return {
+        "plantilla": {"total": total_plantilla, "items": breakdown_plantilla},
+        "non_plantilla": {"total": total_nonplantilla, "items": breakdown_nonplantilla},
+    }
+
+
 def _public_birthdays_this_week(limit: int = 12) -> dict:
     """
     Public landing helper: return employees with birthdays in the current week.
@@ -384,20 +465,43 @@ def _public_birthdays_this_week(limit: int = 12) -> dict:
 
 def _public_on_leave_this_week(limit: int = 12) -> dict:
     """
-    Public landing helper: return employees with approved leave overlapping
-    the current week (Monday..Sunday).
+    Public landing helper: return approved leave overlapping the current calendar month.
+
+    Keys remain week_* for backwards compatibility with templates that reference them,
+    but they represent inclusive month boundaries (first day .. last day).
+
+    count is distinct employees with at least one overlapping approved request.
     """
     today = date.today()
-    week_start = today - timedelta(days=today.weekday())  # Monday
-    week_end = week_start + timedelta(days=6)            # Sunday
+    month_start = date(today.year, today.month, 1)
+    last_dom = calendar.monthrange(today.year, today.month)[1]
+    month_end = date(today.year, today.month, last_dom)
 
+    total_count = 0
     results: list[dict] = []
     try:
-        rows = (db.session.query(LeaveRequest, Employee)
+        base_q = (db.session.query(LeaveRequest, Employee)
+                  .join(Employee, LeaveRequest.employee_id == Employee.id)
+                  .filter(LeaveRequest.status == 'approved')
+                  .filter(LeaveRequest.start_date <= month_end)
+                  .filter(LeaveRequest.end_date >= month_start))
+
+        try:
+            total_count = int(
+                db.session.query(func.count(func.distinct(LeaveRequest.employee_id)))
                 .join(Employee, LeaveRequest.employee_id == Employee.id)
                 .filter(LeaveRequest.status == 'approved')
-                .filter(LeaveRequest.start_date <= week_end)
-                .filter(LeaveRequest.end_date >= week_start)
+                .filter(LeaveRequest.start_date <= month_end)
+                .filter(LeaveRequest.end_date >= month_start)
+                .scalar()
+                or 0
+            )
+        except Exception:
+            total_count = 0
+
+        rows = (base_q
+                .order_by(LeaveRequest.start_date.asc(), Employee.last_name.asc(), Employee.first_name.asc())
+                .limit(max(0, int(limit)))
                 .all())
 
         for lr, emp in rows:
@@ -408,15 +512,16 @@ def _public_on_leave_this_week(limit: int = 12) -> dict:
                 'end': getattr(lr, 'end_date', None),
             })
 
-        results.sort(key=lambda r: (r['start'] or week_start, r['name'].lower()))
+        results.sort(key=lambda r: (r['start'] or month_start, r['name'].lower()))
     except Exception:
+        total_count = 0
         results = []
 
-    items = results[: max(0, int(limit))]
     return {
-        'week_start': week_start,
-        'week_end': week_end,
-        'items': items,
+        'week_start': month_start,
+        'week_end': month_end,
+        'count': total_count,
+        'items': results,
     }
 
 
@@ -429,6 +534,7 @@ def index():
         stats=_public_landing_stats(),
         birthdays=_public_birthdays_this_week(),
         on_leave=_public_on_leave_this_week(),
+        personnel=_public_personnel_breakdown(),
     )
 
 @bp.route('/login', methods=['GET', 'POST'])
@@ -1600,6 +1706,51 @@ def payroll_submission_export(id):
     return redirect(url_for('routes.payroll_submissions'))
 
 
+def _parse_accrual_month_field(raw: str | None) -> int | None:
+    """Accept 1–12 or full English month name (case-insensitive)."""
+    if not raw:
+        return None
+    raw_stripped = raw.strip()
+    try:
+        n = int(raw_stripped)
+        if 1 <= n <= 12:
+            return n
+    except ValueError:
+        pass
+    for fmt in ('%B', '%b'):
+        try:
+            return datetime.strptime(raw_stripped.title(), fmt).month
+        except ValueError:
+            continue
+    return None
+
+
+def _leave_accrual_target_period(year_raw: str | None, month_raw: str | None) -> tuple[int, int] | str:
+    """
+    Resolve year/month from Leave Credits accrual forms.
+
+    Both blank: previous calendar month. Both filled: explicit period.
+    Otherwise returns an error message string.
+    """
+    yr = (year_raw or '').strip()
+    mo = (month_raw or '').strip()
+    if yr and mo:
+        try:
+            y = int(yr)
+            m = _parse_accrual_month_field(mo)
+            if m is None:
+                return 'Month must be a number 1–12 or a full month name (e.g. January).'
+            return (y, m)
+        except ValueError:
+            return 'Invalid year or month.'
+    if not yr and not mo:
+        today = date.today()
+        if today.month == 1:
+            return (today.year - 1, 12)
+        return (today.year, today.month - 1)
+    return 'Provide both year and month, or leave both blank for the previous calendar month.'
+
+
 @bp.route('/leave-credits')
 @login_required
 def leave_credits_list():
@@ -1613,7 +1764,16 @@ def leave_credits_list():
                  .order_by(Employee.last_name, Employee.first_name)
                  .all())
     employee = current_user.employee if current_user.employee else None
-    return render_template('leave_credits/list.html', employees=employees, employee=employee)
+    today = date.today()
+    month_choices = [(m, calendar.month_name[m]) for m in range(1, 13)]
+    return render_template(
+        'leave_credits/list.html',
+        employees=employees,
+        employee=employee,
+        accrual_year_default=today.year,
+        accrual_month_default=today.month,
+        month_choices=month_choices,
+    )
 
 
 @bp.route('/leave-credits/run-accrual', methods=['POST'])
@@ -1624,28 +1784,11 @@ def leave_credits_run_accrual():
     if denied:
         return denied
 
-    year_raw = (request.form.get('accrual_year') or '').strip()
-    month_raw = (request.form.get('accrual_month') or '').strip()
-
-    if year_raw and month_raw:
-        try:
-            y = int(year_raw)
-            m = int(month_raw)
-            if not (1 <= m <= 12):
-                flash('Month must be between 1 and 12.', 'error')
-                return redirect(url_for('routes.leave_credits_list'))
-        except ValueError:
-            flash('Invalid year or month.', 'error')
-            return redirect(url_for('routes.leave_credits_list'))
-    elif not year_raw and not month_raw:
-        today = date.today()
-        if today.month == 1:
-            y, m = today.year - 1, 12
-        else:
-            y, m = today.year, today.month - 1
-    else:
-        flash('Provide both year and month, or leave both blank for the previous calendar month.', 'error')
+    target = _leave_accrual_target_period(request.form.get('accrual_year'), request.form.get('accrual_month'))
+    if isinstance(target, str):
+        flash(target, 'error')
         return redirect(url_for('routes.leave_credits_list'))
+    y, m = target
 
     try:
         result = accrue_monthly_vl_sl_for_month(y, m, created_by_user_id=current_user.id)
@@ -1670,6 +1813,60 @@ def leave_credits_run_accrual():
     except Exception as e:
         db.session.rollback()
         flash(f'Accrual failed: {str(e)}', 'error')
+
+    return redirect(url_for('routes.leave_credits_list'))
+
+
+@bp.route('/leave-credits/undo-accrual', methods=['POST'])
+@login_required
+def leave_credits_undo_accrual():
+    """Remove automated monthly accrual ledger rows for a calendar month (all employees)."""
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+
+    target = _leave_accrual_target_period(
+        request.form.get('undo_accrual_year'),
+        request.form.get('undo_accrual_month'),
+    )
+    if isinstance(target, str):
+        flash(target, 'error')
+        return redirect(url_for('routes.leave_credits_list'))
+    y, m = target
+
+    try:
+        result = undo_monthly_accrual_for_month(
+            y,
+            m,
+            deleted_by_user_id=current_user.id,
+            deleted_by_username=getattr(current_user, 'username', None),
+        )
+        nvl = result['deleted_vl_sl']
+        nan = result['deleted_annual_spl_wl']
+        nlp = result['deleted_year_end_lapse']
+        nemp = result['employees_affected']
+        total_rows = nvl + nan + nlp
+        if total_rows == 0:
+            flash(
+                f'Nothing to undo for {y}-{m:02d}: no automated accrual rows matched '
+                '(VL/SL monthly, Jan SPL/WL, or Dec lapse).',
+                'info',
+            )
+        else:
+            msg = (
+                f'Undo accrual for {y}-{m:02d}: removed {total_rows} ledger row(s) '
+                f'across {nemp} employee(s) '
+                f'(VL/SL: {nvl}'
+            )
+            if m == 1:
+                msg += f'; Jan SPL/WL: {nan}'
+            if m == 12:
+                msg += f'; Dec lapse: {nlp}'
+            msg += '). Running balances were recomputed.'
+            flash(msg, 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Undo accrual failed: {str(e)}', 'error')
 
     return redirect(url_for('routes.leave_credits_list'))
 
@@ -2741,6 +2938,20 @@ def employees_list():
     employee = current_user.employee if current_user.employee else None
     return render_template('employees/list.html', employees=employees, departments=departments, employee=employee)
 
+
+@bp.route('/about/users-manual')
+@login_required
+def users_manual():
+    employee = current_user.employee if current_user.employee else None
+    return render_template('about/users_manual.html', employee=employee)
+
+
+@bp.route('/about/hrmdo-manual')
+@login_required
+def hrmdo_manual():
+    employee = current_user.employee if current_user.employee else None
+    return render_template('about/hrmdo_manual.html', employee=employee)
+
 @bp.route('/employees/add', methods=['GET', 'POST'])
 @login_required
 def employee_add():
@@ -2749,7 +2960,6 @@ def employee_add():
         return denied
     if request.method == 'POST':
         try:
-            employee_id = request.form.get('employee_id', '').strip()
             first_name = request.form.get('first_name', '').strip()
             last_name = request.form.get('last_name', '').strip()
             middle_name = request.form.get('middle_name', '').strip()
@@ -2778,16 +2988,6 @@ def employee_add():
             address = request.form.get('address', '').strip()  # Keep for backward compatibility
             status = request.form.get('status', 'active')
             
-            # Check if employee_id already exists
-            if Employee.query.filter_by(employee_id=employee_id).first():
-                flash('Employee ID already exists.', 'error')
-                departments = Department.query.all()
-                positions = Position.query.order_by(Position.title).all()
-                salary_grades = SalaryGrade.query.all()
-                employee = current_user.employee if current_user.employee else None
-                salary_grades_json = _serialize_salary_grades(salary_grades)
-                return render_template('employees/form.html', departments=departments, positions=positions, salary_grades=salary_grades, salary_grades_json=salary_grades_json, employee=employee)
-            
             # Agency: National if department name is RHU, else Local
             agency = None
             if department_id:
@@ -2809,42 +3009,63 @@ def employee_add():
                     salary_grades = SalaryGrade.query.all()
                     employee = current_user.employee if current_user.employee else None
                     salary_grades_json = _serialize_salary_grades(salary_grades)
-                    return render_template('employees/form.html', departments=departments, positions=positions, salary_grades=salary_grades, salary_grades_json=salary_grades_json, employee=employee)
-            
-            # Create employee
-            new_employee = Employee(
-                employee_id=employee_id,
-                first_name=first_name,
-                last_name=last_name,
-                middle_name=middle_name if middle_name else None,
-                position=position if position else None,
-                department_id=int(department_id) if department_id else None,
-                status_of_appointment=status_of_appointment if status_of_appointment else None,
-                nature_of_appointment=nature_of_appointment if nature_of_appointment else None,
-                appointment_date=datetime.strptime(appointment_date, '%Y-%m-%d').date() if appointment_date else None,
-                phone=phone if phone else None,
-                mobile_no=mobile_no if mobile_no else None,
-                agency=agency,
-                lgu_class_level=lgu_class_level if lgu_class_level else None,
-                salary_tranche=salary_tranche if salary_tranche else None,
-                salary_grade=int(salary_grade_val) if salary_grade_val else None,
-                salary_step=int(salary_step_val) if salary_step_val else None,
-                flexible_worktime=flexible_worktime,
-                flexible_start_time=flexible_start_time,
-                flexible_end_time=flexible_end_time,
-                residential_house_no=residential_house_no if residential_house_no else None,
-                residential_street=residential_street if residential_street else None,
-                residential_subdivision=residential_subdivision if residential_subdivision else None,
-                residential_barangay=residential_barangay if residential_barangay else None,
-                residential_city=residential_city if residential_city else None,
-                residential_province=residential_province if residential_province else None,
-                residential_zip_code=residential_zip_code if residential_zip_code else None,
-                address=address if address else None,  # Keep for backward compatibility
-                status=status
-            )
-            
-            db.session.add(new_employee)
-            db.session.flush()  # Get the employee ID
+                    return render_template(
+                        'employees/form.html',
+                        departments=departments,
+                        positions=positions,
+                        salary_grades=salary_grades,
+                        salary_grades_json=salary_grades_json,
+                        next_employee_id=_next_employee_id_6digit(),
+                        employee=employee,
+                    )
+
+            # Automatic employee_id generation: max 6-digit numeric + 1.
+            # Also includes a small retry loop to avoid collisions in concurrent adds.
+            new_employee = None
+            for _ in range(5):
+                employee_id = _next_employee_id_6digit()
+                try:
+                    new_employee = Employee(
+                        employee_id=employee_id,
+                        first_name=first_name,
+                        last_name=last_name,
+                        middle_name=middle_name if middle_name else None,
+                        position=position if position else None,
+                        department_id=int(department_id) if department_id else None,
+                        status_of_appointment=status_of_appointment if status_of_appointment else None,
+                        nature_of_appointment=nature_of_appointment if nature_of_appointment else None,
+                        appointment_date=datetime.strptime(appointment_date, '%Y-%m-%d').date() if appointment_date else None,
+                        phone=phone if phone else None,
+                        mobile_no=mobile_no if mobile_no else None,
+                        agency=agency,
+                        lgu_class_level=lgu_class_level if lgu_class_level else None,
+                        salary_tranche=salary_tranche if salary_tranche else None,
+                        salary_grade=int(salary_grade_val) if salary_grade_val else None,
+                        salary_step=int(salary_step_val) if salary_step_val else None,
+                        flexible_worktime=flexible_worktime,
+                        flexible_start_time=flexible_start_time,
+                        flexible_end_time=flexible_end_time,
+                        residential_house_no=residential_house_no if residential_house_no else None,
+                        residential_street=residential_street if residential_street else None,
+                        residential_subdivision=residential_subdivision if residential_subdivision else None,
+                        residential_barangay=residential_barangay if residential_barangay else None,
+                        residential_city=residential_city if residential_city else None,
+                        residential_province=residential_province if residential_province else None,
+                        residential_zip_code=residential_zip_code if residential_zip_code else None,
+                        address=address if address else None,  # Keep for backward compatibility
+                        status=status
+                    )
+
+                    db.session.add(new_employee)
+                    db.session.flush()  # Assign new_employee.id and verify unique constraints
+                    break
+                except IntegrityError:
+                    db.session.rollback()
+                    new_employee = None
+                    continue
+
+            if not new_employee:
+                raise RuntimeError("Could not generate a unique Employee ID. Please retry.")
             
             # Get user email if employee has a user account
             user_email = None
@@ -2886,14 +3107,30 @@ def employee_add():
             salary_grades = SalaryGrade.query.all()
             employee = current_user.employee if current_user.employee else None
             salary_grades_json = _serialize_salary_grades(salary_grades)
-            return render_template('employees/form.html', departments=departments, positions=positions, salary_grades=salary_grades, salary_grades_json=salary_grades_json, employee=employee)
+            return render_template(
+                'employees/form.html',
+                departments=departments,
+                positions=positions,
+                salary_grades=salary_grades,
+                salary_grades_json=salary_grades_json,
+                next_employee_id=_next_employee_id_6digit(),
+                employee=employee,
+            )
     
     departments = Department.query.all()
     positions = Position.query.order_by(Position.title).all()
     salary_grades = SalaryGrade.query.all()
     employee = current_user.employee if current_user.employee else None
     salary_grades_json = _serialize_salary_grades(salary_grades)
-    return render_template('employees/form.html', departments=departments, positions=positions, salary_grades=salary_grades, salary_grades_json=salary_grades_json, employee=employee)
+    return render_template(
+        'employees/form.html',
+        departments=departments,
+        positions=positions,
+        salary_grades=salary_grades,
+        salary_grades_json=salary_grades_json,
+        next_employee_id=_next_employee_id_6digit(),
+        employee=employee,
+    )
 
 @bp.route('/employees/edit/<int:id>', methods=['GET', 'POST'])
 @login_required

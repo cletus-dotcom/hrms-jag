@@ -29,6 +29,13 @@
                             <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
                         </div>
                     </div>
+                    <div class="nav-dropdown">
+                        <a href="#" class="nav-link">ABOUT <span class="dropdown-arrow">▼</span></a>
+                        <div class="dropdown-menu">
+                            <a href="{{ url_for('routes.users_manual') }}" class="dropdown-item">User's Manual</a>
+                            <a href="{{ url_for('routes.hrmdo_manual') }}" class="dropdown-item">HRMDO Manual</a>
+                        </div>
+                    </div>
                     {% if current_user.role == 'dtr_uploader' %}
                         <a href="{{ url_for('routes.dtr_upload') }}" class="nav-link">Upload DTR Log</a>
                     {% endif %}
@@ -76,6 +83,13 @@
                             <hr class="dropdown-separator">
                             <a href="{{ url_for('routes.leave_approvals') }}" class="dropdown-item">Leave Approvals</a>
                             {% endif %}
+                        </div>
+                    </div>
+                    <div class="nav-dropdown">
+                        <a href="#" class="nav-link">ABOUT <span class="dropdown-arrow">▼</span></a>
+                        <div class="dropdown-menu">
+                            <a href="{{ url_for('routes.users_manual') }}" class="dropdown-item">User's Manual</a>
+                            <a href="{{ url_for('routes.hrmdo_manual') }}" class="dropdown-item">HRMDO Manual</a>
                         </div>
                     </div>
                     {% if (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') %}

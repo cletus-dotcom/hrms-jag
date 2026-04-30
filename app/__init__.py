@@ -2,12 +2,23 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from app.config import Config
+import os
+import sys
 
 db = SQLAlchemy()
 login_manager = LoginManager()
 
 def create_app(config_class=Config):
-    app = Flask(__name__)
+    # When packaged with PyInstaller (onefile/onedir), templates and static files
+    # are extracted under sys._MEIPASS. Point Flask there so pages render on
+    # machines that don't have the source tree.
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        base_dir = sys._MEIPASS  # type: ignore[attr-defined]
+        template_folder = os.path.join(base_dir, 'app', 'templates')
+        static_folder = os.path.join(base_dir, 'app', 'static')
+        app = Flask(__name__, template_folder=template_folder, static_folder=static_folder, static_url_path='/static')
+    else:
+        app = Flask(__name__)
     app.config.from_object(config_class)
     
     db.init_app(app)

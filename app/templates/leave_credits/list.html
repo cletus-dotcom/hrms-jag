@@ -53,6 +53,13 @@
                         {% endif %}
                     </div>
                 </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">ABOUT <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.users_manual') }}" class="dropdown-item">User's Manual</a>
+                        <a href="{{ url_for('routes.hrmdo_manual') }}" class="dropdown-item">HRMDO Manual</a>
+                    </div>
+                </div>
                 {% if (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') %}
                 <div class="nav-dropdown">
                     <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
@@ -98,22 +105,48 @@
 
         <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
             <h1 class="page-title" style="margin: 0; font-size: 1.5rem;">Leave Credits</h1>
+            <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 0.75rem; max-width: 100%;">
             <form method="POST" action="{{ url_for('routes.leave_credits_run_accrual') }}" class="leave-accrual-form"
                   style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem 0.75rem; max-width: 100%;"
                   onsubmit="return confirm('Run accrual for the selected month? This posts VL/SL (and in January: Jan 1 SPL/WL; in December: year-end SPL/WL lapse). Existing rows with the same particulars/date are skipped.');">
                 <div style="display: flex; flex-direction: column; gap: 0.2rem;">
-                    <label for="accrual_year" style="font-size: 0.75rem; color: var(--medium-gray, #666);">Year (optional)</label>
-                    <input type="number" id="accrual_year" name="accrual_year" class="search-input" min="2000" max="2100" step="1" placeholder="e.g. 2026" style="width: 12rem; min-width: 10rem; min-height: 2.25rem;">
+                    <label for="accrual_year" style="font-size: 0.75rem; color: var(--medium-gray, #666);">Year</label>
+                    <input type="number" id="accrual_year" name="accrual_year" class="search-input" min="2000" max="2100" step="1" value="{{ accrual_year_default }}" style="width: 12rem; min-width: 10rem; min-height: 2.25rem;">
                 </div>
                 <div style="display: flex; flex-direction: column; gap: 0.2rem;">
-                    <label for="accrual_month" style="font-size: 0.75rem; color: var(--medium-gray, #666);">Month 1–12 (optional)</label>
-                    <input type="number" id="accrual_month" name="accrual_month" class="search-input" min="1" max="12" step="1" placeholder="e.g. 4" style="width: 10rem; min-width: 8rem; min-height: 2.25rem;">
+                    <label for="accrual_month" style="font-size: 0.75rem; color: var(--medium-gray, #666);">Month</label>
+                    <select id="accrual_month" name="accrual_month" class="search-input" style="width: 12rem; min-width: 10rem; min-height: 2.25rem;">
+                        <option value="">Previous calendar month (clear year)</option>
+                        {% for num, name in (month_choices or []) %}
+                        <option value="{{ num }}" {% if num == accrual_month_default %}selected{% endif %}>{{ name }}</option>
+                        {% endfor %}
+                    </select>
                 </div>
                 <button type="submit" class="btn-primary" style="white-space: nowrap;">Run accrual</button>
             </form>
+            <form method="POST" action="{{ url_for('routes.leave_credits_undo_accrual') }}" class="leave-accrual-undo-form"
+                  style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem 0.75rem; max-width: 100%;"
+                  onsubmit="return confirm('Undo automated accrual for this period for ALL employees? Matching VL/SL monthly rows are deleted (and January annual SPL/WL or December lapse rows if applicable). Balances will be recomputed.');">
+                <div style="display: flex; flex-direction: column; gap: 0.2rem;">
+                    <label for="undo_accrual_year" style="font-size: 0.75rem; color: var(--medium-gray, #666);">Undo — year</label>
+                    <input type="number" id="undo_accrual_year" name="undo_accrual_year" class="search-input" min="2000" max="2100" step="1" value="{{ accrual_year_default }}" style="width: 12rem; min-width: 10rem; min-height: 2.25rem;">
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 0.2rem;">
+                    <label for="undo_accrual_month" style="font-size: 0.75rem; color: var(--medium-gray, #666);">Undo — month</label>
+                    <select id="undo_accrual_month" name="undo_accrual_month" class="search-input" style="width: 12rem; min-width: 10rem; min-height: 2.25rem;">
+                        <option value="">Previous calendar month (clear year)</option>
+                        {% for num, name in (month_choices or []) %}
+                        <option value="{{ num }}" {% if num == accrual_month_default %}selected{% endif %}>{{ name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button type="submit" class="btn-danger" style="white-space: nowrap;">Undo accrual</button>
+            </form>
+            </div>
         </div>
         <p style="margin: -0.75rem 0 1.25rem; font-size: 0.8rem; color: var(--medium-gray, #666); max-width: 46rem;">
-            Leave year and month blank to accrue the <strong>previous calendar month</strong> for all eligible employees (same list as below). VL/SL rows use the last day of that month. <strong>January</strong> accrual also posts Jan 1 grants of 3 SPL and 5 WL (for anyone appointed before that Jan 1; Jan 1 hires get those only via the appointment ledger row). <strong>December</strong> accrual posts Dec 31 rows to zero out unused SPL/WL. New SPL/WL on appointment are recorded when an eligible employee is saved with an appointment date.
+            Defaults to the <strong>current calendar month</strong>. To accrue the <strong>previous calendar month</strong> instead, choose “Previous calendar month (clear year)” in the month list and clear the year field. VL/SL rows use the last day of that month. <strong>January</strong> accrual also posts Jan 1 grants of 3 SPL and 5 WL (for anyone appointed before that Jan 1; Jan 1 hires get those only via the appointment ledger row). <strong>December</strong> accrual posts Dec 31 rows to zero out unused SPL/WL. New SPL/WL on appointment are recorded when an eligible employee is saved with an appointment date.
+            <strong>Undo accrual</strong> removes those automated rows for the chosen period <strong>for every employee</strong> (same year/month rules as Run accrual), writes deletion snapshots for audit, and recomputes balances. It does not delete manually entered ledger lines unless they exactly match the system accrual wording and dates.
         </p>
 
         <div class="table-section">

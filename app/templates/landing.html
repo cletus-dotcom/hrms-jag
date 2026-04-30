@@ -42,21 +42,59 @@
         <section class="landing-stats" aria-labelledby="landing-stats-heading">
             <h2 id="landing-stats-heading" class="visually-hidden">Key figures</h2>
             <div class="landing-stats-grid">
-                <article class="landing-stat-card">
+                <article class="landing-stat-card landing-stat-card--span2">
                     <div class="landing-stat-value">{{ stats.employees }}</div>
-                    <p class="landing-stat-label">Active &amp; on-leave personnel records</p>
+                    <p class="landing-stat-label">NUMBER OF PERSONNEL</p>
                 </article>
-                <article class="landing-stat-card">
+                <article class="landing-stat-card landing-stat-card--span2">
                     <div class="landing-stat-value">{{ stats.departments }}</div>
                     <p class="landing-stat-label">Departments / offices in directory</p>
                 </article>
-                <article class="landing-stat-card">
-                    <div class="landing-stat-value">{{ stats.leave_requests }}</div>
-                    <p class="landing-stat-label">Leave applications on file</p>
+                <article class="landing-stat-card landing-stat-card--span2">
+                    <div class="landing-stat-value">{{ (on_leave['count'] if on_leave and 'count' in on_leave else 0) }}</div>
+                    <p class="landing-stat-label">
+                        APPROVED LEAVE FOR THIS MONTH
+                        {% if on_leave and ('week_start' in on_leave) and ('week_end' in on_leave) and on_leave['week_start'] and on_leave['week_end'] %}
+                        <br><span style="font-weight: 600; font-size: 0.92em; opacity: 0.9;">
+                          {{ on_leave['week_start'].strftime('%b %d') }}–{{ on_leave['week_end'].strftime('%b %d') }}
+                        </span>
+                        {% endif %}
+                    </p>
                 </article>
-                <article class="landing-stat-card">
-                    <div class="landing-stat-value">{{ stats.positions }}</div>
-                    <p class="landing-stat-label">Position titles maintained</p>
+                {% set p = (personnel or {}) %}
+                {% set pl = (p['plantilla'] if p and 'plantilla' in p else {'total': 0, 'items': []}) %}
+                {% set npl = (p['non_plantilla'] if p and 'non_plantilla' in p else {'total': 0, 'items': []}) %}
+
+                <article class="landing-stat-card landing-personnel-card landing-personnel-card--half" aria-label="Plantilla breakdown">
+                    <div class="landing-personnel-top">
+                        <div class="landing-personnel-label">PLANTILLA</div>
+                        <div class="landing-personnel-value">{{ pl['total'] if pl and 'total' in pl else 0 }}</div>
+                    </div>
+                    <div class="landing-personnel-sep" aria-hidden="true"></div>
+                    <ul class="landing-personnel-list">
+                        {% for it in (pl['items'] if pl and 'items' in pl else []) %}
+                        <li class="landing-personnel-item">
+                            <span class="landing-personnel-item-label">{{ it['label'] if it and 'label' in it else '' }}</span>
+                            <span class="landing-personnel-item-count">{{ it['count'] if it and 'count' in it else 0 }}</span>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </article>
+
+                <article class="landing-stat-card landing-personnel-card landing-personnel-card--half" aria-label="Non-plantilla breakdown">
+                    <div class="landing-personnel-top">
+                        <div class="landing-personnel-label">NON-PLANTILLA</div>
+                        <div class="landing-personnel-value">{{ npl['total'] if npl and 'total' in npl else 0 }}</div>
+                    </div>
+                    <div class="landing-personnel-sep" aria-hidden="true"></div>
+                    <ul class="landing-personnel-list">
+                        {% for it in (npl['items'] if npl and 'items' in npl else []) %}
+                        <li class="landing-personnel-item">
+                            <span class="landing-personnel-item-label">{{ it['label'] if it and 'label' in it else '' }}</span>
+                            <span class="landing-personnel-item-count">{{ it['count'] if it and 'count' in it else 0 }}</span>
+                        </li>
+                        {% endfor %}
+                    </ul>
                 </article>
                 <article class="landing-stat-card landing-birthday-card" aria-labelledby="landing-bdays-title">
                     {% set bdays_items = (birthdays['items'] if birthdays and 'items' in birthdays else []) %}
@@ -84,7 +122,7 @@
                 <article class="landing-stat-card landing-onleave-card" aria-labelledby="landing-onleave-title">
                     {% set onleave_items = (on_leave['items'] if on_leave and 'items' in on_leave else []) %}
                     <div class="landing-birthday-head">
-                        <h3 id="landing-onleave-title" class="landing-birthday-title">On leave this week</h3>
+                        <h3 id="landing-onleave-title" class="landing-birthday-title">On leave this month</h3>
                         {% if on_leave and ('week_start' in on_leave) and ('week_end' in on_leave) and on_leave['week_start'] and on_leave['week_end'] %}
                         <div class="landing-birthday-range">
                             {{ on_leave['week_start'].strftime('%b %d') }}–{{ on_leave['week_end'].strftime('%b %d') }}
@@ -110,7 +148,7 @@
                             {% endfor %}
                         </ul>
                     {% else %}
-                        <p class="landing-birthday-empty">No approved leaves scheduled for this week.</p>
+                        <p class="landing-birthday-empty">No approved leaves overlapping this month.</p>
                     {% endif %}
                 </article>
             </div>

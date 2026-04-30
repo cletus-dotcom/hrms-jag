@@ -361,6 +361,88 @@ def accrue_monthly_vl_sl_for_month(
     }
 
 
+def undo_monthly_accrual_for_month(
+    year: int,
+    month: int,
+    *,
+    deleted_by_user_id: int | None = None,
+    deleted_by_username: str | None = None,
+) -> dict:
+    """
+    Remove ledger rows created by accrue_monthly_vl_sl_for_month for this period (all employees).
+
+    Only deletes rows that match the exact particulars, remarks, and transaction dates used when
+    posting automated accrual (manual rows are unchanged unless they match that pattern exactly).
+
+    January: removes Jan 1 annual SPL/WL rows for that year plus Jan 31 VL/SL accrual rows.
+    December: removes Dec 31 VL/SL accrual rows plus Dec 31 SPL/WL lapse rows for that year.
+    """
+    last_day = date(year, month, calendar.monthrange(year, month)[1])
+    particulars_vlsl = monthly_accrual_particulars(year, month)
+    affected: set[int] = set()
+    deleted_vlsl = 0
+    deleted_annual = 0
+    deleted_lapse = 0
+    uname = (deleted_by_username or '').strip()[:80] or None
+
+    def _delete_matching(rows: list[LeaveLedger]) -> None:
+        for row in rows:
+            record_leave_ledger_deletion(
+                row,
+                deleted_by_user_id=deleted_by_user_id,
+                deleted_by_username=uname,
+                source='accrual_undo_bulk',
+            )
+            db.session.delete(row)
+            affected.add(row.employee_id)
+
+    # VL/SL monthly row (always posted on month-end when accrual ran for eligible employees)
+    q_vlsl = LeaveLedger.query.filter(
+        LeaveLedger.transaction_date == last_day,
+        LeaveLedger.particulars == particulars_vlsl,
+        LeaveLedger.remarks == 'System monthly accrual',
+    )
+    rows_v = q_vlsl.all()
+    _delete_matching(rows_v)
+    deleted_vlsl = len(rows_v)
+
+    if month == 1:
+        jan1 = date(year, 1, 1)
+        annual_p = annual_spl_wl_particulars(year)
+        rows_a = LeaveLedger.query.filter(
+            LeaveLedger.transaction_date == jan1,
+            LeaveLedger.particulars == annual_p,
+            LeaveLedger.remarks == 'Annual SPL and WL (start of year)',
+        ).all()
+        _delete_matching(rows_a)
+        deleted_annual = len(rows_a)
+
+    if month == 12:
+        dec31 = date(year, 12, 31)
+        lapse_p = year_end_lapse_particulars(year)
+        rows_l = LeaveLedger.query.filter(
+            LeaveLedger.transaction_date == dec31,
+            LeaveLedger.particulars == lapse_p,
+            LeaveLedger.remarks == 'Year-end forfeit of unused SPL/WL',
+        ).all()
+        _delete_matching(rows_l)
+        deleted_lapse = len(rows_l)
+
+    db.session.flush()
+    for eid in affected:
+        recompute_leave_ledger_balances(eid)
+    db.session.commit()
+
+    return {
+        'year': year,
+        'month': month,
+        'deleted_vl_sl': deleted_vlsl,
+        'deleted_annual_spl_wl': deleted_annual,
+        'deleted_year_end_lapse': deleted_lapse,
+        'employees_affected': len(affected),
+    }
+
+
 def record_leave_ledger_deletion(
     entry: LeaveLedger,
     *,
