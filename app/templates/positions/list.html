@@ -9,6 +9,7 @@
             <span class="logo-text">HRMS</span>
             <nav class="main-nav">
                 <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+                {% if (current_user.role or '')|lower in ('admin', 'hr') %}
                 <div class="nav-dropdown">
                     <a href="#" class="nav-link nav-link-active">Settings <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">
@@ -16,9 +17,12 @@
                         <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
                         <hr class="dropdown-separator">
                         <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
-                        <a href="#" class="dropdown-item">Salary Grade</a>
+                        <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
                     </div>
                 </div>
+                {% endif %}
                 <div class="nav-dropdown">
                     <a href="#" class="nav-link">Employee Management <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">
@@ -26,9 +30,24 @@
                     </div>
                 </div>
                 <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Attendance <span class="dropdown-arrow">▼</span></a>
+                    <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
                 </div>
-                <a href="#" class="nav-link">Leave Requests</a>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Leave Management <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+                        <a href="{{ url_for('routes.leave_settings_list') }}" class="dropdown-item">Leave Settings</a>
+                        <a href="{{ url_for('routes.leave_credits_list') }}" class="dropdown-item">Leave Credits</a>
+                        <hr class="dropdown-separator">
+                        {% endif %}
+                        <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply for Leave</a>
+                        <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
+                        {% if (current_user.role or '')|lower == 'manager' %}
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.leave_approvals') }}" class="dropdown-item">Leave Approvals</a>
+                        {% endif %}
+                    </div>
+                </div>
                 <a href="#" class="nav-link">Reports</a>
             </nav>
             <div class="user-dropdown">
@@ -41,7 +60,10 @@
                     <span class="dropdown-arrow">▼</span>
                 </a>
                 <div class="dropdown-menu dropdown-menu-right">
-                    <a href="{{ url_for('routes.logout') }}" class="dropdown-item">Logout</a>
+                    <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
+                    <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
+                    <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
+                </form>
                 </div>
             </div>
         </div>

@@ -1,0 +1,769 @@
+{% extends "base.html" %}
+
+{% block title %}Leave Card - {{ emp.employee_id }} - HRMS{% endblock %}
+
+{% block extra_css %}
+<style>
+    .ledger-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.8rem;
+        min-width: 1400px;
+    }
+    .ledger-table th, .ledger-table td {
+        border: 1px solid #ccc;
+        padding: 0.35rem 0.5rem;
+        text-align: center;
+        vertical-align: middle;
+    }
+    .ledger-table th {
+        background: #f5f5f5;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+    .ledger-table th.section-header {
+        background: #e8e8e8;
+        font-weight: 700;
+    }
+    .ledger-table th.vl-header {
+        background: #d4edda;
+    }
+    .ledger-table th.sl-header {
+        background: #cce5ff;
+    }
+    .ledger-table th.other-header {
+        background: #fff3cd;
+    }
+    /* Per-leave color coding (Other Kinds of Leave) */
+    .ledger-table th.leave-spl { background: #ffe0f0; }         /* pink */
+    .ledger-table th.leave-wl { background: #e6f7ff; }          /* light cyan */
+    .ledger-table th.leave-ml { background: #e8f5e9; }          /* mint */
+    .ledger-table th.leave-pl { background: #ede7f6; }          /* lavender */
+    .ledger-table th.leave-sp { background: #fff8e1; }          /* soft amber */
+    .ledger-table th.leave-avaw { background: #f3e5f5; }        /* lilac */
+    .ledger-table th.leave-study { background: #e1f5fe; }       /* sky */
+    .ledger-table th.leave-rehab { background: #e0f2f1; }       /* teal */
+    .ledger-table th.leave-slbw { background: #fbe9e7; }        /* peach */
+    .ledger-table th.leave-secalamity { background: #f1f8e9; }  /* light green */
+    .ledger-table th.leave-adopt { background: #fff3e0; }       /* orange tint */
+    .ledger-table th.cto-header {
+        background: #f8d7da;
+    }
+    .ledger-table td.text-left {
+        text-align: left;
+    }
+    .ledger-table td.balance-cell {
+        font-weight: 600;
+    }
+    .ledger-table tbody tr:hover {
+        background: #f9f9f9;
+    }
+    .table-scroll-container {
+        overflow-x: auto;
+        margin-bottom: 1rem;
+    }
+    .add-entry-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 1rem;
+        background: var(--primary-color, #0056b3);
+        color: #fff;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.9rem;
+    }
+    .add-entry-btn:hover {
+        background: var(--primary-hover, #004494);
+    }
+    .modal-overlay {
+        display: none;
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 1000;
+        align-items: center;
+        justify-content: center;
+    }
+    .modal-overlay.active {
+        display: flex;
+    }
+    .modal-content {
+        background: #fff;
+        border-radius: 8px;
+        padding: 1.5rem;
+        max-width: 900px;
+        width: 95%;
+        max-height: 90vh;
+        overflow-y: auto;
+    }
+    .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+        border-bottom: 1px solid #eee;
+        padding-bottom: 0.75rem;
+    }
+    .modal-header h3 {
+        margin: 0;
+        font-size: 1.2rem;
+    }
+    .modal-close {
+        background: none;
+        border: none;
+        font-size: 1.5rem;
+        cursor: pointer;
+        color: #666;
+    }
+    .form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 0.75rem;
+    }
+    .form-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+    .form-group label {
+        font-size: 0.8rem;
+        font-weight: 500;
+        color: #555;
+    }
+    .form-group input {
+        padding: 0.4rem 0.5rem;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        font-size: 0.85rem;
+    }
+    .form-group.full-width {
+        grid-column: 1 / -1;
+    }
+    .section-title {
+        font-weight: 600;
+        font-size: 0.9rem;
+        margin: 1rem 0 0.5rem;
+        padding: 0.5rem;
+        border-radius: 4px;
+    }
+    .section-title.vl { background: #d4edda; }
+    .section-title.sl { background: #cce5ff; }
+    .section-title.other { background: #fff3cd; }
+    .section-title.cto { background: #f8d7da; }
+    .modal-actions {
+        margin-top: 1.5rem;
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.75rem;
+    }
+    .btn-submit {
+        padding: 0.5rem 1.25rem;
+        background: var(--primary-color, #0056b3);
+        color: #fff;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.9rem;
+    }
+    .btn-cancel {
+        padding: 0.5rem 1.25rem;
+        background: #6c757d;
+        color: #fff;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.9rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="header-bar">
+        <div class="header-content">
+            <span class="logo-text">HRMS</span>
+            <nav class="main-nav">
+                <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+                {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Settings <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
+                        <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
+                        <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
+                    </div>
+                </div>
+                {% endif %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Employee Management <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Employees</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link nav-link-active">Leave Management <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+                        <a href="{{ url_for('routes.leave_settings_list') }}" class="dropdown-item">Leave Settings</a>
+                        <a href="{{ url_for('routes.leave_credits_list') }}" class="dropdown-item">Leave Credits</a>
+                        <hr class="dropdown-separator">
+                        {% endif %}
+                        <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply for Leave</a>
+                        <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
+                        {% if (current_user.role or '')|lower == 'manager' %}
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.leave_approvals') }}" class="dropdown-item">Leave Approvals</a>
+                        {% endif %}
+                    </div>
+                </div>
+                <a href="#" class="nav-link">Reports</a>
+            </nav>
+            <div class="user-dropdown">
+                <a href="#" class="user-info">
+                    {% if employee %}
+                        {{ employee.full_name }} ({{ current_user.role|title }})
+                    {% else %}
+                        {{ current_user.username }} ({{ current_user.role|title }})
+                    {% endif %}
+                    <span class="dropdown-arrow">▼</span>
+                </a>
+                <div class="dropdown-menu dropdown-menu-right">
+                    <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
+                    <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
+                        <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="dashboard-content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible">
+                        <span>{{ message }}</span>
+                        <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
+            <div>
+                <h1 class="page-title" style="margin: 0; font-size: 1.5rem;">Leave Card</h1>
+                <p style="margin: 0.25rem 0 0; font-size: 0.9rem; color: var(--medium-gray, #666);">
+                    {{ emp.employee_id }} &mdash; {{ emp.full_name }}{% if emp.department %}, {{ emp.department.name }}{% endif %} ({{ emp.status_of_appointment or 'N/A' }})
+                </p>
+            </div>
+            <div style="display: flex; gap: 0.75rem;">
+                <button type="button" class="add-entry-btn" onclick="openAddModal()">+ Add Entry</button>
+                <a href="{{ url_for('routes.leave_credits_list') }}" class="btn-secondary">Back to Leave Credits</a>
+            </div>
+        </div>
+
+        <div class="card" style="padding: 1.25rem 1.5rem;">
+            <h2 style="font-size: 1.1rem; margin-bottom: 1rem;">Leave Ledger</h2>
+            {% set _sex = ((emp.pds.sex_at_birth if emp.pds else '') or '')|lower %}
+            {% set _civil = ((emp.pds.civil_status if emp.pds else '') or '')|lower %}
+            {% set show_ml = (_sex == '' or _sex.startswith('f')) %}
+            {% set show_pl = (_sex == '' or _sex.startswith('m')) %}
+            {% set show_avaw = (_sex == '' or _sex.startswith('f')) %}
+            {% set show_slbw = (_sex == '' or _sex.startswith('f')) %}
+            {% set show_sp = (_civil == '' or _civil != 'married') %}
+            {% set other_colspan = 36 - (0 if show_ml else 3) - (0 if show_pl else 3) - (0 if show_sp else 3) - (0 if show_avaw else 3) - (0 if show_slbw else 3) %}
+            <div class="table-scroll-container">
+                <table class="ledger-table">
+                    <thead>
+                        <!-- Row 1: Main Section Headers -->
+                        <tr>
+                            <th rowspan="3" style="width: 90px;">Date</th>
+                            <th rowspan="3" style="min-width: 150px;">Particulars</th>
+                            <th colspan="5" class="section-header vl-header">Vacation Leave</th>
+                            <th colspan="3" class="section-header sl-header">Sick Leave</th>
+                            <th colspan="{{ other_colspan }}" class="section-header other-header">Other Kinds of Leave</th>
+                            <th rowspan="3" style="min-width: 120px;">Remarks</th>
+                        </tr>
+                        <!-- Row 2: Sub-headers -->
+                        <tr>
+                            <th rowspan="2" class="vl-header">Earned</th>
+                            <th rowspan="2" class="vl-header">Applied &<br>Approved</th>
+                            <th rowspan="2" class="vl-header">Abs. Tard.<br>w/ Pay</th>
+                            <th rowspan="2" class="vl-header">Abs. UT<br>w/ Pay</th>
+                            <th rowspan="2" class="vl-header">Balance</th>
+                            <th rowspan="2" class="sl-header">Earned</th>
+                            <th rowspan="2" class="sl-header">Applied &<br>Approved</th>
+                            <th rowspan="2" class="sl-header">Balance</th>
+                            <th colspan="3" class="section-header leave-spl">SPL</th>
+                            <th colspan="3" class="section-header leave-wl">WL</th>
+                            {% if show_ml %}<th colspan="3" class="section-header leave-ml">ML</th>{% endif %}
+                            {% if show_pl %}<th colspan="3" class="section-header leave-pl">PL</th>{% endif %}
+                            {% if show_sp %}<th colspan="3" class="section-header leave-sp">SP</th>{% endif %}
+                            {% if show_avaw %}<th colspan="3" class="section-header leave-avaw">AVAW</th>{% endif %}
+                            <th colspan="3" class="section-header leave-study">Study</th>
+                            <th colspan="3" class="section-header leave-rehab">Rehab</th>
+                            {% if show_slbw %}<th colspan="3" class="section-header leave-slbw">SLBW</th>{% endif %}
+                            <th colspan="3" class="section-header leave-secalamity">SE-Calamity</th>
+                            <th colspan="3" class="section-header leave-adopt">Adopt</th>
+                            <th colspan="3" class="section-header cto-header">CTO</th>
+                        </tr>
+                        <!-- Row 3: Other kinds of leave sub-columns -->
+                        <tr>
+                            <th class="leave-spl">Credits</th>
+                            <th class="leave-spl">Used</th>
+                            <th class="leave-spl">Balance</th>
+                            <th class="leave-wl">Credits</th>
+                            <th class="leave-wl">Used</th>
+                            <th class="leave-wl">Balance</th>
+                            {% if show_ml %}<th class="leave-ml">Credits</th><th class="leave-ml">Used</th><th class="leave-ml">Balance</th>{% endif %}
+                            {% if show_pl %}<th class="leave-pl">Credits</th><th class="leave-pl">Used</th><th class="leave-pl">Balance</th>{% endif %}
+                            {% if show_sp %}<th class="leave-sp">Credits</th><th class="leave-sp">Used</th><th class="leave-sp">Balance</th>{% endif %}
+                            {% if show_avaw %}<th class="leave-avaw">Credits</th><th class="leave-avaw">Used</th><th class="leave-avaw">Balance</th>{% endif %}
+                            <th class="leave-study">Credits</th>
+                            <th class="leave-study">Used</th>
+                            <th class="leave-study">Balance</th>
+                            <th class="leave-rehab">Credits</th>
+                            <th class="leave-rehab">Used</th>
+                            <th class="leave-rehab">Balance</th>
+                            {% if show_slbw %}<th class="leave-slbw">Credits</th><th class="leave-slbw">Used</th><th class="leave-slbw">Balance</th>{% endif %}
+                            <th class="leave-secalamity">Credits</th>
+                            <th class="leave-secalamity">Used</th>
+                            <th class="leave-secalamity">Balance</th>
+                            <th class="leave-adopt">Credits</th>
+                            <th class="leave-adopt">Used</th>
+                            <th class="leave-adopt">Balance</th>
+                            <th class="cto-header">Credits</th>
+                            <th class="cto-header">Used</th>
+                            <th class="cto-header">Balance</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for entry in ledger_entries %}
+                        <tr>
+                            <td>{{ entry.transaction_date.strftime('%d/%m/%Y') }}</td>
+                            <td class="text-left">{{ entry.particulars }}</td>
+                            <!-- VL -->
+                            <td>{{ '{:,.3f}'.format(entry.vl_earned) if entry.vl_earned else '' }}</td>
+                            <td>{{ '{:,.3f}'.format(entry.vl_applied) if entry.vl_applied else '' }}</td>
+                            <td>{{ '{:,.3f}'.format(entry.vl_tardiness) if entry.vl_tardiness else '' }}</td>
+                            <td>{{ '{:,.3f}'.format(entry.vl_undertime) if entry.vl_undertime else '' }}</td>
+                            <td class="balance-cell">{{ '{:,.3f}'.format(entry.vl_balance) }}</td>
+                            <!-- SL -->
+                            <td>{{ '{:,.3f}'.format(entry.sl_earned) if entry.sl_earned else '' }}</td>
+                            <td>{{ '{:,.3f}'.format(entry.sl_applied) if entry.sl_applied else '' }}</td>
+                            <td class="balance-cell">{{ '{:,.3f}'.format(entry.sl_balance) }}</td>
+                            <!-- Other -->
+                            <!-- SPL -->
+                            <td>{{ '{:,.3f}'.format(entry.spl_earned) if entry.spl_earned else '' }}</td>
+                            <td>{{ '{:,.3f}'.format(entry.spl_used) if entry.spl_used else '' }}</td>
+                            <td class="balance-cell">{{ '{:,.3f}'.format(entry.spl_balance) if entry.spl_balance else '' }}</td>
+                            <!-- WL -->
+                            <td>{{ '{:,.3f}'.format(entry.wl_earned) if entry.wl_earned else '' }}</td>
+                            <td>{{ '{:,.3f}'.format(entry.wl_used) if entry.wl_used else '' }}</td>
+                            <td class="balance-cell">{{ '{:,.3f}'.format(entry.wl_balance) if entry.wl_balance else '' }}</td>
+                            <!-- ML -->
+                            {% if show_ml %}
+                            <td>{{ '{:,.3f}'.format(entry.ml_credits) if entry.ml_credits else '' }}</td>
+                            <td>{{ '{:,.3f}'.format(entry.ml_used) if entry.ml_used else '' }}</td>
+                            <td class="balance-cell">{{ '{:,.3f}'.format(entry.ml_balance) if entry.ml_balance else '' }}</td>
+                            {% endif %}
+                            <!-- PL -->
+                            {% if show_pl %}
+                            <td>{{ '{:,.3f}'.format(entry.pl_credits) if entry.pl_credits else '' }}</td>
+                            <td>{{ '{:,.3f}'.format(entry.pl_used) if entry.pl_used else '' }}</td>
+                            <td class="balance-cell">{{ '{:,.3f}'.format(entry.pl_balance) if entry.pl_balance else '' }}</td>
+                            {% endif %}
+                            <!-- SP -->
+                            {% if show_sp %}
+                            <td>{{ '{:,.3f}'.format(entry.sp_credits) if entry.sp_credits else '' }}</td>
+                            <td>{{ '{:,.3f}'.format(entry.sp_used) if entry.sp_used else '' }}</td>
+                            <td class="balance-cell">{{ '{:,.3f}'.format(entry.sp_balance) if entry.sp_balance else '' }}</td>
+                            {% endif %}
+                            <!-- AVAW -->
+                            {% if show_avaw %}
+                            <td>{{ '{:,.3f}'.format(entry.avaw_credits) if entry.avaw_credits else '' }}</td>
+                            <td>{{ '{:,.3f}'.format(entry.avaw_used) if entry.avaw_used else '' }}</td>
+                            <td class="balance-cell">{{ '{:,.3f}'.format(entry.avaw_balance) if entry.avaw_balance else '' }}</td>
+                            {% endif %}
+                            <!-- Study -->
+                            <td>{{ '{:,.3f}'.format(entry.study_credits) if entry.study_credits else '' }}</td>
+                            <td>{{ '{:,.3f}'.format(entry.study_used) if entry.study_used else '' }}</td>
+                            <td class="balance-cell">{{ '{:,.3f}'.format(entry.study_balance) if entry.study_balance else '' }}</td>
+                            <!-- Rehab -->
+                            <td>{{ '{:,.3f}'.format(entry.rehab_credits) if entry.rehab_credits else '' }}</td>
+                            <td>{{ '{:,.3f}'.format(entry.rehab_used) if entry.rehab_used else '' }}</td>
+                            <td class="balance-cell">{{ '{:,.3f}'.format(entry.rehab_balance) if entry.rehab_balance else '' }}</td>
+                            <!-- SLBW -->
+                            {% if show_slbw %}
+                            <td>{{ '{:,.3f}'.format(entry.slbw_credits) if entry.slbw_credits else '' }}</td>
+                            <td>{{ '{:,.3f}'.format(entry.slbw_used) if entry.slbw_used else '' }}</td>
+                            <td class="balance-cell">{{ '{:,.3f}'.format(entry.slbw_balance) if entry.slbw_balance else '' }}</td>
+                            {% endif %}
+                            <!-- SE-Calamity -->
+                            <td>{{ '{:,.3f}'.format(entry.se_calamity_credits) if entry.se_calamity_credits else '' }}</td>
+                            <td>{{ '{:,.3f}'.format(entry.se_calamity_used) if entry.se_calamity_used else '' }}</td>
+                            <td class="balance-cell">{{ '{:,.3f}'.format(entry.se_calamity_balance) if entry.se_calamity_balance else '' }}</td>
+                            <!-- Adopt -->
+                            <td>{{ '{:,.3f}'.format(entry.adopt_credits) if entry.adopt_credits else '' }}</td>
+                            <td>{{ '{:,.3f}'.format(entry.adopt_used) if entry.adopt_used else '' }}</td>
+                            <td class="balance-cell">{{ '{:,.3f}'.format(entry.adopt_balance) if entry.adopt_balance else '' }}</td>
+                            <!-- CTO -->
+                            <td>{{ '{:,.3f}'.format(entry.cto_earned) if entry.cto_earned else '' }}</td>
+                            <td>{{ '{:,.3f}'.format(entry.cto_used) if entry.cto_used else '' }}</td>
+                            <td class="balance-cell">{{ '{:,.3f}'.format(entry.cto_balance) if entry.cto_balance else '' }}</td>
+                            <!-- Remarks -->
+                            <td class="text-left">
+                                <div>{{ entry.remarks or '' }}</div>
+                                <div style="display: flex; gap: 0.4rem; align-items: center; margin-top: 0.25rem; flex-wrap: wrap;">
+                                    <button type="button"
+                                            class="btn-secondary"
+                                            style="padding: 0.15rem 0.4rem; font-size: 0.75rem;"
+                                            data-entry-id="{{ entry.id }}"
+                                            data-date="{{ entry.transaction_date.isoformat() }}"
+                                            data-particulars="{{ entry.particulars|e }}"
+                                            data-remarks="{{ entry.remarks|e if entry.remarks }}"
+                                            data-vl-earned="{{ entry.vl_earned or '' }}"
+                                            data-vl-applied="{{ entry.vl_applied or '' }}"
+                                            data-vl-tardiness="{{ entry.vl_tardiness or '' }}"
+                                            data-vl-undertime="{{ entry.vl_undertime or '' }}"
+                                            data-sl-earned="{{ entry.sl_earned or '' }}"
+                                            data-sl-applied="{{ entry.sl_applied or '' }}"
+                                            data-spl-earned="{{ entry.spl_earned or '' }}"
+                                            data-spl-used="{{ entry.spl_used or '' }}"
+                                            data-wl-earned="{{ entry.wl_earned or '' }}"
+                                            data-wl-used="{{ entry.wl_used or '' }}"
+                                            data-ml-credits="{{ entry.ml_credits or '' }}"
+                                            data-ml-used="{{ entry.ml_used or '' }}"
+                                            data-pl-credits="{{ entry.pl_credits or '' }}"
+                                            data-pl-used="{{ entry.pl_used or '' }}"
+                                            data-sp-credits="{{ entry.sp_credits or '' }}"
+                                            data-sp-used="{{ entry.sp_used or '' }}"
+                                            data-avaw-credits="{{ entry.avaw_credits or '' }}"
+                                            data-avaw-used="{{ entry.avaw_used or '' }}"
+                                            data-study-credits="{{ entry.study_credits or '' }}"
+                                            data-study-used="{{ entry.study_used or '' }}"
+                                            data-rehab-credits="{{ entry.rehab_credits or '' }}"
+                                            data-rehab-used="{{ entry.rehab_used or '' }}"
+                                            data-slbw-credits="{{ entry.slbw_credits or '' }}"
+                                            data-slbw-used="{{ entry.slbw_used or '' }}"
+                                            data-se-calamity-credits="{{ entry.se_calamity_credits or '' }}"
+                                            data-se-calamity-used="{{ entry.se_calamity_used or '' }}"
+                                            data-adopt-credits="{{ entry.adopt_credits or '' }}"
+                                            data-adopt-used="{{ entry.adopt_used or '' }}"
+                                            data-cto-earned="{{ entry.cto_earned or '' }}"
+                                            data-cto-used="{{ entry.cto_used or '' }}"
+                                            onclick="openEditModal(this)">
+                                        Edit
+                                    </button>
+                                    <form method="POST"
+                                          action="{{ url_for('routes.leave_ledger_delete', emp_id=emp.id, entry_id=entry.id) }}"
+                                          style="margin: 0;"
+                                          onsubmit="return confirm('Delete this ledger entry? Balances will be recomputed.');">
+                                        <button type="submit"
+                                                class="btn-secondary"
+                                                style="padding: 0.15rem 0.4rem; font-size: 0.75rem; background: #dc3545; border-color: #dc3545; color: #fff;">
+                                            Delete
+                                        </button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="{{ 11 + other_colspan }}" class="no-data" style="padding: 2rem; color: #666;">No leave ledger entries for this employee. Click "Add Entry" to create the first record.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <p style="margin-top: 0.75rem; font-size: 0.8rem; color: var(--medium-gray, #666);">
+                <strong>Legend:</strong> SPL = Special Privilege Leave, WL = Wellness Leave (5 days/year, max 3 consecutive),{% if show_ml %} ML = Maternity Leave,{% endif %}{% if show_pl %} PL = Paternity Leave,{% endif %}{% if show_sp %} SP = Solo Parent,{% endif %}{% if show_avaw %} AVAW = Anti-Violence Against Women,{% endif %}{% if show_slbw %} SLBW = Special Leave Benefits for Women,{% endif %} SE-Calamity = Special Emergency (Calamity), CTO = Credit to Overtime, Abs. Tard. = Absence Tardiness, Abs. UT = Absence Undertime
+            </p>
+        </div>
+    </div>
+</div>
+
+<!-- Add Entry Modal -->
+<div id="addEntryModal" class="modal-overlay">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Add Leave Ledger Entry</h3>
+            <button type="button" class="modal-close" onclick="closeAddModal()">&times;</button>
+        </div>
+        <form method="POST" action="{{ url_for('routes.leave_ledger_add', id=emp.id) }}">
+            <div class="form-grid">
+                <input type="hidden" id="entry_id" name="entry_id">
+                <div class="form-group">
+                    <label for="transaction_date">Date *</label>
+                    <input type="date" id="transaction_date" name="transaction_date" required>
+                </div>
+                <div class="form-group full-width">
+                    <label for="particulars">Particulars *</label>
+                    <input type="text" id="particulars" name="particulars" placeholder="e.g., Monthly earned credit, VL application, Tardiness deduction" required>
+                </div>
+            </div>
+
+            <div class="section-title vl">Vacation Leave (VL)</div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label for="vl_earned">Earned</label>
+                    <input type="number" step="0.001" id="vl_earned" name="vl_earned" placeholder="0.000">
+                </div>
+                <div class="form-group">
+                    <label for="vl_applied">Applied & Approved</label>
+                    <input type="number" step="0.001" id="vl_applied" name="vl_applied" placeholder="0.000">
+                </div>
+                <div class="form-group">
+                    <label for="vl_tardiness">Abs. Tardiness w/ Pay</label>
+                    <input type="number" step="0.001" id="vl_tardiness" name="vl_tardiness" placeholder="0.000">
+                </div>
+                <div class="form-group">
+                    <label for="vl_undertime">Abs. Undertime w/ Pay</label>
+                    <input type="number" step="0.001" id="vl_undertime" name="vl_undertime" placeholder="0.000">
+                </div>
+            </div>
+
+            <div class="section-title sl">Sick Leave (SL)</div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label for="sl_earned">Earned</label>
+                    <input type="number" step="0.001" id="sl_earned" name="sl_earned" placeholder="0.000">
+                </div>
+                <div class="form-group">
+                    <label for="sl_applied">Applied & Approved</label>
+                    <input type="number" step="0.001" id="sl_applied" name="sl_applied" placeholder="0.000">
+                </div>
+            </div>
+
+            <div class="section-title other">Other Kinds of Leave</div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label for="spl_earned">SPL Credits</label>
+                    <input type="number" step="0.001" id="spl_earned" name="spl_earned" placeholder="0.000">
+                </div>
+                <div class="form-group">
+                    <label for="spl_used">SPL Used</label>
+                    <input type="number" step="0.001" id="spl_used" name="spl_used" placeholder="0.000">
+                </div>
+                <div class="form-group">
+                    <label for="wl_earned">WL Credits</label>
+                    <input type="number" step="0.001" id="wl_earned" name="wl_earned" placeholder="0.000">
+                </div>
+                <div class="form-group">
+                    <label for="wl_used">WL Used</label>
+                    <input type="number" step="0.001" id="wl_used" name="wl_used" placeholder="0.000">
+                </div>
+                {% if show_ml %}
+                <div class="form-group">
+                    <label for="ml_credits">ML Credits</label>
+                    <input type="number" step="0.001" id="ml_credits" name="ml_credits" placeholder="0.000">
+                </div>
+                <div class="form-group">
+                    <label for="ml_used">ML Used</label>
+                    <input type="number" step="0.001" id="ml_used" name="ml_used" placeholder="0.000">
+                </div>
+                {% endif %}
+                {% if show_pl %}
+                <div class="form-group">
+                    <label for="pl_credits">PL Credits</label>
+                    <input type="number" step="0.001" id="pl_credits" name="pl_credits" placeholder="0.000">
+                </div>
+                <div class="form-group">
+                    <label for="pl_used">PL Used</label>
+                    <input type="number" step="0.001" id="pl_used" name="pl_used" placeholder="0.000">
+                </div>
+                {% endif %}
+                {% if show_sp %}
+                <div class="form-group">
+                    <label for="sp_credits">SP Credits</label>
+                    <input type="number" step="0.001" id="sp_credits" name="sp_credits" placeholder="0.000">
+                </div>
+                <div class="form-group">
+                    <label for="sp_used">SP Used</label>
+                    <input type="number" step="0.001" id="sp_used" name="sp_used" placeholder="0.000">
+                </div>
+                {% endif %}
+                {% if show_avaw %}
+                <div class="form-group">
+                    <label for="avaw_credits">AVAW Credits</label>
+                    <input type="number" step="0.001" id="avaw_credits" name="avaw_credits" placeholder="0.000">
+                </div>
+                <div class="form-group">
+                    <label for="avaw_used">AVAW Used</label>
+                    <input type="number" step="0.001" id="avaw_used" name="avaw_used" placeholder="0.000">
+                </div>
+                {% endif %}
+                <div class="form-group">
+                    <label for="study_credits">Study Credits</label>
+                    <input type="number" step="0.001" id="study_credits" name="study_credits" placeholder="0.000">
+                </div>
+                <div class="form-group">
+                    <label for="study_used">Study Used</label>
+                    <input type="number" step="0.001" id="study_used" name="study_used" placeholder="0.000">
+                </div>
+                <div class="form-group">
+                    <label for="rehab_credits">Rehab Credits</label>
+                    <input type="number" step="0.001" id="rehab_credits" name="rehab_credits" placeholder="0.000">
+                </div>
+                <div class="form-group">
+                    <label for="rehab_used">Rehab Used</label>
+                    <input type="number" step="0.001" id="rehab_used" name="rehab_used" placeholder="0.000">
+                </div>
+                {% if show_slbw %}
+                <div class="form-group">
+                    <label for="slbw_credits">SLBW Credits</label>
+                    <input type="number" step="0.001" id="slbw_credits" name="slbw_credits" placeholder="0.000">
+                </div>
+                <div class="form-group">
+                    <label for="slbw_used">SLBW Used</label>
+                    <input type="number" step="0.001" id="slbw_used" name="slbw_used" placeholder="0.000">
+                </div>
+                {% endif %}
+                <div class="form-group">
+                    <label for="se_calamity_credits">SE-Calamity Credits</label>
+                    <input type="number" step="0.001" id="se_calamity_credits" name="se_calamity_credits" placeholder="0.000">
+                </div>
+                <div class="form-group">
+                    <label for="se_calamity_used">SE-Calamity Used</label>
+                    <input type="number" step="0.001" id="se_calamity_used" name="se_calamity_used" placeholder="0.000">
+                </div>
+                <div class="form-group">
+                    <label for="adopt_credits">Adopt Credits</label>
+                    <input type="number" step="0.001" id="adopt_credits" name="adopt_credits" placeholder="0.000">
+                </div>
+                <div class="form-group">
+                    <label for="adopt_used">Adopt Used</label>
+                    <input type="number" step="0.001" id="adopt_used" name="adopt_used" placeholder="0.000">
+                </div>
+            </div>
+
+            <div class="section-title cto">CTO (Credit to Overtime)</div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label for="cto_earned">CTO Earned</label>
+                    <input type="number" step="0.001" id="cto_earned" name="cto_earned" placeholder="0.000">
+                </div>
+                <div class="form-group">
+                    <label for="cto_used">CTO Used</label>
+                    <input type="number" step="0.001" id="cto_used" name="cto_used" placeholder="0.000">
+                </div>
+            </div>
+
+            <div class="section-title" style="background: #e9ecef;">Remarks</div>
+            <div class="form-grid">
+                <div class="form-group full-width">
+                    <label for="remarks">Remarks (e.g., Approved 01/15/2026-01/17/2026, Dis-approved, Cancelled)</label>
+                    <input type="text" id="remarks" name="remarks" placeholder="Approved, Dis-approved, Cancelled, or custom text">
+                </div>
+            </div>
+
+            <div class="modal-actions">
+                <button type="button" class="btn-cancel" onclick="closeAddModal()">Cancel</button>
+                <button type="submit" class="btn-submit">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function resetNumericFields() {
+    const ids = [
+        'vl_earned','vl_applied','vl_tardiness','vl_undertime',
+        'sl_earned','sl_applied',
+        'spl_earned','spl_used',
+        'wl_earned','wl_used',
+        'ml_credits','ml_used',
+        'pl_credits','pl_used',
+        'sp_credits','sp_used',
+        'avaw_credits','avaw_used',
+        'study_credits','study_used',
+        'rehab_credits','rehab_used',
+        'slbw_credits','slbw_used',
+        'se_calamity_credits','se_calamity_used',
+        'adopt_credits','adopt_used',
+        'cto_earned','cto_used'
+    ];
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+}
+
+function openAddModal() {
+    const modal = document.getElementById('addEntryModal');
+    document.getElementById('entry_id').value = '';
+    document.getElementById('transaction_date').valueAsDate = new Date();
+    document.getElementById('particulars').value = '';
+    document.getElementById('remarks').value = '';
+    resetNumericFields();
+    modal.classList.add('active');
+}
+
+function openEditModal(button) {
+    const d = button.dataset;
+    const modal = document.getElementById('addEntryModal');
+    document.getElementById('entry_id').value = d.entryId || '';
+    document.getElementById('transaction_date').value = d.date || '';
+    document.getElementById('particulars').value = d.particulars || '';
+    document.getElementById('remarks').value = d.remarks || '';
+
+    function setVal(id, key) {
+        const el = document.getElementById(id);
+        if (el) el.value = d[key] || '';
+    }
+
+    setVal('vl_earned','vlEarned');
+    setVal('vl_applied','vlApplied');
+    setVal('vl_tardiness','vlTardiness');
+    setVal('vl_undertime','vlUndertime');
+    setVal('sl_earned','slEarned');
+    setVal('sl_applied','slApplied');
+    setVal('spl_earned','splEarned');
+    setVal('spl_used','splUsed');
+    setVal('wl_earned','wlEarned');
+    setVal('wl_used','wlUsed');
+    setVal('ml_credits','mlCredits');
+    setVal('ml_used','mlUsed');
+    setVal('pl_credits','plCredits');
+    setVal('pl_used','plUsed');
+    setVal('sp_credits','spCredits');
+    setVal('sp_used','spUsed');
+    setVal('avaw_credits','avawCredits');
+    setVal('avaw_used','avawUsed');
+    setVal('study_credits','studyCredits');
+    setVal('study_used','studyUsed');
+    setVal('rehab_credits','rehabCredits');
+    setVal('rehab_used','rehabUsed');
+    setVal('slbw_credits','slbwCredits');
+    setVal('slbw_used','slbwUsed');
+    setVal('se_calamity_credits','seCalamityCredits');
+    setVal('se_calamity_used','seCalamityUsed');
+    setVal('adopt_credits','adoptCredits');
+    setVal('adopt_used','adoptUsed');
+    setVal('cto_earned','ctoEarned');
+    setVal('cto_used','ctoUsed');
+
+    modal.classList.add('active');
+}
+function closeAddModal() {
+    document.getElementById('addEntryModal').classList.remove('active');
+}
+// Close modal on outside click
+document.getElementById('addEntryModal').addEventListener('click', function(e) {
+    if (e.target === this) closeAddModal();
+});
+// Close modal on Escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeAddModal();
+});
+</script>
+{% endblock %}

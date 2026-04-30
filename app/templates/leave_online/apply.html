@@ -1,0 +1,367 @@
+{% extends "base.html" %}
+
+{% block title %}Apply Leave - HRMS{% endblock %}
+
+{% block extra_css %}
+<style>
+  .leave-grid { display: grid; grid-template-columns: 280px 1fr; gap: 1rem; align-items: start; }
+  @media (max-width: 980px) { .leave-grid { grid-template-columns: 1fr; } }
+  .credits-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 1rem; }
+  .credits-title { font-weight: 700; margin: 0 0 0.75rem; }
+  .credits-row { display: flex; justify-content: space-between; align-items: baseline; gap: 0.75rem; padding: 0.35rem 0; border-bottom: 1px dashed #eee; font-size: 0.9rem; }
+  .credits-row:last-child { border-bottom: none; }
+  .credits-row.subtotal { font-weight: 600; color: #0f172a; background: #f8fafc; margin: 0 -0.5rem; padding: 0.4rem 0.5rem; border-bottom: 1px solid #e2e8f0; }
+  .credits-section-title { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; margin: 0.85rem 0 0.25rem; }
+  .credits-section-title:first-child { margin-top: 0; }
+  .credits-label { flex: 1; min-width: 0; }
+  .credits-label code { font-size: 0.78rem; background: #e2e8f0; padding: 0.08rem 0.35rem; border-radius: 4px; margin-right: 0.35rem; }
+  .credits-value { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .apply-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 1rem 1.25rem; }
+  .field-row { display: grid; grid-template-columns: 160px 1fr; gap: 0.75rem; align-items: center; margin: 0.5rem 0; }
+  @media (max-width: 820px) { .field-row { grid-template-columns: 1fr; } }
+  .radio-row { display: flex; flex-wrap: wrap; gap: 0.85rem 1.15rem; align-items: center; }
+  .radio-row label { display: inline-flex; gap: 0.45rem; align-items: center; }
+  .calendar-wrap { display: grid; grid-template-columns: 1fr 240px; gap: 1rem; align-items: start; }
+  @media (max-width: 980px) { .calendar-wrap { grid-template-columns: 1fr; } }
+  .calendar { border: 1px solid #e5e7eb; border-radius: 10px; padding: 0.75rem; }
+  .cal-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+  .cal-btn { border: 1px solid #cbd5e1; background: #fff; border-radius: 6px; padding: 0.2rem 0.5rem; cursor: pointer; }
+  .cal-title { font-weight: 700; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.25rem; }
+  .cal-dow { font-size: 0.75rem; color: #64748b; text-align: center; padding: 0.25rem 0; }
+  .cal-day { text-align: center; padding: 0.45rem 0; border-radius: 8px; cursor: pointer; user-select: none; border: 1px solid transparent; }
+  .cal-day.muted { color: #94a3b8; cursor: default; }
+  .cal-day.selected { background: #2563eb; color: #fff; }
+  .cal-day:hover:not(.muted) { border-color: #93c5fd; }
+  .helper { font-size: 0.85rem; color: #64748b; margin: 0.25rem 0 0; }
+  .right-box { border: 1px solid #e5e7eb; border-radius: 10px; padding: 0.75rem; background: #f8fafc; }
+  .pill { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.75rem; background: #e2e8f0; color: #0f172a; margin: 0 0.25rem 0.25rem 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+  <div class="header-bar">
+    <div class="header-content">
+      <span class="logo-text">HRMS</span>
+      <nav class="main-nav">
+        <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+        <div class="nav-dropdown">
+          <a href="#" class="nav-link">Leave Management <span class="dropdown-arrow">▼</span></a>
+          <div class="dropdown-menu">
+            <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply for Leave</a>
+            <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
+          </div>
+        </div>
+      </nav>
+      <div class="user-dropdown">
+        <a href="#" class="user-info">{{ employee.full_name if employee else current_user.username }} ({{ current_user.role|title }}) <span class="dropdown-arrow">▼</span></a>
+        <div class="dropdown-menu dropdown-menu-right">
+          <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
+          <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
+            <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dashboard-content">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} alert-dismissible">
+            <span>{{ message }}</span>
+            <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="page-header" style="margin-bottom: 1rem;">
+      <h1 class="page-title" style="margin: 0;">Apply Leave</h1>
+      <p class="helper">Select one or more dates from the calendar, then submit for Manager approval.</p>
+    </div>
+
+    <div class="leave-grid">
+      <div class="credits-card">
+        <div class="credits-title">Credits as of <span style="color:#1e40af;">{{ credit_month_label }}</span></div>
+        <p class="helper" style="margin: 0 0 0.75rem;">Showing leave types with a balance above zero (from your latest ledger row). Types may also be hidden based on your PDS sex and civil status.</p>
+        {% if credit_groups %}
+        {% for group in credit_groups %}
+        <div class="credits-section-title">{{ group.title }}</div>
+        {% for r in group.rows %}
+        <div class="credits-row{% if r.subtotal %} subtotal{% endif %}">
+          <span class="credits-label">{% if r.code and r.code != '—' %}<code>{{ r.code }}</code>{% endif %}{{ r.label }}</span>
+          <span class="credits-value">{{ '{:,.3f}'.format(r.balance) }}</span>
+        </div>
+        {% endfor %}
+        {% endfor %}
+        {% else %}
+        <p class="helper" style="margin: 0;">No leave credits to display (all zero or not applicable for your profile).</p>
+        {% endif %}
+      </div>
+
+      <div class="apply-card">
+        <form method="POST" action="{{ url_for('routes.leave_apply') }}">
+          <div class="field-row">
+            <div><strong>Type of Leave:</strong></div>
+            <div>
+              <select name="leave_type" id="leave_type" class="form-control" required>
+                <option value="">Select type</option>
+                {% for code, label in leave_type_options %}
+                  <option value="{{ code }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <div class="field-row" id="reasonRow">
+            <div><strong>Reason:</strong></div>
+            <div>
+              <textarea name="reason" id="reasonText" class="form-control" rows="3" placeholder="Reason for leave" required></textarea>
+            </div>
+          </div>
+
+          <div class="field-row" id="slCaseRow" style="display:none; align-items: start;">
+            <div><strong>In case of sick leave:</strong></div>
+            <div>
+              <div class="radio-row" role="radiogroup" aria-label="Sick leave in hospital or out-patient">
+                <label><input type="radio" name="sl_case" value="IN_HOSPITAL"> In-Hospital</label>
+                <label><input type="radio" name="sl_case" value="OUT_PATIENT"> Out-Patient</label>
+              </div>
+              <div style="margin-top: 0.5rem;">
+                <input type="text" name="sl_illness" id="sl_illness" class="form-control" placeholder="Specify illness (e.g., fever)">
+              </div>
+            </div>
+          </div>
+
+          <div class="field-row" id="vlLocRow" style="display:none; align-items: start;">
+            <div><strong>Location (VL/SPL):</strong></div>
+            <div>
+              <div class="radio-row" role="radiogroup" aria-label="Vacation/SPL leave location">
+                <label><input type="radio" name="vl_location" value="WITHIN_PH"> Within the Philippines</label>
+                <label><input type="radio" name="vl_location" value="ABROAD"> Abroad</label>
+              </div>
+              <div style="margin-top: 0.5rem;">
+                <input type="text" name="vl_abroad_place" id="vl_abroad_place" class="form-control" placeholder="If Abroad, specify place" disabled>
+              </div>
+            </div>
+          </div>
+
+          <div class="field-row" id="otherDetailsRow">
+            <div><strong>Other details:</strong></div>
+            <div>
+              <textarea name="extra_details" id="extraDetailsText" class="form-control" rows="2" placeholder="(Optional) e.g., sick leave specifics, location, etc."></textarea>
+              <div class="helper">These are saved with your application.</div>
+            </div>
+          </div>
+
+          <div class="field-row">
+            <div><strong>Commutation:</strong></div>
+            <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+              <label style="display:flex; gap:0.35rem; align-items:center;"><input type="radio" name="commutation" value="Requested"> Requested</label>
+              <label style="display:flex; gap:0.35rem; align-items:center;"><input type="radio" name="commutation" value="Not Requested" checked> Not Requested</label>
+            </div>
+          </div>
+
+          <div class="field-row" style="align-items: start;">
+            <div><strong>Specify date(s):</strong></div>
+            <div class="calendar-wrap">
+              <div class="calendar" id="calendar"></div>
+              <div class="right-box">
+                <div style="font-weight:700; margin-bottom:0.35rem;">Selected dates</div>
+                <div id="selectedPills"></div>
+                <div class="helper" id="selectedSummary">No dates selected.</div>
+                <button type="button" class="cal-btn" style="margin-top:0.6rem;" onclick="clearSelected()">Clear</button>
+              </div>
+            </div>
+          </div>
+
+          <input type="hidden" name="selected_dates" id="selected_dates">
+
+          <div style="display:flex; justify-content:flex-end; margin-top: 1rem;">
+            <button type="submit" class="btn-primary" style="min-width: 140px;">Submit</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const state = { year: new Date().getFullYear(), month: new Date().getMonth(), selected: new Set() };
+const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+function iso(d){
+  // Use local date (avoid UTC off-by-one from toISOString()).
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+function parseIso(s){ const [y,m,dd]=s.split('-').map(Number); return new Date(y, m-1, dd); }
+
+function startOfDay(d){
+  const x = new Date(d);
+  x.setHours(0,0,0,0);
+  return x;
+}
+
+function addDays(d, n){
+  const x = new Date(d);
+  x.setDate(x.getDate() + n);
+  return x;
+}
+
+function currentLeaveCode(){
+  const el = document.getElementById('leave_type');
+  return ((el && el.value) ? el.value : '').trim().toUpperCase();
+}
+
+function minSelectableDate(){
+  // Rule: if NOT Sick Leave, only allow dates 6 days from today and onwards.
+  const code = currentLeaveCode();
+  if(code && code !== 'SL'){
+    return startOfDay(addDays(new Date(), 6));
+  }
+  return null; // no restriction for Sick Leave / empty selection
+}
+
+function isDateSelectable(d){
+  const minD = minSelectableDate();
+  if(!minD) return true;
+  return startOfDay(d) >= minD;
+}
+
+function renderCalendar(){
+  const cal = document.getElementById('calendar');
+  const first = new Date(state.year, state.month, 1);
+  const last = new Date(state.year, state.month + 1, 0);
+  const startDow = first.getDay(); // 0 Sun
+  const daysInMonth = last.getDate();
+  const title = `${monthNames[state.month]} ${state.year}`;
+
+  let html = `
+    <div class="cal-head">
+      <button type="button" class="cal-btn" onclick="prevMonth()">&lt;</button>
+      <div class="cal-title">${title}</div>
+      <button type="button" class="cal-btn" onclick="nextMonth()">&gt;</button>
+    </div>
+    <div class="cal-grid">
+      ${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d=>`<div class="cal-dow">${d}</div>`).join("")}
+  `;
+  // blanks
+  for(let i=0;i<startDow;i++){
+    html += `<div class="cal-day muted"></div>`;
+  }
+  for(let day=1; day<=daysInMonth; day++){
+    const d = new Date(state.year, state.month, day);
+    const k = iso(d);
+    const selected = state.selected.has(k) ? 'selected' : '';
+    const disabled = !isDateSelectable(d);
+    const cls = disabled ? 'muted' : '';
+    const click = disabled ? '' : `onclick="toggleDate('${k}')"`; 
+    html += `<div class="cal-day ${selected} ${cls}" ${click}>${day}</div>`;
+  }
+  html += `</div>`;
+  cal.innerHTML = html;
+  syncSelected();
+}
+
+function toggleDate(k){
+  const d = parseIso(k);
+  if(!isDateSelectable(d)) return;
+  if(state.selected.has(k)) state.selected.delete(k);
+  else state.selected.add(k);
+  renderCalendar();
+}
+
+function syncSelected(){
+  const out = Array.from(state.selected).sort();
+  document.getElementById('selected_dates').value = out.join(',');
+  const pills = document.getElementById('selectedPills');
+  pills.innerHTML = out.map(d => `<span class="pill">${d}</span>`).join('');
+  const summary = document.getElementById('selectedSummary');
+  if(out.length===0) summary.textContent = 'No dates selected.';
+  else summary.textContent = `${out.length} day(s) selected.`;
+}
+
+function clearSelected(){
+  state.selected.clear();
+  renderCalendar();
+}
+
+function prevMonth(){
+  state.month--;
+  if(state.month<0){ state.month=11; state.year--; }
+  renderCalendar();
+}
+function nextMonth(){
+  state.month++;
+  if(state.month>11){ state.month=0; state.year++; }
+  renderCalendar();
+}
+
+renderCalendar();
+
+function pruneSelectedDates(){
+  // Remove selected dates that are no longer selectable under current leave type rule
+  for(const k of Array.from(state.selected)){
+    const d = parseIso(k);
+    if(!isDateSelectable(d)) state.selected.delete(k);
+  }
+}
+
+function show(el, yes){ if(!el) return; el.style.display = yes ? '' : 'none'; }
+function q(sel){ return document.querySelector(sel); }
+
+function syncSickLeaveUI(){
+  const code = (q('#leave_type')?.value || '').trim().toUpperCase();
+  const isSL = code === 'SL';
+  const isVLorSPL = code === 'VL' || code === 'SPL';
+  show(q('#slCaseRow'), isSL);
+  show(q('#vlLocRow'), isVLorSPL);
+  show(q('#otherDetailsRow'), !isSL);
+
+  const reasonText = q('#reasonText');
+  if(reasonText){
+    reasonText.required = true;
+  }
+  const extraDetailsText = q('#extraDetailsText');
+  if(extraDetailsText && isSL){
+    extraDetailsText.value = '';
+  }
+  const slIll = q('#sl_illness');
+  if(slIll && !isSL){
+    slIll.value = '';
+  }
+  if(!isSL){
+    document.querySelectorAll('input[name=\"sl_case\"]').forEach(r => { r.checked = false; });
+  }
+
+  if(!isVLorSPL){
+    document.querySelectorAll('input[name=\"vl_location\"]').forEach(r => { r.checked = false; });
+    const abroad = q('#vl_abroad_place');
+    if(abroad){ abroad.value = ''; abroad.disabled = true; }
+  }
+}
+
+q('#leave_type')?.addEventListener('change', syncSickLeaveUI);
+document.querySelectorAll('input[name=\"vl_location\"]').forEach(r => {
+  r.addEventListener('change', () => {
+    const abroad = q('#vl_abroad_place');
+    if(!abroad) return;
+    const v = (document.querySelector('input[name=\"vl_location\"]:checked')?.value || '').trim();
+    abroad.disabled = (v !== 'ABROAD');
+    if(v !== 'ABROAD') abroad.value = '';
+  });
+});
+q('#leave_type')?.addEventListener('change', () => {
+  pruneSelectedDates();
+  renderCalendar();
+});
+syncSickLeaveUI();
+</script>
+{% endblock %}
+

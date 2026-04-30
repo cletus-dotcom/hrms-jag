@@ -415,6 +415,27 @@ body {
     border-left-color: var(--danger-red);
 }
 
+.stat-card-pastel {
+    background: #e8e4f3;
+    border-left-color: #9b8dc2;
+}
+
+.stat-card-link {
+    text-decoration: none;
+    color: inherit;
+    display: block;
+}
+
+.stat-card-link:hover {
+    color: inherit;
+}
+
+.stat-sublabel {
+    font-size: 0.8rem;
+    color: var(--medium-gray);
+    margin-top: 0.25rem;
+}
+
 .stat-label {
     font-size: 0.9rem;
     color: var(--medium-gray);

@@ -18,7 +18,8 @@ class User(UserMixin, db.Model):
     last_login = db.Column(db.DateTime)
     
     # Relationship
-    employee = db.relationship('Employee', backref='user', uselist=False, cascade='all, delete-orphan')
+    # Link to employee record. Do NOT delete employee/PDS when deleting a user.
+    employee = db.relationship('Employee', backref='user', uselist=False)
     
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -57,6 +58,15 @@ class Employee(db.Model):
     residential_zip_code = db.Column(db.String(10))
     address = db.Column(db.Text)  # Keep for backward compatibility
     status = db.Column(db.String(20), default='active')  # active, on_leave, terminated
+    # Salary / LGU fields (Agency is derived from department but can be stored)
+    agency = db.Column(db.String(50), nullable=True)  # Local / National (set from department)
+    lgu_class_level = db.Column(db.String(20), nullable=True)  # 1st, 2nd, 3rd, 4th, 5th, 6th
+    salary_tranche = db.Column(db.String(20), nullable=True)  # 1st, 2nd, 3rd, 4th
+    salary_grade = db.Column(db.Integer, nullable=True)  # sg value from salary_grade table
+    salary_step = db.Column(db.Integer, nullable=True)  # 1-8
+    flexible_worktime = db.Column(db.Boolean, default=False, nullable=False)
+    flexible_start_time = db.Column(db.Time, nullable=True)
+    flexible_end_time = db.Column(db.Time, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -82,6 +92,34 @@ class Employee(db.Model):
     @hire_date.setter
     def hire_date(self, value):
         self.appointment_date = value
+
+
+class EmployeeAppointmentHistory(db.Model):
+    """Postgres table for employees appointment history (audit trail)."""
+    __tablename__ = 'employee_appointment_history'
+
+    id = db.Column(db.Integer, primary_key=True)
+    emp_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    emp_dept = db.Column(db.String(200), nullable=True)   # department name at time of record
+    emp_position = db.Column(db.String(200), nullable=True)
+    appoint_date = db.Column(db.Date, nullable=True)
+    appoint_status = db.Column(db.String(50), nullable=True)   # e.g. Permanent, Casual
+    appoint_nature = db.Column(db.String(50), nullable=True)    # e.g. Original, Reemployment
+    agency = db.Column(db.String(50), nullable=True)
+    lgu_class = db.Column(db.String(20), nullable=True)
+    sal_grade = db.Column(db.Integer, nullable=True)
+    sal_step = db.Column(db.Integer, nullable=True)
+    sal_amount = db.Column(db.Numeric(12, 2), nullable=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    location = db.Column(db.String(45), nullable=True)   # IP address (IPv6 max ~45 chars)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    employee = db.relationship('Employee', backref=db.backref('appointment_history', lazy='dynamic'))
+    user = db.relationship('User', backref=db.backref('appointment_history_entries', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<EmployeeAppointmentHistory id={self.id} emp_id={self.emp_id}>'
+
 
 class Department(db.Model):
     __tablename__ = 'departments'
@@ -112,6 +150,7 @@ class SalaryGrade(db.Model):
     sg_step_6 = db.Column(db.Numeric(12, 2), nullable=True)
     sg_step_7 = db.Column(db.Numeric(12, 2), nullable=True)
     sg_step_8 = db.Column(db.Numeric(12, 2), nullable=True)
+    sg_lgu_class = db.Column(db.String(50), nullable=True)
 
     def __repr__(self):
         return f'<SalaryGrade sg={self.sg} tranche={self.sg_tranche} agency={self.sg_agency}>'
@@ -140,24 +179,158 @@ class Attendance(db.Model):
     def __repr__(self):
         return f'<Attendance {self.employee_id} - {self.date}>'
 
+
+class DailyTimeRecord(db.Model):
+    """
+    Daily Time Record (Civil Service Form No. 48).
+    One row per employee per day: AM IN/OUT, PM IN/OUT, undertime, remarks.
+
+    NOTE: employee_id is the internal Employee primary key (employees.id), NOT the
+    public ID number on employees.employee_id (badge). Upload/save code resolves
+    badge -> Employee row and stores emp.id.
+    """
+    __tablename__ = 'daily_time_record'
+    __table_args__ = (db.UniqueConstraint('employee_id', 'record_date', name='uq_dtr_employee_date'),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    record_date = db.Column(db.Date, nullable=False)
+    am_in = db.Column(db.Time, nullable=True)
+    am_out = db.Column(db.Time, nullable=True)
+    pm_in = db.Column(db.Time, nullable=True)
+    pm_out = db.Column(db.Time, nullable=True)
+    undertime_hrs = db.Column(db.SmallInteger, default=0)
+    undertime_mins = db.Column(db.SmallInteger, default=0)
+    remarks = db.Column(db.String(100), nullable=True)  # SICK LEAVE, VACATION LEAVE, HOLIDAY, etc.
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    employee = db.relationship('Employee', backref=db.backref('daily_time_records', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<DailyTimeRecord employee_id={self.employee_id} date={self.record_date}>'
+
+
+class DtrWorkArrangementSetting(db.Model):
+    """
+    Date-ranged duty-hour model used by DTR late/undertime computation.
+
+    model_code:
+      - '5day' => 08:00 / 12:00 / 13:00 / 17:00
+      - '4day' => 07:00 / 12:00 / 13:00 / 18:00
+    applies_to:
+      - 'all', 'regular', 'jo_cos'
+    """
+    __tablename__ = 'dtr_work_arrangement_settings'
+
+    id = db.Column(db.Integer, primary_key=True)
+    model_code = db.Column(db.String(20), nullable=False)  # 5day | 4day
+    applies_to = db.Column(db.String(20), nullable=False, default='all')  # all | regular | jo_cos
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+    notes = db.Column(db.String(255), nullable=True)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    created_by = db.relationship('User', backref=db.backref('dtr_work_arrangement_settings', lazy='dynamic'))
+
+    def __repr__(self):
+        return (
+            f'<DtrWorkArrangementSetting {self.model_code} {self.start_date}..{self.end_date} '
+            f'applies_to={self.applies_to}>'
+        )
+
+
+class DtrJustification(db.Model):
+    __tablename__ = 'dtr_justifications'
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    record_date = db.Column(db.Date, nullable=False)
+    reason = db.Column(db.Text, nullable=False)
+    attachment_name = db.Column(db.String(255), nullable=True)
+    status = db.Column(db.String(20), default='submitted', nullable=False)  # submitted, forwarded, reviewed
+    submitted_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    forwarded_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    reviewed_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('dtr_justifications', lazy='dynamic'))
+    submitted_by = db.relationship('User', foreign_keys=[submitted_by_user_id])
+    forwarded_by = db.relationship('User', foreign_keys=[forwarded_by_user_id])
+    reviewed_by = db.relationship('User', foreign_keys=[reviewed_by_user_id])
+
+    __table_args__ = (
+        db.UniqueConstraint('employee_id', 'record_date', name='uq_dtr_justification_employee_date'),
+    )
+
+
+class PayrollSubmission(db.Model):
+    __tablename__ = 'payroll_submissions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    period_mode = db.Column(db.String(20), nullable=False)  # quincena|month
+    year = db.Column(db.Integer, nullable=False)
+    month = db.Column(db.Integer, nullable=False)
+    quincena = db.Column(db.String(1), nullable=True)
+    summary_json = db.Column(db.Text, nullable=True)
+    submitted_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    submitted_to = db.Column(db.String(100), nullable=True, default='Accounting Office')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    submitted_by = db.relationship('User', backref=db.backref('payroll_submissions', lazy='dynamic'))
+
+
 class LeaveRequest(db.Model):
+    """Online leave application. Schema kept in sync with Supabase and local PostgreSQL."""
     __tablename__ = 'leave_requests'
     
     id = db.Column(db.Integer, primary_key=True)
     employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
-    leave_type = db.Column(db.String(50), nullable=False)  # vacation, sick, personal, etc.
+    leave_type = db.Column(db.String(50), nullable=False)  # VL, SL, LWOP, etc.
     start_date = db.Column(db.Date, nullable=False)
     end_date = db.Column(db.Date, nullable=False)
+    total_days = db.Column(db.Numeric(5, 2), nullable=True)  # computed or entered
     reason = db.Column(db.Text)
-    status = db.Column(db.String(20), default='pending')  # pending, approved, rejected
+    status = db.Column(db.String(20), default='pending')  # pending, approved, rejected, cancelled
     approved_by = db.Column(db.Integer, db.ForeignKey('users.id'))
     approved_at = db.Column(db.DateTime)
+    rejection_reason = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     approver = db.relationship('User', foreign_keys=[approved_by])
     
     def __repr__(self):
         return f'<LeaveRequest {self.id} - {self.status}>'
+
+
+class LeaveType(db.Model):
+    """Reference table for leave types (VL, SL, etc.). Optional; sync with migrate_leave_schema.py."""
+    __tablename__ = 'leave_types'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(20), unique=True, nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.Text)
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class LeaveBalance(db.Model):
+    """Leave balance per employee per type per year. Optional; sync with migrate_leave_schema.py."""
+    __tablename__ = 'leave_balances'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    leave_type = db.Column(db.String(50), nullable=False)
+    year = db.Column(db.Integer, nullable=False)
+    balance = db.Column(db.Numeric(5, 2), default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    __table_args__ = (db.UniqueConstraint('employee_id', 'leave_type', 'year', name='uq_leave_balance_emp_type_year'),)
 
 class EmployeePDS(db.Model):
     __tablename__ = 'employee_pds'
@@ -1139,7 +1312,185 @@ class EmployeePDS(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationship
-    employee = db.relationship('Employee', backref='pds', uselist=False)
+    # Ensure Employee.pds is a single record (not a list)
+    employee = db.relationship('Employee', backref=db.backref('pds', uselist=False), uselist=False)
     
     def __repr__(self):
         return f'<EmployeePDS {self.employee_id}>'
+
+
+class LeaveLedger(db.Model):
+    """
+    Leave ledger for tracking all leave credit transactions per employee.
+    Each row represents a transaction (earned, applied, deduction) with running balances.
+    """
+    __tablename__ = 'leave_ledger'
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    transaction_date = db.Column(db.Date, nullable=False)
+    particulars = db.Column(db.String(500), nullable=False)
+
+    # Vacation Leave columns
+    vl_earned = db.Column(db.Numeric(6, 3), default=0)
+    vl_applied = db.Column(db.Numeric(6, 3), default=0)
+    vl_tardiness = db.Column(db.Numeric(6, 3), default=0)
+    vl_undertime = db.Column(db.Numeric(6, 3), default=0)
+    vl_balance = db.Column(db.Numeric(8, 3), default=0)
+
+    # Sick Leave columns
+    sl_earned = db.Column(db.Numeric(6, 3), default=0)
+    sl_applied = db.Column(db.Numeric(6, 3), default=0)
+    sl_balance = db.Column(db.Numeric(8, 3), default=0)
+
+    # Special Privilege Leave
+    spl_earned = db.Column(db.Numeric(6, 3), default=0)
+    spl_used = db.Column(db.Numeric(6, 3), default=0)
+    spl_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    # Wellness Leave (5 days per year, max 3 consecutive days per application)
+    wl_earned = db.Column(db.Numeric(6, 3), default=0)
+    wl_used = db.Column(db.Numeric(6, 3), default=0)
+    wl_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    # Other kinds of leave (credits / used / balance)
+    ml_credits = db.Column(db.Numeric(6, 3), default=0)      # Maternity Leave
+    ml_used = db.Column(db.Numeric(6, 3), default=0)
+    ml_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    pl_credits = db.Column(db.Numeric(6, 3), default=0)      # Paternity Leave
+    pl_used = db.Column(db.Numeric(6, 3), default=0)
+    pl_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    sp_credits = db.Column(db.Numeric(6, 3), default=0)      # Solo Parent
+    sp_used = db.Column(db.Numeric(6, 3), default=0)
+    sp_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    avaw_credits = db.Column(db.Numeric(6, 3), default=0)    # Anti-Violence Against Women
+    avaw_used = db.Column(db.Numeric(6, 3), default=0)
+    avaw_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    study_credits = db.Column(db.Numeric(6, 3), default=0)   # Study Leave
+    study_used = db.Column(db.Numeric(6, 3), default=0)
+    study_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    rehab_credits = db.Column(db.Numeric(6, 3), default=0)   # Rehab Leave
+    rehab_used = db.Column(db.Numeric(6, 3), default=0)
+    rehab_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    slbw_credits = db.Column(db.Numeric(6, 3), default=0)    # SLBW
+    slbw_used = db.Column(db.Numeric(6, 3), default=0)
+    slbw_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    se_calamity_credits = db.Column(db.Numeric(6, 3), default=0)  # SE-Calamity
+    se_calamity_used = db.Column(db.Numeric(6, 3), default=0)
+    se_calamity_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    adopt_credits = db.Column(db.Numeric(6, 3), default=0)   # Adopt Leave
+    adopt_used = db.Column(db.Numeric(6, 3), default=0)
+    adopt_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    # CTO (Credit to Overtime) with sub-columns
+    cto_earned = db.Column(db.Numeric(6, 3), default=0)
+    cto_used = db.Column(db.Numeric(6, 3), default=0)
+    cto_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    # Remarks column (Approved, Dis-approved, Cancelled, or custom text)
+    remarks = db.Column(db.String(500), nullable=True)
+
+    # Metadata
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Relationships
+    employee = db.relationship('Employee', backref=db.backref('leave_ledger_entries', lazy='dynamic'))
+    creator = db.relationship('User', backref=db.backref('leave_ledger_entries', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<LeaveLedger id={self.id} emp={self.employee_id} date={self.transaction_date}>'
+
+
+class LeaveLedgerDeletion(db.Model):
+    """
+    Audit trail: snapshot of a leave_ledger row at delete time, with who deleted it.
+    employee_id is stored without FK so history survives employee record deletion.
+    """
+    __tablename__ = 'leave_ledger_deletion'
+
+    id = db.Column(db.Integer, primary_key=True)
+    original_ledger_id = db.Column(db.Integer, nullable=False)
+    employee_id = db.Column(db.Integer, nullable=False)
+    deleted_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    deleted_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    deleted_by_username = db.Column(db.String(80), nullable=True)
+    delete_source = db.Column(db.String(40), nullable=False)
+
+    transaction_date = db.Column(db.Date, nullable=False)
+    particulars = db.Column(db.String(500), nullable=False)
+
+    vl_earned = db.Column(db.Numeric(6, 3), default=0)
+    vl_applied = db.Column(db.Numeric(6, 3), default=0)
+    vl_tardiness = db.Column(db.Numeric(6, 3), default=0)
+    vl_undertime = db.Column(db.Numeric(6, 3), default=0)
+    vl_balance = db.Column(db.Numeric(8, 3), default=0)
+
+    sl_earned = db.Column(db.Numeric(6, 3), default=0)
+    sl_applied = db.Column(db.Numeric(6, 3), default=0)
+    sl_balance = db.Column(db.Numeric(8, 3), default=0)
+
+    spl_earned = db.Column(db.Numeric(6, 3), default=0)
+    spl_used = db.Column(db.Numeric(6, 3), default=0)
+    spl_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    wl_earned = db.Column(db.Numeric(6, 3), default=0)
+    wl_used = db.Column(db.Numeric(6, 3), default=0)
+    wl_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    ml_credits = db.Column(db.Numeric(6, 3), default=0)
+    ml_used = db.Column(db.Numeric(6, 3), default=0)
+    ml_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    pl_credits = db.Column(db.Numeric(6, 3), default=0)
+    pl_used = db.Column(db.Numeric(6, 3), default=0)
+    pl_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    sp_credits = db.Column(db.Numeric(6, 3), default=0)
+    sp_used = db.Column(db.Numeric(6, 3), default=0)
+    sp_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    avaw_credits = db.Column(db.Numeric(6, 3), default=0)
+    avaw_used = db.Column(db.Numeric(6, 3), default=0)
+    avaw_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    study_credits = db.Column(db.Numeric(6, 3), default=0)
+    study_used = db.Column(db.Numeric(6, 3), default=0)
+    study_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    rehab_credits = db.Column(db.Numeric(6, 3), default=0)
+    rehab_used = db.Column(db.Numeric(6, 3), default=0)
+    rehab_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    slbw_credits = db.Column(db.Numeric(6, 3), default=0)
+    slbw_used = db.Column(db.Numeric(6, 3), default=0)
+    slbw_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    se_calamity_credits = db.Column(db.Numeric(6, 3), default=0)
+    se_calamity_used = db.Column(db.Numeric(6, 3), default=0)
+    se_calamity_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    adopt_credits = db.Column(db.Numeric(6, 3), default=0)
+    adopt_used = db.Column(db.Numeric(6, 3), default=0)
+    adopt_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    cto_earned = db.Column(db.Numeric(6, 3), default=0)
+    cto_used = db.Column(db.Numeric(6, 3), default=0)
+    cto_balance = db.Column(db.Numeric(6, 3), default=0)
+
+    remarks = db.Column(db.String(500), nullable=True)
+    orig_created_by = db.Column(db.Integer, nullable=True)
+    orig_created_at = db.Column(db.DateTime, nullable=True)
+
+    deleter = db.relationship('User', backref=db.backref('leave_ledger_deletions', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<LeaveLedgerDeletion orig_id={self.original_ledger_id} emp={self.employee_id}>'

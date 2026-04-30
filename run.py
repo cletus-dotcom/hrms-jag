@@ -11,7 +11,7 @@ app = create_app()
 if __name__ == '__main__':
     # Get port from environment variable or default to 8015
     port = int(os.environ.get('PORT', 8030))
-    host = os.environ.get('HOST', '127.0.0.1')
+    host = os.environ.get('HOST', '0.0.0.0')
     
     print(f"Starting HRMS server on http://{host}:{port}")
     print("Press CTRL+C to stop the server")

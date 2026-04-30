@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block title %}View Leave - HRMS{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+  <div class="header-bar">
+    <div class="header-content">
+      <span class="logo-text">HRMS</span>
+      <nav class="main-nav">
+        <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+        <div class="nav-dropdown">
+          <a href="#" class="nav-link nav-link-active">Leave Management <span class="dropdown-arrow">▼</span></a>
+          <div class="dropdown-menu">
+            <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply for Leave</a>
+            <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
+            {% if (current_user.role or '')|lower == 'manager' %}
+              <hr class="dropdown-separator">
+              <a href="{{ url_for('routes.leave_approvals') }}" class="dropdown-item">Leave Approvals</a>
+            {% endif %}
+          </div>
+        </div>
+      </nav>
+      <div class="user-dropdown">
+        <a href="#" class="user-info">
+          {% if employee %}{{ employee.full_name }}{% else %}{{ current_user.username }}{% endif %} ({{ current_user.role|title }})
+          <span class="dropdown-arrow">▼</span>
+        </a>
+        <div class="dropdown-menu dropdown-menu-right">
+          <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
+          <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
+            <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dashboard-content">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} alert-dismissible">
+            <span>{{ message }}</span>
+            <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="page-header" style="display:flex; justify-content: space-between; align-items:center; gap:1rem; flex-wrap:wrap;">
+      <div>
+        <h1 class="page-title" style="margin:0;">View Leave</h1>
+        <p style="margin:0.25rem 0 0; color: var(--medium-gray, #666); font-size: 0.9rem;">Search and open applications. Print is enabled when approved.</p>
+      </div>
+      <a href="{{ url_for('routes.leave_apply') }}" class="btn-primary">Apply for Leave</a>
+    </div>
+
+    <div class="card" style="padding: 1rem 1.25rem;">
+      <div style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center; margin-bottom: 0.75rem;">
+        <input type="text" id="leaveSearch" class="form-control" placeholder="Search leave..." style="max-width: 420px;">
+      </div>
+      <div class="table-container">
+        <table class="data-table" id="leaveTable">
+          <thead>
+            <tr>
+              <th>Applied Date(s)</th>
+              <th>Type of Leave</th>
+              <th>Description</th>
+              <th>Date Submitted</th>
+              <th>Status</th>
+              <th>Manager Remarks</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for l in leaves %}
+              <tr class="leave-row" data-href="{{ url_for('routes.leave_detail', id=l.id) }}">
+                <td>{{ l.start_date.strftime('%Y-%m-%d') }}{% if l.end_date and l.end_date != l.start_date %} to {{ l.end_date.strftime('%Y-%m-%d') }}{% endif %}</td>
+                <td>{{ l.leave_type }}</td>
+                <td style="max-width: 420px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ (l.reason or '')|replace('\n',' ') }}</td>
+                <td>{{ l.created_at.strftime('%Y-%m-%d %H:%M') if l.created_at else '' }}</td>
+                <td><span class="status-badge status-{{ l.status }}">{{ l.status|title }}</span></td>
+                <td>{{ l.rejection_reason or '' }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="6" class="no-data">No leave applications found.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('.leave-row').forEach(r => {
+  r.style.cursor = 'pointer';
+  r.addEventListener('click', () => window.location.href = r.dataset.href);
+});
+document.getElementById('leaveSearch')?.addEventListener('input', function(){
+  const q = this.value.toLowerCase();
+  document.querySelectorAll('#leaveTable tbody tr').forEach(tr => {
+    const txt = tr.innerText.toLowerCase();
+    tr.style.display = txt.includes(q) ? '' : 'none';
+  });
+});
+</script>
+{% endblock %}
+

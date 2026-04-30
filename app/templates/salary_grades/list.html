@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+
+{% block title %}Salary Grade - HRMS{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="header-bar">
+        <div class="header-content">
+            <span class="logo-text">HRMS</span>
+            <nav class="main-nav">
+                <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+                {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link nav-link-active">Settings <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
+                        <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
+                        <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
+                    </div>
+                </div>
+                {% endif %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Employee Management <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Employees</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Leave Management <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+                        <a href="{{ url_for('routes.leave_settings_list') }}" class="dropdown-item">Leave Settings</a>
+                        <a href="{{ url_for('routes.leave_credits_list') }}" class="dropdown-item">Leave Credits</a>
+                        <hr class="dropdown-separator">
+                        {% endif %}
+                        <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply for Leave</a>
+                        <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
+                        {% if (current_user.role or '')|lower == 'manager' %}
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.leave_approvals') }}" class="dropdown-item">Leave Approvals</a>
+                        {% endif %}
+                    </div>
+                </div>
+                <a href="#" class="nav-link">Reports</a>
+            </nav>
+            <div class="user-dropdown">
+                <a href="#" class="user-info">
+                    {% if employee %}
+                        {{ employee.full_name }} ({{ current_user.role|title }})
+                    {% else %}
+                        {{ current_user.username }} ({{ current_user.role|title }})
+                    {% endif %}
+                    <span class="dropdown-arrow">▼</span>
+                </a>
+                <div class="dropdown-menu dropdown-menu-right">
+                    <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
+                    <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
+                    <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
+                </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="dashboard-content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible">
+                        <span>{{ message }}</span>
+                        <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="page-header page-header-salary-grade">
+            <h1 class="page-title" style="margin: 0;">Salary Grade</h1>
+            <div class="page-header-right">
+                <form id="salaryGradeUploadForm" method="POST" action="{{ url_for('routes.salary_grade_upload') }}" enctype="multipart/form-data" style="display: inline;">
+                    <input type="file" id="salaryGradeFileInput" name="salary_grade_file" accept=".csv" style="display: none;">
+                    <button type="button" id="btnAddSalaryGrade" class="btn-primary">+ Add Salary Grade</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="salary-grade-filters">
+            <label for="agencyFilter">Agency:</label>
+            <select id="agencyFilter" class="form-control" style="width: auto; display: inline-block; margin-left: 0.5rem;">
+                <option value="Local" {% if agency == 'Local' %}selected{% endif %}>Local</option>
+                <option value="National" {% if agency == 'National' %}selected{% endif %}>National</option>
+            </select>
+        </div>
+
+        <div class="table-section">
+            <div class="search-bar">
+                <input type="text" id="searchSalaryGrade" class="search-input" placeholder="Search salary grade (SG, tranche, LGU class)...">
+                <span class="search-icon">🔍</span>
+            </div>
+            <div class="table-container">
+                <table class="data-table" id="salaryGradeTable">
+                    <thead>
+                        <tr>
+                            <th>SG</th>
+                            <th>Agency</th>
+                            <th>Tranche</th>
+                            <th>LGU Class</th>
+                            <th>Step 1</th>
+                            <th>Step 2</th>
+                            <th>Step 3</th>
+                            <th>Step 4</th>
+                            <th>Step 5</th>
+                            <th>Step 6</th>
+                            <th>Step 7</th>
+                            <th>Step 8</th>
+                        </tr>
+                    </thead>
+                    <tbody id="salaryGradeTableBody">
+                        {% if salary_grades %}
+                            {% for sg in salary_grades %}
+                            <tr class="table-row" data-id="{{ sg.id }}" data-search="{{ sg.sg or '' }} {{ sg.sg_agency or '' }} {{ sg.sg_tranche or '' }} {{ sg.sg_lgu_class or '' }}">
+                                <td>{{ sg.sg }}</td>
+                                <td>{{ sg.sg_agency or '—' }}</td>
+                                <td>{{ sg.sg_tranche or '—' }}</td>
+                                <td>{{ sg.sg_lgu_class or '—' }}</td>
+                                <td>{{ '{:,.2f}'.format(sg.sg_step_1) if sg.sg_step_1 is not none else '—' }}</td>
+                                <td>{{ '{:,.2f}'.format(sg.sg_step_2) if sg.sg_step_2 is not none else '—' }}</td>
+                                <td>{{ '{:,.2f}'.format(sg.sg_step_3) if sg.sg_step_3 is not none else '—' }}</td>
+                                <td>{{ '{:,.2f}'.format(sg.sg_step_4) if sg.sg_step_4 is not none else '—' }}</td>
+                                <td>{{ '{:,.2f}'.format(sg.sg_step_5) if sg.sg_step_5 is not none else '—' }}</td>
+                                <td>{{ '{:,.2f}'.format(sg.sg_step_6) if sg.sg_step_6 is not none else '—' }}</td>
+                                <td>{{ '{:,.2f}'.format(sg.sg_step_7) if sg.sg_step_7 is not none else '—' }}</td>
+                                <td>{{ '{:,.2f}'.format(sg.sg_step_8) if sg.sg_step_8 is not none else '—' }}</td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr>
+                                <td colspan="12" class="no-data">No salary grades found for this agency. Upload a CSV to add data.</td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.page-header-salary-grade { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; }
+.page-header-salary-grade .page-title { flex: 1; }
+.page-header-right { display: block; }
+.salary-grade-filters { margin-bottom: 1.5rem; }
+.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+.modal-dialog { background: var(--white); border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); max-width: 640px; width: 100%; max-height: 90vh; overflow-y: auto; }
+.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.5rem; border-bottom: 1px solid var(--light-gray); }
+.modal-title { font-size: 1.25rem; margin: 0; }
+.modal-close { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--medium-gray); line-height: 1; padding: 0 0.25rem; }
+.modal-close:hover { color: var(--primary-black); }
+.modal-body { padding: 1.5rem; }
+.modal-footer { display: flex; justify-content: flex-end; gap: 0.75rem; padding: 1rem 1.5rem; border-top: 1px solid var(--light-gray); }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var agencyFilter = document.getElementById('agencyFilter');
+    if (agencyFilter) {
+        agencyFilter.addEventListener('change', function() {
+            window.location.href = '{{ url_for("routes.salary_grades_list") }}?agency=' + encodeURIComponent(this.value);
+        });
+    }
+
+    var fileInput = document.getElementById('salaryGradeFileInput');
+    var uploadForm = document.getElementById('salaryGradeUploadForm');
+    document.getElementById('btnAddSalaryGrade').addEventListener('click', function() {
+        fileInput.click();
+    });
+    fileInput.addEventListener('change', function() {
+        if (this.files && this.files.length) {
+            uploadForm.submit();
+        }
+    });
+
+    var searchInput = document.getElementById('searchSalaryGrade');
+    var tableBody = document.getElementById('salaryGradeTableBody');
+    if (searchInput && tableBody) {
+        searchInput.addEventListener('input', function() {
+            var query = this.value.toLowerCase().trim();
+            var rows = tableBody.querySelectorAll('tr[data-search]');
+            rows.forEach(function(row) {
+                var text = (row.getAttribute('data-search') || '').toLowerCase();
+                row.style.display = text.indexOf(query) !== -1 ? '' : 'none';
+            });
+        });
+    }
+});
+</script>
+{% endblock %}

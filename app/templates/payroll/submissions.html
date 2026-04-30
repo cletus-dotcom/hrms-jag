@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+
+{% block title %}Submitted Payroll History - HRMS{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+  <div class="dashboard-content">
+    <div class="page-header" style="display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap;">
+      <h1 class="page-title" style="margin:0;">Submitted Payroll History</h1>
+      <a href="{{ url_for('routes.payroll_summary') }}" class="btn-secondary">Back to Payroll Summary</a>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} alert-dismissible">
+            <span>{{ message }}</span>
+            <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="card" style="padding:1rem 1.25rem; margin-bottom:1rem;">
+      <form method="GET" style="display:grid; grid-template-columns:repeat(5, minmax(120px, 1fr)); gap:0.75rem; align-items:end;">
+        <div>
+          <label>Year</label>
+          <input type="number" min="2000" max="2100" name="year" class="form-control" value="{{ filters.year }}">
+        </div>
+        <div>
+          <label>Month</label>
+          <input type="number" min="1" max="12" name="month" class="form-control" value="{{ filters.month }}">
+        </div>
+        <div>
+          <label>Mode</label>
+          <select name="mode" class="form-control">
+            <option value="" {% if not filters.mode %}selected{% endif %}>All</option>
+            <option value="quincena" {% if filters.mode == 'quincena' %}selected{% endif %}>Quincena</option>
+            <option value="month" {% if filters.mode == 'month' %}selected{% endif %}>Month</option>
+          </select>
+        </div>
+        <div>
+          <label>Submitted By</label>
+          <select name="submitted_by" class="form-control">
+            <option value="" {% if not filters.submitted_by %}selected{% endif %}>All</option>
+            {% for u in submitters %}
+            <option value="{{ u.id }}" {% if filters.submitted_by == (u.id|string) %}selected{% endif %}>{{ u.username }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div style="display:flex; gap:0.5rem;">
+          <button type="submit" class="btn-primary">Filter</button>
+          <a href="{{ url_for('routes.payroll_submissions') }}" class="btn-secondary">Reset</a>
+        </div>
+      </form>
+    </div>
+
+    <div class="card" style="padding:1rem 1.25rem;">
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Period</th>
+              <th>Submitted By</th>
+              <th>Submitted At</th>
+              <th>Target Office</th>
+              <th>Exports</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+            <tr>
+              <td>{{ r.id }}</td>
+              <td>
+                {% if r.period_mode == 'quincena' %}
+                {{ r.year }}-{{ '%02d'|format(r.month) }} ({{ '1st' if r.quincena == '1' else '2nd' }} Quincena)
+                {% else %}
+                {{ r.year }}-{{ '%02d'|format(r.month) }} (Month)
+                {% endif %}
+              </td>
+              <td>{{ r.submitted_by.username if r.submitted_by else 'N/A' }}</td>
+              <td>{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '' }}</td>
+              <td>{{ r.submitted_to or 'Accounting Office' }}</td>
+              <td style="display:flex; gap:0.35rem;">
+                <a class="btn-action" href="{{ url_for('routes.payroll_submission_export', id=r.id, format='csv') }}">CSV</a>
+                <a class="btn-action" href="{{ url_for('routes.payroll_submission_export', id=r.id, format='pdf') }}">PDF</a>
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6" class="no-data">No submitted payroll history yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

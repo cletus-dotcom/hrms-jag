@@ -26,7 +26,34 @@ def create_app(config_class=Config):
     
     with app.app_context():
         try:
+            from app import models  # register all models so create_all() creates every table
             db.create_all()
+            # Ensure leave_ledger_deletion exists (audit log); create_all can miss new tables in some setups
+            from app.models import LeaveLedgerDeletion
+            LeaveLedgerDeletion.__table__.create(db.engine, checkfirst=True)
+            # Ensure employees table has agency, lgu_class_level, salary_* columns (add if missing)
+            from sqlalchemy import text
+            from sqlalchemy import inspect
+            try:
+                inspector = inspect(db.engine)
+                if "employees" in inspector.get_table_names():
+                    columns = [c["name"] for c in inspector.get_columns("employees")]
+                    for name, typ in [
+                        ("agency", "VARCHAR(50)"),
+                        ("lgu_class_level", "VARCHAR(20)"),
+                        ("salary_tranche", "VARCHAR(20)"),
+                        ("salary_grade", "INTEGER"),
+                        ("salary_step", "INTEGER"),
+                        ("flexible_worktime", "BOOLEAN DEFAULT FALSE"),
+                        ("flexible_start_time", "TIME"),
+                        ("flexible_end_time", "TIME"),
+                    ]:
+                        if name not in columns:
+                            db.session.execute(text(f"ALTER TABLE employees ADD COLUMN {name} {typ}"))
+                            db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                print(f"Warning: Could not add employee salary columns: {e}")
             # Create default admin user if it doesn't exist
             from app.models import User, Employee
             admin_user = User.query.filter_by(username='admin').first()

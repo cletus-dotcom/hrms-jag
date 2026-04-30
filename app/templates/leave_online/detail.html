@@ -1,0 +1,501 @@
+{% extends "base.html" %}
+
+{% block title %}Leave Application #{{ leave.id }} - HRMS{% endblock %}
+
+{% block extra_css %}
+<style>
+  .print-wrap { background: #fff; border: 1px solid #111827; border-radius: 10px; padding: 1rem 1.25rem; }
+  .print-actions { display:flex; gap:0.75rem; justify-content:flex-end; flex-wrap:wrap; margin-bottom: 0.75rem; }
+  .csf6 { font-size: 12px; color: #111827; }
+  .csf6 .center { text-align: center; }
+  .csf6 .muted { color: #374151; }
+  .csf6 .bold { font-weight: 700; }
+  .csf6 .italic { font-style: italic; }
+  .csf6 .box { border: 1px solid #111827; border-radius: 8px; overflow: hidden; }
+  .csf6 table { width: 100%; border-collapse: collapse; }
+  .csf6 td, .csf6 th { border: 1px solid #111827; padding: 6px 8px; vertical-align: top; }
+  .csf6 .nob { border: none !important; }
+  .csf6 .tight td, .csf6 .tight th { padding: 4px 6px; }
+  .csf6 .hdr { line-height: 1.25; }
+  .csf6 .title { font-size: 14px; letter-spacing: 0.02em; }
+  /* Header layout to match CSC Form 6: centered logo+text group, centered title */
+  .csf6 .brand-row { display:grid; grid-template-columns: 1fr 2fr 1fr; align-items:center; }
+  .csf6 .brand-logo-wrap { display:flex; justify-content:flex-end; }
+  .csf6 .brand-text { text-align: center; }
+  .csf6 .brand-logo { width: 74px; height: 74px; object-fit: contain; }
+  .csf6 .check { display:inline-block; width: 12px; height: 12px; border: 1px solid #111827; margin-right: 6px; position: relative; top: 2px; }
+  .csf6 .check.on::after { content: ''; position: absolute; left: 2px; top: 1px; width: 7px; height: 9px; border-right: 2px solid #111827; border-bottom: 2px solid #111827; transform: rotate(40deg); }
+  .csf6 .line { display:inline-block; border-bottom: 1px solid #111827; min-width: 120px; height: 14px; vertical-align: bottom; }
+  .csf6 .sigline { border-top: 1px solid #111827; margin-top: 18px; padding-top: 6px; text-align: center; }
+  .csf6 .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .csf6 .small { font-size: 11px; }
+  /* 6.A: keep each checkbox on one line */
+  .csf6 .leave-opts { font-size: 10.5px; line-height: 1.15; }
+  .csf6 .leave-opts .opt { display:flex; gap: 6px; align-items: flex-start; margin: 2px 0; }
+  .csf6 .leave-opts .opt .check { flex: 0 0 auto; margin-right: 0; top: 1px; }
+  .csf6 .leave-opts .opt .label { white-space: nowrap; }
+  /* A4 print layout */
+  @page { size: A4; margin: 6mm; }
+  .csf6 { max-width: 210mm; margin: 0 auto; }
+  .csf6 .print-wrap { box-shadow: none; }
+  @media print {
+    .header-bar, .print-actions { display:none !important; }
+    .page-header, .alert { display:none !important; }
+    html, body { background: #fff !important; }
+    .dashboard-content { padding: 0 !important; }
+    .print-wrap { border: none; border-radius: 0; padding: 0; }
+    .csf6 .box { border-radius: 0; }
+    .dashboard-container { background: #fff !important; }
+    /* Prevent awkward splits inside main boxes */
+    .csf6 .box { break-inside: avoid; page-break-inside: avoid; }
+    /* Fit to one A4 page */
+    .csf6 { font-size: 11px; }
+    .csf6 .small { font-size: 10px; }
+    .csf6 .title { font-size: 13px; }
+    .csf6 td, .csf6 th { padding: 4px 6px; }
+  }
+
+  {% if (leave.status or '')|lower != 'approved' %}
+  /* If not approved, prevent any meaningful print output */
+  @media print {
+    body * { visibility: hidden !important; }
+    .print-blocked { visibility: visible !important; display: block !important; }
+  }
+  {% endif %}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+  <div class="header-bar">
+    <div class="header-content">
+      <span class="logo-text">HRMS</span>
+      <nav class="main-nav">
+        <a href="{{ url_for('routes.leave_list') }}" class="nav-link">View Leave</a>
+      </nav>
+      <div class="user-dropdown">
+        <a href="#" class="user-info">
+          {% if employee %}{{ employee.full_name }}{% else %}{{ current_user.username }}{% endif %} ({{ current_user.role|title }})
+          <span class="dropdown-arrow">▼</span>
+        </a>
+        <div class="dropdown-menu dropdown-menu-right">
+          <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
+          <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
+            <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dashboard-content">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} alert-dismissible">
+            <span>{{ message }}</span>
+            <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="page-header" style="display:flex; justify-content: space-between; align-items:center; gap:1rem; flex-wrap:wrap;">
+      <div>
+        <h1 class="page-title" style="margin:0;">Leave Application</h1>
+        <p style="margin:0.25rem 0 0; color: var(--medium-gray, #666); font-size: 0.9rem;">Application #{{ leave.id }}</p>
+      </div>
+      <div class="print-actions">
+        {% if (current_user.role or '')|lower == 'manager' %}
+          <a href="{{ url_for('routes.leave_approvals') }}" class="btn-secondary">Back</a>
+        {% else %}
+          <a href="{{ url_for('routes.leave_list') }}" class="btn-secondary">Back</a>
+        {% endif %}
+        {% if leave.status == 'approved' %}
+          <button type="button" class="btn-primary" onclick="window.print()">Print</button>
+        {% else %}
+          <button type="button" class="btn-secondary" disabled style="opacity:0.6; cursor:not-allowed;">Print (Approved only)</button>
+        {% endif %}
+      </div>
+    </div>
+
+    {% set emp2 = target_emp if target_emp else leave.employee %}
+    {% set lname = emp2.last_name if emp2 else '' %}
+    {% set fname = emp2.first_name if emp2 else '' %}
+    {% set mname = emp2.middle_name if emp2 and emp2.middle_name else '' %}
+    {% set office = emp2.department.name if emp2 and emp2.department else '' %}
+    {% set pos = emp2.position if emp2 and emp2.position else '' %}
+    {% set filing = (leave.created_at.strftime('%b-%d-%Y') if leave.created_at else '') %}
+    {% set salary = ('{:,.2f}'.format(salary_amount) if salary_amount else '') %}
+    {% set code = (leave.leave_type or '')|upper %}
+    {% set inclusive = leave.start_date.strftime('%b %d, %Y') if leave.start_date else '' %}
+    {% if leave.end_date and leave.end_date != leave.start_date %}
+      {% set inclusive = inclusive + ' to ' + leave.end_date.strftime('%b %d, %Y') %}
+    {% endif %}
+    {% set days = ('{:,.3f}'.format(leave.total_days) if leave.total_days else '') %}
+
+    <div class="print-wrap csf6">
+      {% macro name_with_middle_initial(p) -%}
+        {%- if not p -%}
+        {%- elif p.middle_name -%}
+          {{ (p.first_name or '') }} {{ (p.middle_name|string)[0] }}. {{ (p.last_name or '') }}
+        {%- else -%}
+          {{ (p.first_name or '') }} {{ (p.last_name or '') }}
+        {%- endif -%}
+      {%- endmacro %}
+      <div class="hdr small">
+        <div style="display:flex; justify-content: space-between; align-items: flex-start;">
+          <div style="text-align:left;">
+            <div class="italic">Civil Service Form No. 6</div>
+            <div class="italic">Revised 2020</div>
+          </div>
+          <div style="text-align:right;">
+            <div class="italic">ANNEX A</div>
+          </div>
+        </div>
+        <div class="center" style="margin-top: 6px;">
+          <div class="brand-row">
+            <div class="brand-logo-wrap">
+              <img class="brand-logo" src="{{ url_for('static', filename='jagna_logo.png') }}" alt="Jagna logo">
+            </div>
+            <div class="brand-text">
+              <div>Republic of the Philippines</div>
+              <div class="bold">MUNICIPALITY OF JAGNA</div>
+              <div class="bold">Jagna, Bohol</div>
+            </div>
+            <div></div>
+          </div>
+          <div style="height:6px;"></div>
+          <div class="bold title">APPLICATION FOR LEAVE</div>
+        </div>
+      </div>
+
+      <div style="height:10px;"></div>
+
+      <div class="box">
+        <table class="tight">
+          <tr>
+            <td style="width: 22%;">
+              <div class="muted bold">1. Office/Agency</div>
+              <div>{{ office }}</div>
+            </td>
+            <td style="width: 52%;">
+              <div class="muted bold">2. Name (Last) &nbsp;&nbsp; (First) &nbsp;&nbsp; (Middle)</div>
+              <div>{{ lname }} &nbsp;&nbsp; {{ fname }} &nbsp;&nbsp; {{ mname }}</div>
+            </td>
+            <td style="width: 26%;">
+              <div class="muted bold">Stamp of Date of Receipt</div>
+              <div style="height: 22px;"></div>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <div class="muted bold">3. Date of Filing</div>
+              <div>{{ filing }}</div>
+            </td>
+            <td>
+              <div class="muted bold">4. Position</div>
+              <div>{{ pos }}</div>
+            </td>
+            <td>
+              <div class="muted bold">5. Salary</div>
+              <div>{{ salary }}</div>
+            </td>
+          </tr>
+        </table>
+      </div>
+
+      <div style="height:10px;"></div>
+
+      <div class="box">
+        <table class="tight">
+          <tr>
+            <th colspan="2" class="center">6. DETAILS OF APPLICATION</th>
+          </tr>
+          <tr>
+            <td style="width: 60%;">
+              <div class="bold muted">6.A TYPE OF LEAVE TO BE AVAILED OF</div>
+              <div class="leave-opts" style="margin-top: 6px;">
+                <div class="opt"><span class="check {% if code == 'WL' %}on{% endif %}"></span><span class="label">Wellness Leave (Republic Act No. 11036 or the Mental Health Act)</span></div>
+                <div class="opt"><span class="check {% if code == 'VL' %}on{% endif %}"></span><span class="label">Vacation Leave (Sec. 51, Rule XVI, Omnibus Rules Implementing E.O. No. 292)</span></div>
+                <div class="opt"><span class="check {% if code == 'MFL' %}on{% endif %}"></span><span class="label">Mandatory/Forced Leave (Sec. 25, Rule XVI, Omnibus Rules Implementing E.O. No. 292)</span></div>
+                <div class="opt"><span class="check {% if code == 'SL' %}on{% endif %}"></span><span class="label">Sick Leave (Sec. 43, Rule XVI, Omnibus Rules Implementing E.O. No. 292)</span></div>
+                <div class="opt"><span class="check {% if code == 'ML' %}on{% endif %}"></span><span class="label">Maternity Leave (R.A. No. 11210 / IRR issued by CSC, DOLE and SSS)</span></div>
+                <div class="opt"><span class="check {% if code == 'PL' %}on{% endif %}"></span><span class="label">Paternity Leave (R.A. No. 8187 / CSC MC No. 71, s. 1998, as amended)</span></div>
+                <div class="opt"><span class="check {% if code == 'SPL' %}on{% endif %}"></span><span class="label">Special Privilege Leave (Sec. 21, Rule XVI, Omnibus Rules Implementing E.O. No. 292)</span></div>
+                <div class="opt"><span class="check {% if code == 'SP' %}on{% endif %}"></span><span class="label">Solo Parent Leave (RA No. 8972 / CSC MC No. 8, s. 2004)</span></div>
+                <div class="opt"><span class="check {% if code == 'STUDY' %}on{% endif %}"></span><span class="label">Study Leave (Sec. 68, Rule XVI, Omnibus Rules Implementing E.O. No. 292)</span></div>
+                <div class="opt"><span class="check {% if code == 'VAWC' %}on{% endif %}"></span><span class="label">10-Day VAWC Leave (RA No. 9262 / CSC MC No. 15, s. 2005)</span></div>
+                <div class="opt"><span class="check {% if code == 'REHAB' %}on{% endif %}"></span><span class="label">Rehabilitation Privilege (Sec. 55, Rule XVI, Omnibus Rules Implementing E.O. No. 292)</span></div>
+                <div class="opt"><span class="check {% if code == 'SLBW' %}on{% endif %}"></span><span class="label">Special Leave Benefits for Women (RA No. 9710 / CSC MC No. 25, s. 2010)</span></div>
+                <div class="opt"><span class="check {% if code == 'SE_CALAMITY' %}on{% endif %}"></span><span class="label">Special Emergency (Calamity) Leave (CSC MC No. 2, s. 2012, as amended)</span></div>
+                <div class="opt"><span class="check {% if code == 'ADOPT' %}on{% endif %}"></span><span class="label">Adoption Leave (R.A. No. 8552)</span></div>
+                <div class="opt"><span class="check {% if code == 'CTO' %}on{% endif %}"></span><span class="label">Compensatory Time Off</span></div>
+                <div class="opt" style="margin-top: 6px;"><span class="label">Others:&nbsp;</span><span class="line" style="min-width: 220px;"></span></div>
+              </div>
+            </td>
+            <td style="width: 40%;">
+              <div class="bold muted">6.B DETAILS OF LEAVE</div>
+              <div style="margin-top: 6px;">
+                {% set ns = namespace(vl_loc='', vl_abroad='', sl_case='', sl_ill='') %}
+                {% for ln in (leave.reason or '').splitlines() %}
+                  {% if ln.startswith('__META__VL_LOCATION=') %}
+                    {% set v = ln.split('=', 1)[1] %}
+                    {% if v.startswith('ABROAD:') %}
+                      {% set ns.vl_loc = 'ABROAD' %}
+                      {% set ns.vl_abroad = v.split(':', 1)[1] %}
+                    {% else %}
+                      {% set ns.vl_loc = v %}
+                    {% endif %}
+                  {% elif ln.startswith('__META__SL_CASE=') %}
+                    {% set ns.sl_case = ln.split('=', 1)[1] %}
+                  {% elif ln.startswith('__META__SL_ILLNESS=') %}
+                    {% set ns.sl_ill = ln.split('=', 1)[1] %}
+                  {% endif %}
+                {% endfor %}
+
+                <div class="bold">In case of Vacation/Special Privilege Leave:</div>
+                <div><span class="check {% if code in ('VL','SPL') and (ns.vl_loc == 'WITHIN_PH') %}on{% endif %}"></span>Within the Philippines</div>
+                <div><span class="check {% if code in ('VL','SPL') and (ns.vl_loc == 'ABROAD') %}on{% endif %}"></span>Abroad (Specify) <span class="line" style="min-width: 160px;">{% if ns.vl_loc == 'ABROAD' %} {{ ns.vl_abroad }}{% endif %}</span></div>
+                <div style="height: 8px;"></div>
+                <div class="bold">In case of Sick Leave:</div>
+                {% set reason = (leave.reason or '') %}
+                {% set sl_in = (ns.sl_case == 'IN_HOSPITAL') or ('In-Hospital' in reason) %}
+                {% set sl_out = (ns.sl_case == 'OUT_PATIENT') or ('Out-Patient' in reason) %}
+                <div><span class="check {% if code == 'SL' and sl_in %}on{% endif %}"></span>In Hospital (Specify Illness) <span class="line" style="min-width: 150px;">{% if code == 'SL' and sl_in and ns.sl_ill %} {{ ns.sl_ill }}{% endif %}</span></div>
+                <div><span class="check {% if code == 'SL' and (sl_out or (not sl_in and not sl_out)) %}on{% endif %}"></span>Out Patient <span class="line" style="min-width: 190px;">{% if code == 'SL' and sl_out and ns.sl_ill %} ({{ ns.sl_ill }}){% endif %}</span></div>
+                <div style="height: 8px;"></div>
+                <div class="bold">In case of Special Leave Benefits for Women:</div>
+                <div>(Specify Illness) <span class="line" style="min-width: 240px;"></span></div>
+                <div style="height: 8px;"></div>
+                <div class="bold">In case of Study Leave:</div>
+                <div><span class="check"></span>Completion of Master's Degree</div>
+                <div><span class="check"></span>BAR/Board Examination Review</div>
+                <div style="height: 8px;"></div>
+                <div class="bold">Other purpose:</div>
+                <div><span class="check"></span>Monetization of Leave Credits</div>
+                <div><span class="check"></span>Terminal Leave</div>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              <div class="bold muted">6.C NUMBER OF WORKING DAYS APPLIED FOR</div>
+              <div style="margin-top: 6px;">
+                <span class="bold">{{ days }}</span> day/s.
+              </div>
+              <div style="margin-top: 6px;" class="bold muted">Inclusive Dates:</div>
+              <div>{{ inclusive }}</div>
+            </td>
+            <td>
+              <div class="bold muted">6.D COMMUTATION</div>
+              {% set comm_req = 'Commutation: Requested' in (leave.reason or '') %}
+              {% set comm_not = 'Commutation: Not Requested' in (leave.reason or '') %}
+              <div style="margin-top: 6px;">
+                <div><span class="check {% if comm_req %}on{% endif %}"></span>Requested</div>
+                <div><span class="check {% if comm_not or (not comm_req and not comm_not) %}on{% endif %}"></span>Not Requested</div>
+              </div>
+              <div class="sigline">
+                SIGNATURE OF APPLICANT
+              </div>
+            </td>
+          </tr>
+        </table>
+      </div>
+
+      <div style="height:10px;"></div>
+
+      <div class="box">
+        <table class="tight">
+          <tr>
+            <th colspan="2" class="center">7. DETAILS OF ACTION ON APPLICATION</th>
+          </tr>
+          <tr>
+            <td style="width: 52%; border-bottom: none;">
+              <div class="bold muted">7.A CERTIFICATION OF LEAVE CREDITS</div>
+              <div class="muted" style="margin-top: 4px;">
+                As of <span class="line" style="min-width: 140px;">{{ leave.created_at.strftime('%B, %Y') if leave.created_at else '' }}</span>
+              </div>
+              {% set b = balances or {} %}
+              {% set vl_bal = b.get('vl', 0) %}
+              {% set sl_bal = b.get('sl', 0) %}
+              {% set spl_bal = b.get('spl', 0) %}
+              {% set cto_bal = b.get('cto', 0) %}
+              {% set wl_bal = b.get('wl', 0) %}
+
+              {# Map this application's leave type into the appropriate credit column #}
+              {% set _ap_code = (leave.leave_type or '')|upper %}
+              {% set applied_days = (leave.total_days if leave.total_days is not none else 0) %}
+              {% set vl_less = (applied_days if _ap_code == 'VL' else 0) %}
+              {% set sl_less = (applied_days if _ap_code == 'SL' else 0) %}
+              {% set spl_less = (applied_days if _ap_code == 'SPL' else 0) %}
+              {% set cto_less = (applied_days if _ap_code == 'CTO' else 0) %}
+              {% set wl_less = (applied_days if _ap_code == 'WL' else 0) %}
+
+              {% set vl_earned = vl_bal + vl_less %}
+              {% set sl_earned = sl_bal + sl_less %}
+              {% set spl_earned = spl_bal + spl_less %}
+              {% set cto_earned = cto_bal + cto_less %}
+              {% set wl_earned = wl_bal + wl_less %}
+
+              {% macro fmt_credit(v) -%}
+                {%- set _v = (v if v is not none else 0) -%}
+                {%- if _v == 0 -%}
+                {%- else -%}
+                  {{ '{:,.3f}'.format(_v) }}
+                {%- endif -%}
+              {%- endmacro %}
+              <table class="tight" style="margin-top: 6px;">
+                <tr class="center">
+                  <th style="width: 40%;">&nbsp;</th>
+                  <th>VL</th>
+                  <th>SL</th>
+                  <th>SPL</th>
+                  <th>CTO</th>
+                  <th>WL</th>
+                </tr>
+                <tr class="center">
+                  <td style="text-align:left;">Total Earned</td>
+                  <td>{{ fmt_credit(vl_earned) }}</td>
+                  <td>{{ fmt_credit(sl_earned) }}</td>
+                  <td>{{ fmt_credit(spl_earned) }}</td>
+                  <td>{{ fmt_credit(cto_earned) }}</td>
+                  <td>{{ fmt_credit(wl_earned) }}</td>
+                </tr>
+                <tr class="center">
+                  <td style="text-align:left;">Less this application</td>
+                  <td>{{ fmt_credit(vl_less) }}</td>
+                  <td>{{ fmt_credit(sl_less) }}</td>
+                  <td>{{ fmt_credit(spl_less) }}</td>
+                  <td>{{ fmt_credit(cto_less) }}</td>
+                  <td>{{ fmt_credit(wl_less) }}</td>
+                </tr>
+                <tr class="center">
+                  <td style="text-align:left;">Balance</td>
+                  <td>{{ fmt_credit(vl_bal) }}</td>
+                  <td>{{ fmt_credit(sl_bal) }}</td>
+                  <td>{{ fmt_credit(spl_bal) }}</td>
+                  <td>{{ fmt_credit(cto_bal) }}</td>
+                  <td>{{ fmt_credit(wl_bal) }}</td>
+                </tr>
+              </table>
+              <div class="sigline" style="border-top: none; margin-top: 12px; padding-top: 0;">
+                <div style="height: 14px;"></div>
+                <div class="bold">{{ name_with_middle_initial(hr_signatory) }}</div>
+                <div class="muted">{{ hr_signatory.position if hr_signatory and hr_signatory.position else '' }}</div>
+              </div>
+            </td>
+            <td style="width: 48%; border-bottom: none; position: relative; padding-bottom: 68px;">
+              <div>
+                <div class="bold muted">7.B RECOMMENDATION:</div>
+                {% set dept_head = (emp2.department.manager if emp2 and emp2.department and emp2.department.manager else None) %}
+                {% set _dept_name = (emp2.department.name if emp2 and emp2.department and emp2.department.name else '')|lower %}
+                {% set is_mo_dept = (_dept_name in ('mo', "mayor's office", 'mayors office', 'municipal mayor') or 'mayor' in _dept_name) %}
+                {% set is_mict_dept = ('mict' in _dept_name) %}
+                {% set is_applicant_dept_head = (dept_head and emp2 and dept_head.id == emp2.id) %}
+                {% set is_mict_dept_head = (is_mict_dept and is_applicant_dept_head) %}
+                {# Hide checkboxes/choices only for MICT department head #}
+                {% set _hide_7b_choices = is_mict_dept_head %}
+                {# New rule: if applicant is any department manager, blank 7.B details + signatory. #}
+                {% set _hide_7b_all = applicant_is_department_manager %}
+                {% if not _hide_7b_all %}
+                <div style="margin-top: 6px;">
+                  {% if not _hide_7b_choices %}
+                  <div><span class="check"></span>For approval</div>
+                  <div><span class="check"></span>For disapproval due to <span class="line" style="min-width: 200px;"></span></div>
+                  {% endif %}
+                </div>
+                <div style="position:absolute; left:0; right:0; bottom:10px; text-align:center;">
+                  {% if applicant_is_manager or is_mo_dept %}
+                    {% if is_mo_dept and not is_mict_dept_head %}
+                      {# MO applicants (except MICT dept head): recommendation should show, signed by MADO dept manager #}
+                      {% set mo_rec = (mado_signatory or dept_head) %}
+                      {% set mo_rec_title = "Municipal Administrator" %}
+                    {% else %}
+                      {% set mo_rec = mayor_signatory %}
+                      {% set mo_rec_title = "Municipal Mayor" %}
+                    {% endif %}
+                    <div style="padding-top: 6px; display:inline-block; min-width: 260px;">
+                      <div class="bold">{{ name_with_middle_initial(mo_rec) }}</div>
+                      <div class="muted">{{ mo_rec_title }}</div>
+                    </div>
+                  {% else %}
+                    <div style="padding-top: 6px; display:inline-block; min-width: 260px;">
+                      <div class="bold">{{ name_with_middle_initial(dept_head) }}</div>
+                      <div class="muted">{{ dept_head.position if dept_head and dept_head.position else '' }}</div>
+                    </div>
+                  {% endif %}
+                </div>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td colspan="2" style="padding:0; height:0; border: none;">
+              <div style="border-top: 0.5px solid #111827;"></div>
+            </td>
+          </tr>
+          <tr>
+            <td style="width: 52%; border-right: none; border-bottom: none;">
+              <div class="bold muted">7.C APPROVED FOR:</div>
+              <div style="margin-top: 6px;">
+                {# Match CSC Form 6 layout: lines aligned under "APPROVED" #}
+                {% set _indent = 24 %}
+                {% set _line_w = 80 %}
+                <div style="padding-left: {{ _indent }}px;"><span class="line" style="min-width: {{ _line_w }}px;"> {{ days }}</span> days with pay</div>
+                <div style="padding-left: {{ _indent }}px;"><span class="line" style="min-width: {{ _line_w }}px;"></span> days without pay</div>
+                <div style="padding-left: {{ _indent }}px;"><span class="line" style="min-width: {{ _line_w }}px;"></span> others (specify)</div>
+              </div>
+            </td>
+            <td style="width: 48%; border-left: none; border-bottom: none;">
+              <div class="bold muted">7.D DISAPPROVED DUE TO:</div>
+              <div style="margin-top: 6px;">
+                <span class="line" style="min-width: 260px;"></span>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td colspan="2" style="text-align:center; border-top: none;">
+              <div style="height: 14px;"></div>
+              <div class="bold">{{ name_with_middle_initial(mayor_signatory) }}</div>
+              <div class="muted">{% if mayor_signatory %}Municipal Mayor{% endif %}</div>
+            </td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% if (leave.status or '')|lower != 'approved' %}
+<div class="print-blocked" style="display:none; padding: 24mm; font-size: 14px;">
+  Printing is disabled. This leave application must be approved before it can be printed.
+</div>
+<script>
+(function () {
+  const isApproved = {{ 'true' if (leave.status or '')|lower == 'approved' else 'false' }};
+  if (isApproved) return;
+
+  const msg = 'Printing is disabled. This leave application must be approved before it can be printed.';
+
+  // Block common keyboard shortcuts (Ctrl+P / Cmd+P)
+  window.addEventListener('keydown', function (e) {
+    const key = (e.key || '').toLowerCase();
+    const isPrint = (key === 'p') && (e.ctrlKey || e.metaKey);
+    if (isPrint) {
+      e.preventDefault();
+      e.stopPropagation();
+      alert(msg);
+    }
+  }, true);
+
+  // Block programmatic prints
+  const originalPrint = window.print;
+  window.print = function () {
+    alert(msg);
+    return;
+  };
+})();
+</script>
+{% endif %}
+{% endblock %}
+

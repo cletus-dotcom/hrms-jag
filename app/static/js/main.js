@@ -168,51 +168,60 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Table search functionality - Employees table
     const searchInputEmployees = document.getElementById('searchInputEmployees');
+    const deptFilterEmployees = document.getElementById('departmentFilterEmployees');
     if (searchInputEmployees) {
-        searchInputEmployees.addEventListener('input', function(e) {
-            const searchTerm = e.target.value.toLowerCase().trim();
+        const applyEmployeesFilters = () => {
+            const searchTerm = (searchInputEmployees.value || '').toLowerCase().trim();
+            const deptId = deptFilterEmployees ? (deptFilterEmployees.value || '').trim() : '';
             const tableRows = document.querySelectorAll('#employeesTable .table-row');
-            
+            const tbody = document.getElementById('employeesTableBody');
+            const existingNoResults = tbody ? tbody.querySelector('.no-results') : null;
+
             tableRows.forEach(row => {
-                const searchData = row.getAttribute('data-search') || '';
-                if (searchData.includes(searchTerm)) {
+                const searchData = (row.getAttribute('data-search') || '').toLowerCase();
+                const rowDeptId = (row.getAttribute('data-department-id') || '').trim();
+                const okSearch = !searchTerm || searchData.includes(searchTerm);
+                const okDept = !deptId || rowDeptId === deptId;
+                if (okSearch && okDept) {
                     row.classList.remove('hidden');
                 } else {
                     row.classList.add('hidden');
                 }
             });
-            
-            // Show "No results" message if all rows are hidden
+
             const visibleRows = Array.from(tableRows).filter(row => !row.classList.contains('hidden'));
-            const tbody = document.getElementById('employeesTableBody');
-            const existingNoResults = tbody.querySelector('.no-results');
-            
-            if (visibleRows.length === 0 && searchTerm !== '') {
-                if (!existingNoResults) {
-                    // Remove existing no-data row if it exists (but not no-results)
+
+            if (tbody) {
+                const colSpan = tbody.getAttribute('data-cols') || '6';
+                const shouldShowNoResults = visibleRows.length === 0 && (searchTerm !== '' || deptId !== '');
+
+                if (shouldShowNoResults) {
+                    if (!existingNoResults) {
+                        const existingNoData = tbody.querySelector('.no-data:not(.no-results)');
+                        if (existingNoData) {
+                            existingNoData.style.display = 'none';
+                        }
+                        const noResultsRow = document.createElement('tr');
+                        noResultsRow.className = 'no-data no-results';
+                        noResultsRow.innerHTML = `<td colspan="${colSpan}" class="no-data">No employees found matching your filters</td>`;
+                        tbody.appendChild(noResultsRow);
+                    }
+                } else {
+                    if (existingNoResults) {
+                        existingNoResults.remove();
+                    }
                     const existingNoData = tbody.querySelector('.no-data:not(.no-results)');
                     if (existingNoData) {
-                        existingNoData.style.display = 'none';
+                        existingNoData.style.display = '';
                     }
-                    
-                    // Create new no-results row
-                    const noResultsRow = document.createElement('tr');
-                    noResultsRow.className = 'no-data no-results';
-                    noResultsRow.innerHTML = '<td colspan="6" class="no-data">No employees found matching your search</td>';
-                    tbody.appendChild(noResultsRow);
-                }
-            } else {
-                // Remove no-results row if it exists
-                if (existingNoResults) {
-                    existingNoResults.remove();
-                }
-                // Show existing no-data row if it was hidden
-                const existingNoData = tbody.querySelector('.no-data:not(.no-results)');
-                if (existingNoData) {
-                    existingNoData.style.display = '';
                 }
             }
-        });
+        };
+
+        searchInputEmployees.addEventListener('input', applyEmployeesFilters);
+        if (deptFilterEmployees) {
+            deptFilterEmployees.addEventListener('change', applyEmployeesFilters);
+        }
     }
     
     // Table search functionality - Departments table

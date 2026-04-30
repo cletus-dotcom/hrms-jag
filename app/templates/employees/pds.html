@@ -19,28 +19,62 @@
         <div class="header-content">
             <span class="logo-text">HRMS</span>
             <nav class="main-nav">
-                <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Settings <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
-                        <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
-                        <hr class="dropdown-separator">
-                        <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
-                        <a href="#" class="dropdown-item">Salary Grade</a>
+                {% if current_user.role in ['employee', 'dtr_uploader'] %}
+                    <a href="{{ url_for('routes.employee_dashboard') }}" class="nav-link">Dashboard</a>
+                    <a href="#" class="nav-link">Daily Time Records</a>
+                    <div class="nav-dropdown">
+                        <a href="#" class="nav-link">Leave <span class="dropdown-arrow">▼</span></a>
+                        <div class="dropdown-menu">
+                            <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply Leave</a>
+                            <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
+                        </div>
                     </div>
-                </div>
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link nav-link-active">Employee Management <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Employees</a>
+                    {% if current_user.role == 'dtr_uploader' %}
+                        <a href="{{ url_for('routes.dtr_upload') }}" class="nav-link">Upload DTR Log</a>
+                    {% endif %}
+                {% else %}
+                    <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+                    {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+                    <div class="nav-dropdown">
+                        <a href="#" class="nav-link">Settings <span class="dropdown-arrow">▼</span></a>
+                        <div class="dropdown-menu">
+                            <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
+                            <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
+                            <hr class="dropdown-separator">
+                            <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
+                            <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
+                            <hr class="dropdown-separator">
+                            <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
+                        </div>
                     </div>
-                </div>
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Attendance <span class="dropdown-arrow">▼</span></a>
-                </div>
-                <a href="#" class="nav-link">Leave Requests</a>
-                <a href="#" class="nav-link">Reports</a>
+                    {% endif %}
+                    <div class="nav-dropdown">
+                        <a href="#" class="nav-link nav-link-active">Employee Management <span class="dropdown-arrow">▼</span></a>
+                        <div class="dropdown-menu">
+                            <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Employees</a>
+                        </div>
+                    </div>
+                    <div class="nav-dropdown">
+                        <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
+                    </div>
+                    <div class="nav-dropdown">
+                        <a href="#" class="nav-link">Leave Management <span class="dropdown-arrow">▼</span></a>
+                        <div class="dropdown-menu">
+                            {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+                            <a href="{{ url_for('routes.leave_settings_list') }}" class="dropdown-item">Leave Settings</a>
+                            <a href="{{ url_for('routes.leave_credits_list') }}" class="dropdown-item">Leave Credits</a>
+                            <hr class="dropdown-separator">
+                            {% endif %}
+                            <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply for Leave</a>
+                            <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
+                            {% if (current_user.role or '')|lower == 'manager' %}
+                            <hr class="dropdown-separator">
+                            <a href="{{ url_for('routes.leave_approvals') }}" class="dropdown-item">Leave Approvals</a>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <a href="#" class="nav-link">Reports</a>
+                {% endif %}
             </nav>
             <div class="user-dropdown">
                 <a href="#" class="user-info">
@@ -52,7 +86,10 @@
                     <span class="dropdown-arrow">▼</span>
                 </a>
                 <div class="dropdown-menu dropdown-menu-right">
-                    <a href="{{ url_for('routes.logout') }}" class="dropdown-item">Logout</a>
+                    <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
+                    <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
+                    <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
+                </form>
                 </div>
             </div>
         </div>
@@ -65,8 +102,12 @@
                     <h1>{{ emp.employee_id }} - {{ emp.last_name }}, {{ emp.first_name }}{% if emp.middle_name %} {{ emp.middle_name }}{% endif %}</h1>
                 </div>
                 <div class="pds-actions">
-                    <a href="{{ url_for('routes.employees_list') }}" class="btn-secondary">Back to List</a>
-                    <a href="{{ url_for('routes.employee_edit', id=emp.id) }}" class="btn-primary">Edit Employee</a>
+                    {% if current_user.role not in ['employee', 'dtr_uploader'] %}
+                        <a href="{{ url_for('routes.employees_list') }}" class="btn-secondary">Back to List</a>
+                        {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+                        <a href="{{ url_for('routes.employee_edit', id=emp.id) }}" class="btn-primary">Edit Employee</a>
+                        {% endif %}
+                    {% endif %}
                 </div>
             </div>
             <div class="pds-photo">
@@ -89,6 +130,13 @@
             {% endif %}
         {% endwith %}
         
+        {% if not can_edit_pds %}
+        <div class="alert alert-info alert-dismissible" style="margin: 0 0 1rem;">
+            <span>This PDS is read-only. Only the employee (on their own record) can save changes.</span>
+            <button class="alert-close" onclick="this.parentElement.style.display='none'" type="button">×</button>
+        </div>
+        {% endif %}
+        
         <div class="accordion-container">
             <div class="accordion-item">
                 <div class="accordion-header" onclick="toggleAccordion(this)">
@@ -99,6 +147,7 @@
                     <div class="accordion-body">
                         <form method="POST" class="pds-form" action="{{ url_for('routes.employee_pds', id=emp.id) }}">
                             <input type="hidden" name="section" value="personal_information">
+                            <fieldset class="pds-editable-block" style="border:none;margin:0;padding:0;min-width:0;" {% if not can_edit_pds %}disabled{% endif %}>
                             <div class="form-section-grid">
                                 <div class="form-column">
                                     <div class="form-row">
@@ -366,10 +415,12 @@
                                     </div>
                                 </div>
                             </div>
-                            
+                            </fieldset>
+                            {% if can_edit_pds %}
                             <div class="form-actions" style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--light-gray);">
                                 <button type="submit" class="btn-primary">Save Personal Information</button>
                             </div>
+                            {% endif %}
                         </form>
                     </div>
                 </div>
@@ -384,6 +435,7 @@
                     <div class="accordion-body">
                         <form method="POST" class="pds-form" id="familyBackgroundForm" action="{{ url_for('routes.employee_pds', id=emp.id) }}">
                             <input type="hidden" name="section" value="family_background">
+                            <fieldset class="pds-editable-block" style="border:none;margin:0;padding:0;min-width:0;" {% if not can_edit_pds %}disabled{% endif %}>
                             <div class="form-section-grid">
                                 <div class="form-column" style="flex: 1;">
                                     <!-- Section 22: Spouse's Information -->
@@ -596,10 +648,12 @@
                                     </div>
                                 </div>
                             </div>
-                            
+                            </fieldset>
+                            {% if can_edit_pds %}
                             <div class="form-actions" style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--light-gray);">
                                 <button type="submit" class="btn-primary">Save Family Background</button>
                             </div>
+                            {% endif %}
                         </form>
                     </div>
                 </div>
@@ -615,7 +669,7 @@
                     <div class="accordion-body">
                         <form method="POST" class="pds-form" id="educationalBackgroundForm" action="{{ url_for('routes.employee_pds', id=emp.id) }}">
                             <input type="hidden" name="section" value="educational_background">
-                            
+                            <fieldset class="pds-editable-block" style="border:none;margin:0;padding:0;min-width:0;" {% if not can_edit_pds %}disabled{% endif %}>
                             <div style="margin-bottom: 1rem;">
                                 <label style="font-weight: 600; font-size: 0.9rem;">26.</label>
                             </div>
@@ -1299,10 +1353,12 @@
                             </div>
                             
                             <p style="color: #f44336; font-size: 0.85rem; margin-top: 1rem; text-align: center;">(Continue on separate sheet if necessary)</p>
-                            
+                            </fieldset>
+                            {% if can_edit_pds %}
                             <div class="form-actions" style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--light-gray);">
                                 <button type="submit" class="btn-primary">Save Educational Background</button>
                             </div>
+                            {% endif %}
                         </form>
                     </div>
                 </div>
@@ -1318,7 +1374,7 @@
                     <div class="accordion-body">
                         <form method="POST" class="pds-form" id="civilServiceForm" action="{{ url_for('routes.employee_pds', id=emp.id) }}">
                             <input type="hidden" name="section" value="civil_service_eligibility">
-                            
+                            <fieldset class="pds-editable-block" style="border:none;margin:0;padding:0;min-width:0;" {% if not can_edit_pds %}disabled{% endif %}>
                             <div style="margin-bottom: 1rem;">
                                 <label style="font-weight: 600; font-size: 0.9rem;">27.</label>
                             </div>
@@ -1545,13 +1601,15 @@
                             </div>
                             
                             <p style="color: #f44336; font-size: 0.85rem; margin-top: 1rem; text-align: center;">(Continue on separate sheet if necessary)</p>
-                            
+                            </fieldset>
+                            {% if can_edit_pds %}
                             <div class="form-actions" id="civilServiceFormActions" style="margin-top: 1.5rem; padding: 0.75rem 0; border-top: 1px solid var(--light-gray); position: sticky; bottom: 0; background: white; z-index: 10; display: flex; gap: 0.75rem; justify-content: space-between; align-items: center;">
                                 <button type="button" class="btn-add-row" onclick="addCivilServiceRow()" id="addCivilServiceBtn" style="background: #4CAF50; color: white; border: none; padding: 0.5rem 0.9rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">
                                     + Add More Rows
                                 </button>
                                 <button type="submit" class="btn-primary">Save Civil Service Eligibility</button>
                             </div>
+                            {% endif %}
                         </form>
                     </div>
                 </div>
@@ -1567,7 +1625,7 @@
                     <div class="accordion-body">
                         <form method="POST" class="pds-form" id="workExperienceForm" action="{{ url_for('routes.employee_pds', id=emp.id) }}">
                             <input type="hidden" name="section" value="work_experience">
-                            
+                            <fieldset class="pds-editable-block" style="border:none;margin:0;padding:0;min-width:0;" {% if not can_edit_pds %}disabled{% endif %}>
                             <p style="font-size: 0.85rem; color: var(--medium-gray); margin-bottom: 1rem;">
                                 (Include private employment. Start from your recent work.) Description of duties should be indicated in the attached Work Experience Sheet.
                             </p>
@@ -1614,6 +1672,7 @@
                                                     <option value="Casual" {% if pds and pds.work_exp1_status_of_appointment == 'Casual' %}selected{% endif %}>Casual</option>
                                                     <option value="Contractual" {% if pds and pds.work_exp1_status_of_appointment == 'Contractual' %}selected{% endif %}>Contractual</option>
                                                     <option value="Coterminus" {% if pds and pds.work_exp1_status_of_appointment == 'Coterminus' %}selected{% endif %}>Coterminus</option>
+                                                    <option value="Designate" {% if pds and pds.work_exp1_status_of_appointment == 'Designate' %}selected{% endif %}>Designate</option>
                                                     <option value="Contract of Service" {% if pds and pds.work_exp1_status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                                                     <option value="Job Order" {% if pds and pds.work_exp1_status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
                                                     <option value="Elective" {% if pds and pds.work_exp1_status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
@@ -2387,13 +2446,15 @@
                             
                             <!-- Spacer so last Description of Duties isn't covered by sticky actions -->
                             <div style="height: 5.5rem;"></div>
-
+                            </fieldset>
+                            {% if can_edit_pds %}
                             <div class="form-actions" id="workExpFormActions" style="margin-top: 1.5rem; padding: 0.75rem 0; border-top: 1px solid var(--light-gray); position: sticky; bottom: 0; background: white; z-index: 10; display: flex; gap: 0.75rem; justify-content: space-between; align-items: center;">
                                 <button type="button" class="btn-add-row" onclick="addWorkExperienceRow()" id="addWorkExpBtn" style="background: #4CAF50; color: white; border: none; padding: 0.5rem 0.9rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">
                                     + Add More Rows
                                 </button>
                                 <button type="submit" class="btn-primary">Save Work Experience</button>
                             </div>
+                            {% endif %}
                         </form>
                     </div>
                 </div>
@@ -2409,7 +2470,7 @@
                     <div class="accordion-body">
                         <form method="POST" class="pds-form" id="voluntaryWorkForm" action="{{ url_for('routes.employee_pds', id=emp.id) }}">
                             <input type="hidden" name="section" value="voluntary_work">
-                            
+                            <fieldset class="pds-editable-block" style="border:none;margin:0;padding:0;min-width:0;" {% if not can_edit_pds %}disabled{% endif %}>
                             <div class="voluntary-work-table-container" style="overflow-x: auto;">
                                 <table class="voluntary-work-table" style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
                                     <thead>
@@ -2625,13 +2686,15 @@
                             </div>
                             
                             <p style="color: #f44336; font-size: 0.85rem; margin-top: 1rem; text-align: center;">(Continue on separate sheet if necessary)</p>
-                            
+                            </fieldset>
+                            {% if can_edit_pds %}
                             <div class="form-actions" id="voluntaryFormActions" style="margin-top: 1.5rem; padding: 0.75rem 0; border-top: 1px solid var(--light-gray); position: sticky; bottom: 0; background: white; z-index: 10; display: flex; gap: 0.75rem; justify-content: space-between; align-items: center;">
                                 <button type="button" class="btn-add-row" onclick="addVoluntaryWorkRow()" id="addVoluntaryBtn" style="background: #4CAF50; color: white; border: none; padding: 0.5rem 0.9rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">
                                     + Add More Rows
                                 </button>
                                 <button type="submit" class="btn-primary">Save Voluntary Work</button>
                             </div>
+                            {% endif %}
                         </form>
                     </div>
                 </div>
@@ -2647,7 +2710,7 @@
                     <div class="accordion-body">
                         <form method="POST" class="pds-form" id="learningDevelopmentForm" action="{{ url_for('routes.employee_pds', id=emp.id) }}">
                             <input type="hidden" name="section" value="learning_development">
-                            
+                            <fieldset class="pds-editable-block" style="border:none;margin:0;padding:0;min-width:0;" {% if not can_edit_pds %}disabled{% endif %}>
                             <div class="ld-table-container" style="overflow-x: auto;">
                                 <table class="ld-table" style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
                                     <thead>
@@ -3617,13 +3680,15 @@
                             </div>
                             
                             <p style="color: #f44336; font-size: 0.85rem; margin-top: 1rem; text-align: center;">(Continue on separate sheet if necessary)</p>
-                            
+                            </fieldset>
+                            {% if can_edit_pds %}
                             <div class="form-actions" id="ldFormActions" style="margin-top: 1.5rem; padding: 0.75rem 0; border-top: 1px solid var(--light-gray); position: sticky; bottom: 0; background: white; z-index: 10; display: flex; gap: 0.75rem; justify-content: space-between; align-items: center;">
                                 <button type="button" class="btn-add-row" onclick="addLDRow()" id="addLDBtn" style="background: #4CAF50; color: white; border: none; padding: 0.5rem 0.9rem; border-radius: 4px; cursor: pointer; font-size: 0.85rem;">
                                     + Add More Rows
                                 </button>
                                 <button type="submit" class="btn-primary">Save Learning and Development</button>
                             </div>
+                            {% endif %}
                         </form>
                     </div>
                 </div>
@@ -3639,7 +3704,7 @@
                     <div class="accordion-body">
                         <form method="POST" class="pds-form" id="otherInformationForm" action="{{ url_for('routes.employee_pds', id=emp.id) }}">
                             <input type="hidden" name="section" value="other_information">
-                            
+                            <fieldset class="pds-editable-block" style="border:none;margin:0;padding:0;min-width:0;" {% if not can_edit_pds %}disabled{% endif %}>
                             <div class="other-info-table-container" style="overflow-x: auto;">
                                 <table class="other-info-table" style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
                                     <thead>
@@ -4207,10 +4272,12 @@
                             
                             <!-- Spacer so last content isn't covered by sticky bar -->
                             <div style="height: 5.5rem;"></div>
-                            
+                            </fieldset>
+                            {% if can_edit_pds %}
                             <div class="form-actions" id="otherInfoFormActions" style="margin-top: 1.5rem; padding: 0.75rem 0; border-top: 1px solid var(--light-gray); position: sticky; bottom: 0; background: white; z-index: 10;">
                                 <button type="submit" class="btn-primary">Save Other Information</button>
                             </div>
+                            {% endif %}
                         </form>
                     </div>
                 </div>
@@ -5227,6 +5294,8 @@ function toggleExtraRows(level) {
     const btnText = document.getElementById(level + '_btn_text');
     const levelRow = document.querySelector('.education-level-row[data-level="' + level + '"]');
     const levelCell = levelRow ? levelRow.querySelector('td[style*="rowspan"]') : null;
+    const controlRow = document.querySelector('.education-control-row[data-level="' + level + '"]');
+    const accordionContent = controlRow ? controlRow.closest('.accordion-content') : null;
     
     let allHidden = true;
     extraRows.forEach(function(row) {
@@ -5257,6 +5326,13 @@ function toggleExtraRows(level) {
         if (levelCell) {
             levelCell.setAttribute('rowspan', '1');
         }
+    }
+    
+    // Re-expand accordion content so control row and Save button stay visible (desktop & mobile)
+    if (accordionContent && accordionContent.closest('.accordion-item').classList.contains('active')) {
+        requestAnimationFrame(function() {
+            accordionContent.style.maxHeight = accordionContent.scrollHeight + 'px';
+        });
     }
 }
 </script>

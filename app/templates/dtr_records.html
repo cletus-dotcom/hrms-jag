@@ -1,0 +1,306 @@
+{% extends "base.html" %}
+
+{% block title %}DTR Records - HRMS{% endblock %}
+
+{% block extra_css %}
+<style>
+  .dtr-records-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  .dtr-records-table th,
+  .dtr-records-table td {
+    border: 1px solid #111827;
+    padding: 0.45rem 0.5rem;
+    vertical-align: middle;
+  }
+  .dtr-records-table thead th { background: #f3f4f6; font-weight: 600; text-align: center; }
+  .dtr-records-table tbody td { text-align: center; }
+  .dtr-records-table tbody td:first-child { font-weight: 600; width: 3rem; }
+  .dtr-records-table tbody td:nth-child(7) { text-align: left; }
+
+  .dtr-mini-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+  }
+  .dtr-mini-stat {
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 0.8rem 1.15rem;
+    min-width: 8.5rem;
+    text-align: center;
+    background: #fafafa;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .dtr-mini-stat-label {
+    font-size: 0.85rem;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    line-height: 1.2;
+  }
+  .dtr-mini-stat-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    line-height: 1.15;
+    margin-top: 0.2rem;
+  }
+  .dtr-mini-stat--warning { border-left: 3px solid #f59e0b; }
+  .dtr-mini-stat--danger { border-left: 3px solid #ef4444; }
+  .dtr-mini-stat--neutral { border-left: 3px solid #9ca3af; }
+
+  .dtr-filter-top {
+    display: grid;
+    grid-template-columns: minmax(220px, 1fr) minmax(480px, 3fr);
+    gap: 4rem;
+    align-items: start;
+  }
+  .dtr-filter-left {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    max-width: 280px;
+  }
+  .dtr-filter-right {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .dtr-filter-search label,
+  .dtr-filter-employee-row label,
+  .dtr-filter-strip label {
+    margin-bottom: 0.35rem;
+    display: block;
+  }
+  .dtr-filter-strip {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(100px, 1fr));
+    gap: 0.65rem;
+    align-items: end;
+  }
+  .dtr-filter-strip > div {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .dtr-filter-employee-row { margin-top: 0; }
+  .dtr-filter-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.85rem;
+  }
+  @media (max-width: 900px) {
+    .dtr-filter-top {
+      grid-template-columns: 1fr;
+    }
+    .dtr-filter-strip {
+      grid-template-columns: repeat(2, minmax(100px, 1fr));
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+  <div class="header-bar">
+    <div class="header-content">
+      <span class="logo-text">HRMS</span>
+      <nav class="main-nav">
+        <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+        <div class="nav-dropdown">
+          <a href="#" class="nav-link nav-link-active">Daily Time Records <span class="dropdown-arrow">▼</span></a>
+          <div class="dropdown-menu">
+            <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
+          </div>
+        </div>
+      </nav>
+      <div class="user-dropdown">
+        <a href="#" class="user-info">
+          {% if employee %}{{ employee.full_name }}{% else %}{{ current_user.username }}{% endif %} ({{ current_user.role|title }})
+          <span class="dropdown-arrow">▼</span>
+        </a>
+        <div class="dropdown-menu dropdown-menu-right">
+          <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
+          <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
+            <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dashboard-content">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} alert-dismissible">
+            <span>{{ message }}</span>
+            <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="page-header" style="display:flex; justify-content: space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap;">
+      <div>
+        <h1 class="page-title" style="margin:0;">Daily Time Records</h1>
+        <p style="margin:0.25rem 0 0; color: var(--medium-gray, #666); font-size: 0.9rem;">
+          Period: {{ start_d.strftime('%b %d, %Y') }} to {{ end_d.strftime('%b %d, %Y') }}
+        </p>
+      </div>
+    </div>
+
+    <div class="card" style="padding: 1rem 1.25rem; margin-bottom: 1rem;">
+      <form method="GET" action="{{ url_for('routes.dtr_records') }}" id="dtrRecordsFilterForm">
+        <div class="dtr-filter-top">
+          <div class="dtr-filter-left">
+            <div class="dtr-filter-search">
+              <label for="dtrEmployeeSearch">Search employees</label>
+              <input type="search" id="dtrEmployeeSearch" class="form-control" placeholder="Name or employee ID..." autocomplete="off" enterkeyhint="search">
+            </div>
+            <div class="dtr-filter-employee-row">
+              <label for="dtrEmployeeSelect">Employee</label>
+              <select name="employee_id" id="dtrEmployeeSelect" class="form-control">
+                {% for emp in employees %}
+                  <option value="{{ emp.id }}" {% if selected_employee and selected_employee.id == emp.id %}selected{% endif %}>
+                    {{ emp.last_name }}, {{ emp.first_name }} ({{ emp.employee_id }})
+                  </option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <div class="dtr-filter-right">
+            <div class="dtr-filter-strip">
+              <div>
+                <label for="dtrModeSelect">Mode</label>
+                <select name="mode" id="dtrModeSelect" class="form-control">
+                  <option value="month" {% if mode == 'month' %}selected{% endif %}>Month</option>
+                  <option value="quincena" {% if mode == 'quincena' %}selected{% endif %}>Quincena</option>
+                </select>
+              </div>
+              <div>
+                <label>Month</label>
+                <select name="month" class="form-control">
+                  <option value="1" {% if month == 1 %}selected{% endif %}>January</option>
+                  <option value="2" {% if month == 2 %}selected{% endif %}>February</option>
+                  <option value="3" {% if month == 3 %}selected{% endif %}>March</option>
+                  <option value="4" {% if month == 4 %}selected{% endif %}>April</option>
+                  <option value="5" {% if month == 5 %}selected{% endif %}>May</option>
+                  <option value="6" {% if month == 6 %}selected{% endif %}>June</option>
+                  <option value="7" {% if month == 7 %}selected{% endif %}>July</option>
+                  <option value="8" {% if month == 8 %}selected{% endif %}>August</option>
+                  <option value="9" {% if month == 9 %}selected{% endif %}>September</option>
+                  <option value="10" {% if month == 10 %}selected{% endif %}>October</option>
+                  <option value="11" {% if month == 11 %}selected{% endif %}>November</option>
+                  <option value="12" {% if month == 12 %}selected{% endif %}>December</option>
+                </select>
+              </div>
+              <div>
+                <label>Quincena</label>
+                <select name="quincena" class="form-control">
+                  <option value="1" {% if quincena == '1' %}selected{% endif %}>1st (1-15)</option>
+                  <option value="2" {% if quincena == '2' %}selected{% endif %}>2nd (16-end)</option>
+                </select>
+              </div>
+              <div>
+                <label>Year</label>
+                <input type="number" min="2000" max="2100" name="year" value="{{ year }}" class="form-control">
+              </div>
+            </div>
+            <div class="dtr-filter-actions">
+              <button type="submit" class="btn-primary">Load DTR</button>
+              <div class="dtr-mini-stats">
+                <div class="dtr-mini-stat dtr-mini-stat--warning">
+                  <div class="dtr-mini-stat-label">Lates</div>
+                  <div class="dtr-mini-stat-value">{{ summary.lates }}</div>
+                </div>
+                <div class="dtr-mini-stat dtr-mini-stat--danger">
+                  <div class="dtr-mini-stat-label">Undertimes</div>
+                  <div class="dtr-mini-stat-value">{{ summary.undertimes }}</div>
+                </div>
+                <div class="dtr-mini-stat dtr-mini-stat--neutral">
+                  <div class="dtr-mini-stat-label">Absences</div>
+                  <div class="dtr-mini-stat-value">{{ summary.absences }}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <div class="card" style="padding: 1rem 1.25rem;">
+      <div class="table-container">
+        <table class="dtr-records-table">
+          <thead>
+            <tr>
+              <th>Day</th>
+              <th>AM In</th>
+              <th>AM Out</th>
+              <th>PM In</th>
+              <th>PM Out</th>
+              <th>Late/Undertime (H/M)</th>
+              <th>Remarks</th>
+              <th>Flags</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+            <tr>
+              <td>{{ r.date.day }}</td>
+              <td>{{ r.am_in.strftime('%I:%M %p') if r.am_in else '' }}</td>
+              <td>{{ r.am_out.strftime('%I:%M %p') if r.am_out else '' }}</td>
+              <td>{{ r.pm_in.strftime('%I:%M %p') if r.pm_in else '' }}</td>
+              <td>{{ r.pm_out.strftime('%I:%M %p') if r.pm_out else '' }}</td>
+              <td>{{ r.undertime }}</td>
+              <td>{{ r.remarks }}</td>
+              <td>
+                {% if r.late %}<span class="status-badge status-pending">Late</span>{% endif %}
+                {% if r.undertime_flag %}<span class="status-badge status-pending">Undertime</span>{% endif %}
+                {% if r.absent %}<span class="status-badge status-rejected">Absent</span>{% endif %}
+                {% if r.has_justification %}<span class="status-badge status-approved">With Justification</span>{% endif %}
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="8" class="no-data">No DTR records for selected period.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  document.addEventListener('DOMContentLoaded', function () {
+    var search = document.getElementById('dtrEmployeeSearch');
+    var sel = document.getElementById('dtrEmployeeSelect');
+    if (!search || !sel) return;
+
+    function applyEmployeeFilter() {
+      var q = (search.value || '').trim().toLowerCase();
+      var opts = Array.prototype.slice.call(sel.querySelectorAll('option'));
+      var visible = [];
+      opts.forEach(function (opt) {
+        var t = (opt.textContent || '').toLowerCase();
+        var ok = !q || t.indexOf(q) !== -1;
+        opt.hidden = !ok;
+        if (ok) visible.push(opt);
+      });
+      if (q && visible.length === 0) {
+        opts.forEach(function (opt) { opt.hidden = false; });
+        return;
+      }
+      if (sel.selectedOptions.length && sel.selectedOptions[0].hidden && visible.length) {
+        sel.value = visible[0].value;
+      }
+    }
+
+    search.addEventListener('input', applyEmployeeFilter);
+    search.addEventListener('search', applyEmployeeFilter);
+  });
+})();
+</script>
+{% endblock %}

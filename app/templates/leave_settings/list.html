@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+
+{% block title %}Leave Settings - HRMS{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="header-bar">
+        <div class="header-content">
+            <span class="logo-text">HRMS</span>
+            <nav class="main-nav">
+                <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+                {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Settings <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
+                        <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
+                        <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
+                    </div>
+                </div>
+                {% endif %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Employee Management <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Employees</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link nav-link-active">Leave Management <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+                        <a href="{{ url_for('routes.leave_settings_list') }}" class="dropdown-item">Leave Settings</a>
+                        <a href="{{ url_for('routes.leave_credits_list') }}" class="dropdown-item">Leave Credits</a>
+                        <hr class="dropdown-separator">
+                        {% endif %}
+                        <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply for Leave</a>
+                        <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
+                        {% if (current_user.role or '')|lower == 'manager' %}
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.leave_approvals') }}" class="dropdown-item">Leave Approvals</a>
+                        {% endif %}
+                    </div>
+                </div>
+                <a href="#" class="nav-link">Reports</a>
+            </nav>
+            <div class="user-dropdown">
+                <a href="#" class="user-info">
+                    {% if employee %}
+                        {{ employee.full_name }} ({{ current_user.role|title }})
+                    {% else %}
+                        {{ current_user.username }} ({{ current_user.role|title }})
+                    {% endif %}
+                    <span class="dropdown-arrow">▼</span>
+                </a>
+                <div class="dropdown-menu dropdown-menu-right">
+                    <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
+                    <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
+                        <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="dashboard-content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible">
+                        <span>{{ message }}</span>
+                        <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
+            <h1 class="page-title" style="margin: 0; font-size: 1.5rem;">Leave Settings</h1>
+            <button type="button" class="btn-primary" id="btnAddLeaveType">+ Add Leave Type</button>
+        </div>
+
+        <div class="table-section">
+            <div class="search-bar" style="margin-bottom: 1rem;">
+                <input type="text" id="searchLeaveType" class="search-input" placeholder="Search by code, name or description...">
+                <span class="search-icon">🔍</span>
+            </div>
+            <div class="table-container">
+                <table class="data-table" id="leaveTypeTable">
+                    <thead>
+                        <tr>
+                            <th>Code</th>
+                            <th>Name</th>
+                            <th>Description</th>
+                            <th>Active</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="leaveTypeTableBody">
+                        {% for lt in leave_types %}
+                        <tr class="table-row" data-id="{{ lt.id }}" data-search="{{ (lt.code or '')|lower }} {{ (lt.name or '')|lower }} {{ (lt.description or '')|lower }}">
+                            <td>{{ lt.code }}</td>
+                            <td>{{ lt.name }}</td>
+                            <td>{{ lt.description or '—' }}</td>
+                            <td>
+                                {% if lt.is_active %}
+                                    <span class="status-badge status-approved">Yes</span>
+                                {% else %}
+                                    <span class="status-badge status-rejected">No</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <button type="button" class="btn-action btn-edit-leave-type" data-id="{{ lt.id }}" data-code="{{ lt.code }}" data-name="{{ lt.name }}" data-description="{{ lt.description or '' }}" data-active="{{ '1' if lt.is_active else '0' }}">Edit</button>
+                                <form method="POST" action="{{ url_for('routes.leave_type_delete', id=lt.id) }}" style="display: inline;" onsubmit="return confirm('Delete this leave type?');">
+                                    <button type="submit" class="btn-action" style="color: #c62828;">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="5" class="no-data">No leave types yet. Click "+ Add Leave Type" to add one.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add / Edit Modal -->
+<div id="leaveTypeModal" class="modal-overlay" style="display: none;">
+    <div class="modal-dialog" style="max-width: 480px;">
+        <div class="modal-header">
+            <h2 class="modal-title" id="leaveTypeModalTitle">Add Leave Type</h2>
+            <button type="button" class="modal-close" id="leaveTypeModalClose">&times;</button>
+        </div>
+        <form id="leaveTypeForm" method="POST" action="{{ url_for('routes.leave_type_add') }}">
+            <input type="hidden" name="id" id="leaveTypeId" value="">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="leaveTypeCode">Code <span style="color: #c62828;">*</span></label>
+                    <input type="text" id="leaveTypeCode" name="code" class="form-control" required maxlength="20" placeholder="e.g. VL, SL">
+                </div>
+                <div class="form-group">
+                    <label for="leaveTypeName">Name <span style="color: #c62828;">*</span></label>
+                    <input type="text" id="leaveTypeName" name="name" class="form-control" required maxlength="100" placeholder="e.g. Vacation Leave">
+                </div>
+                <div class="form-group">
+                    <label for="leaveTypeDescription">Description</label>
+                    <textarea id="leaveTypeDescription" name="description" class="form-control" rows="2" placeholder="Optional"></textarea>
+                </div>
+                <div class="form-group">
+                    <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                        <input type="checkbox" id="leaveTypeActive" name="is_active" checked>
+                        <span>Active</span>
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 0.5rem; padding: 1rem; border-top: 1px solid var(--light-gray, #eee);">
+                <button type="button" class="btn-secondary" id="leaveTypeModalCancel">Cancel</button>
+                <button type="submit" class="btn-primary">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+.modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.45); z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+.modal-dialog { background: #fff; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); width: 100%; max-width: 480px; }
+.modal-header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.25rem; border-bottom: 1px solid #eee; }
+.modal-title { margin: 0; font-size: 1.2rem; }
+.modal-close { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #666; line-height: 1; padding: 0 0.25rem; }
+.modal-body { padding: 1.25rem; }
+.search-bar { position: relative; }
+.search-bar .search-input { width: 100%; max-width: 320px; padding: 0.5rem 1rem 0.5rem 2.25rem; border: 1px solid #ccc; border-radius: 6px; font-size: 0.95rem; }
+.search-bar .search-icon { position: absolute; left: 0.75rem; top: 50%; transform: translateY(-50%); pointer-events: none; opacity: 0.7; }
+</style>
+
+<script>
+(function() {
+    var modal = document.getElementById('leaveTypeModal');
+    var form = document.getElementById('leaveTypeForm');
+    var titleEl = document.getElementById('leaveTypeModalTitle');
+    var idInput = document.getElementById('leaveTypeId');
+    var codeInput = document.getElementById('leaveTypeCode');
+    var nameInput = document.getElementById('leaveTypeName');
+    var descInput = document.getElementById('leaveTypeDescription');
+    var activeInput = document.getElementById('leaveTypeActive');
+
+    function openAdd() {
+        titleEl.textContent = 'Add Leave Type';
+        form.action = '{{ url_for("routes.leave_type_add") }}';
+        form.method = 'POST';
+        idInput.value = '';
+        codeInput.value = '';
+        codeInput.removeAttribute('readonly');
+        nameInput.value = '';
+        descInput.value = '';
+        activeInput.checked = true;
+        modal.style.display = 'flex';
+    }
+
+    function openEdit(id, code, name, description, active) {
+        titleEl.textContent = 'Edit Leave Type';
+        form.action = '{{ url_for("routes.leave_type_edit", id=0) }}'.replace('/0', '/' + id);
+        form.method = 'POST';
+        idInput.value = id;
+        codeInput.value = code || '';
+        codeInput.setAttribute('readonly', 'readonly');
+        nameInput.value = name || '';
+        descInput.value = description || '';
+        activeInput.checked = active === '1';
+        modal.style.display = 'flex';
+    }
+
+    function closeModal() {
+        modal.style.display = 'none';
+    }
+
+    document.getElementById('btnAddLeaveType').addEventListener('click', openAdd);
+    document.getElementById('leaveTypeModalClose').addEventListener('click', closeModal);
+    document.getElementById('leaveTypeModalCancel').addEventListener('click', closeModal);
+    modal.addEventListener('click', function(e) {
+        if (e.target === modal) closeModal();
+    });
+
+    document.querySelectorAll('.btn-edit-leave-type').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            openEdit(
+                this.getAttribute('data-id'),
+                this.getAttribute('data-code'),
+                this.getAttribute('data-name'),
+                this.getAttribute('data-description'),
+                this.getAttribute('data-active')
+            );
+        });
+    });
+
+    // Search
+    var searchInput = document.getElementById('searchLeaveType');
+    var rows = document.querySelectorAll('#leaveTypeTableBody .table-row');
+    searchInput.addEventListener('input', function() {
+        var q = (this.value || '').trim().toLowerCase();
+        rows.forEach(function(tr) {
+            var text = (tr.getAttribute('data-search') || '').toLowerCase();
+            tr.style.display = !q || text.indexOf(q) !== -1 ? '' : 'none';
+        });
+    });
+})();
+</script>
+{% endblock %}

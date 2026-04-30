@@ -9,6 +9,7 @@
             <span class="logo-text">HRMS</span>
             <nav class="main-nav">
                 <a href="{{ url_for('routes.dashboard') }}" class="nav-link active">Dashboard</a>
+                {% if (current_user.role or '')|lower in ('admin', 'hr') %}
                 <div class="nav-dropdown">
                     <a href="#" class="nav-link">Settings <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">
@@ -16,9 +17,12 @@
                         <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
                         <hr class="dropdown-separator">
                         <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
-                        <a href="#" class="dropdown-item">Salary Grade</a>
+                        <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
                     </div>
                 </div>
+                {% endif %}
                 <div class="nav-dropdown">
                     <a href="#" class="nav-link">Employee Management <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">
@@ -26,9 +30,36 @@
                     </div>
                 </div>
                 <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Attendance <span class="dropdown-arrow">▼</span></a>
+                    <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
+                        <a href="{{ url_for('routes.payroll_summary') }}" class="dropdown-item">Payroll Summary Report</a>
+                        <a href="{{ url_for('routes.payroll_submissions') }}" class="dropdown-item">Submitted Payroll History</a>
+                        <a href="{{ url_for('routes.dtr_justifications') }}" class="dropdown-item">DTR Justifications</a>
+                        {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+                        <button type="button" class="dropdown-item" onclick="document.getElementById('generateDtrModal').style.display='flex'">Generate DTR</button>
+                        <form method="POST" action="{{ url_for('routes.dtr_recompute') }}" style="margin:0;">
+                          <button type="submit" class="dropdown-item" style="width:100%; text-align:left; background:none; border:none; cursor:pointer; font:inherit; padding:0.5rem 1rem;">Recompute DTR Late/Undertime</button>
+                        </form>
+                        {% endif %}
+                    </div>
                 </div>
-                <a href="#" class="nav-link">Leave Requests</a>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Leave Management <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+                        <a href="{{ url_for('routes.leave_settings_list') }}" class="dropdown-item">Leave Settings</a>
+                        <a href="{{ url_for('routes.leave_credits_list') }}" class="dropdown-item">Leave Credits</a>
+                        <hr class="dropdown-separator">
+                        {% endif %}
+                        <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply for Leave</a>
+                        <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
+                        {% if (current_user.role or '')|lower in ('manager', 'admin') %}
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.leave_approvals') }}" class="dropdown-item">Leave Approvals</a>
+                        {% endif %}
+                    </div>
+                </div>
                 <a href="#" class="nav-link">Reports</a>
             </nav>
             <div class="user-dropdown">
@@ -41,7 +72,10 @@
                     <span class="dropdown-arrow">▼</span>
                 </a>
                 <div class="dropdown-menu dropdown-menu-right">
-                    <a href="{{ url_for('routes.logout') }}" class="dropdown-item">Logout</a>
+                    <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
+                    <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
+                    <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
+                </form>
                 </div>
             </div>
         </div>
@@ -67,25 +101,38 @@
         </div>
         
         <div class="stats-grid">
-            <div class="stat-card">
+            <a href="{{ url_for('routes.employees_list') }}" class="stat-card stat-card-link">
                 <div class="stat-label">Total Employees</div>
                 <div class="stat-value">{{ total_employees }}</div>
-            </div>
+            </a>
             
-            <div class="stat-card stat-card-active">
+            <a href="{{ url_for('routes.users_list') }}" class="stat-card stat-card-active stat-card-link">
                 <div class="stat-label">Active Users</div>
                 <div class="stat-value">{{ total_users }}</div>
-            </div>
+            </a>
             
+            {% if (current_user.role or '')|lower in ('manager', 'admin') %}
+            <a href="{{ url_for('routes.leave_approvals') }}" class="stat-card stat-card-warning stat-card-link">
+                <div class="stat-label">Pending Approvals</div>
+                <div class="stat-value">{{ pending_approvals if pending_approvals is not none else pending_leaves }}</div>
+            </a>
+            {% else %}
             <div class="stat-card stat-card-warning">
                 <div class="stat-label">Pending Leaves</div>
                 <div class="stat-value">{{ pending_leaves }}</div>
             </div>
+            {% endif %}
             
             <div class="stat-card stat-card-danger">
                 <div class="stat-label">On Leave Today</div>
                 <div class="stat-value">{{ on_leave_today }}</div>
             </div>
+            
+            <a href="{{ url_for('routes.status_of_appointment_list') }}" class="stat-card stat-card-pastel stat-card-link">
+                <div class="stat-label">Step Increment Due</div>
+                <div class="stat-value">{{ step_increment_due_count }}</div>
+                <div class="stat-sublabel">within 15 days</div>
+            </a>
         </div>
         
         <div class="recent-section">
@@ -118,7 +165,7 @@
                                     </span>
                                 </td>
                                 <td>
-                                    <a href="#" class="btn-action">View</a>
+                                    <a href="{{ url_for('routes.leave_detail', id=leave.id) }}" class="btn-action">View</a>
                                 </td>
                             </tr>
                             {% endfor %}
@@ -133,4 +180,109 @@
         </div>
     </div>
 </div>
+{% if (current_user.role or '')|lower in ('admin', 'hr') %}
+<div id="generateDtrModal" class="change-password-modal-overlay" style="display:none;">
+  <div class="change-password-modal-dialog" style="max-width: 560px;">
+    <div class="change-password-modal-header">
+      <h2 class="change-password-modal-title">Generate DTR</h2>
+      <button type="button" class="change-password-modal-close" onclick="document.getElementById('generateDtrModal').style.display='none'">&times;</button>
+    </div>
+    <form method="POST" action="{{ url_for('routes.dtr_generate') }}">
+      <div class="change-password-modal-body">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Generation Type</label>
+            <select name="mode" id="dtrMode" class="form-control" onchange="(function(){const q=document.getElementById('quincenaWrap'); q.style.display=(document.getElementById('dtrMode').value==='quincena'?'block':'none');})()">
+              <option value="quincena">Quincena (JO/COS)</option>
+              <option value="month">Month (Regular)</option>
+            </select>
+          </div>
+          <div class="form-group" id="quincenaWrap">
+            <label>Quincena</label>
+            <select name="quincena" class="form-control">
+              <option value="1">1st Quincena (1-15)</option>
+              <option value="2">2nd Quincena (16-31)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Month</label>
+            <select name="month" id="dtrGenMonth" class="form-control" required>
+              <option value="1">January</option>
+              <option value="2">February</option>
+              <option value="3">March</option>
+              <option value="4">April</option>
+              <option value="5">May</option>
+              <option value="6">June</option>
+              <option value="7">July</option>
+              <option value="8">August</option>
+              <option value="9">September</option>
+              <option value="10">October</option>
+              <option value="11">November</option>
+              <option value="12">December</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Year</label>
+            <input type="number" min="2000" max="2100" name="year" id="dtrGenYear" class="form-control" required>
+          </div>
+          <div class="form-group" style="grid-column: 1 / -1; margin-top: 0.5rem;">
+            <label style="font-weight: 700;">Compressed Workweek Settings (optional)</label>
+            <div style="font-size: 0.85rem; color: #6b7280;">
+              5-day: 8:00 / 12:00 / 13:00 / 17:00, 4-day: 7:00 / 12:00 / 13:00 / 18:00
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Model</label>
+            <select name="arrangement_model" class="form-control">
+              <option value="">-- No change --</option>
+              <option value="5day">5-day compressed</option>
+              <option value="4day">4-day compressed</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Applies To</label>
+            <select name="arrangement_applies_to" class="form-control">
+              <option value="all">All employees</option>
+              <option value="regular">Regular only</option>
+              <option value="jo_cos">JO/COS only</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Start Date</label>
+            <input type="date" name="arrangement_start_date" class="form-control">
+          </div>
+          <div class="form-group">
+            <label>End Date</label>
+            <input type="date" name="arrangement_end_date" class="form-control">
+          </div>
+        </div>
+      </div>
+      <div class="change-password-modal-footer">
+        <button type="button" class="btn-secondary" onclick="document.getElementById('generateDtrModal').style.display='none'">Cancel</button>
+        <button type="submit" class="btn-primary">Generate</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  var modal = document.getElementById('generateDtrModal');
+  var monthEl = document.getElementById('dtrGenMonth');
+  var yearEl = document.getElementById('dtrGenYear');
+  if (monthEl && yearEl) {
+    var now = new Date();
+    monthEl.value = String(now.getMonth() + 1);
+    yearEl.value = String(now.getFullYear());
+  }
+  if (modal) {
+    modal.addEventListener('click', function (e) {
+      if (e.target === modal) modal.style.display = 'none';
+    });
+  }
+});
+</script>
 {% endblock %}

@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Payroll Summary - HRMS{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+  <div class="dashboard-content">
+    <div class="page-header" style="display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap;">
+      <h1 class="page-title" style="margin:0;">Payroll Summary</h1>
+      <div style="display:flex; gap:0.5rem;">
+        <a href="{{ url_for('routes.payroll_submissions') }}" class="btn-secondary">Submitted History</a>
+        <a href="{{ url_for('routes.dashboard') }}" class="btn-secondary">Back</a>
+      </div>
+    </div>
+
+    <div class="card" style="padding:1rem 1.25rem; margin-bottom:1rem;">
+      <form method="GET" style="display:grid; grid-template-columns:repeat(4, minmax(120px, 1fr)); gap:0.75rem; align-items:end;">
+        <div>
+          <label>Mode</label>
+          <select name="mode" class="form-control">
+            <option value="quincena" {% if mode == 'quincena' %}selected{% endif %}>Quincena</option>
+            <option value="month" {% if mode == 'month' %}selected{% endif %}>Month</option>
+          </select>
+        </div>
+        <div>
+          <label>Month</label>
+          <input type="number" min="1" max="12" name="month" class="form-control" value="{{ month }}">
+        </div>
+        <div>
+          <label>Year</label>
+          <input type="number" min="2000" max="2100" name="year" class="form-control" value="{{ year }}">
+        </div>
+        <div>
+          <label>Quincena</label>
+          <select name="quincena" class="form-control">
+            <option value="1" {% if quincena == '1' %}selected{% endif %}>1st</option>
+            <option value="2" {% if quincena == '2' %}selected{% endif %}>2nd</option>
+          </select>
+        </div>
+        <div style="grid-column:1 / -1;">
+          <button class="btn-primary" type="submit">Generate List</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card" style="padding:1rem 1.25rem;">
+      <div class="table-container">
+        <div style="display:flex; gap:0.5rem; margin-bottom:0.75rem;">
+          <a class="btn-secondary" href="{{ url_for('routes.payroll_summary_export', mode=mode, month=month, year=year, quincena=quincena, format='csv') }}">Export CSV</a>
+          <a class="btn-secondary" href="{{ url_for('routes.payroll_summary_export', mode=mode, month=month, year=year, quincena=quincena, format='pdf') }}">Export PDF</a>
+          <button class="btn-secondary" type="button" onclick="window.print()">Print</button>
+        </div>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Employee</th>
+              <th>Work Hours (HH:MM)</th>
+              <th>Late/Undertime (HH:MM)</th>
+              <th>Approved Leave Days</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+            <tr>
+              <td>{{ r.employee_name }} ({{ r.employee_code }})</td>
+              <td>{{ r.work_hours }}</td>
+              <td>{{ r.late_under }}</td>
+              <td>{{ r.leave_days }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="no-data">No rows found.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <form method="POST" action="{{ url_for('routes.payroll_summary_submit') }}" style="margin-top:1rem;">
+        <input type="hidden" name="mode" value="{{ mode }}">
+        <input type="hidden" name="month" value="{{ month }}">
+        <input type="hidden" name="year" value="{{ year }}">
+        <input type="hidden" name="quincena" value="{{ quincena }}">
+        <input type="hidden" name="summary_json" value='{{ rows|tojson }}'>
+        <button class="btn-primary" type="submit">Submit Payroll to Accounting Office</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

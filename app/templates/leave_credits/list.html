@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+
+{% block title %}Leave Credits - HRMS{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="header-bar">
+        <div class="header-content">
+            <span class="logo-text">HRMS</span>
+            <nav class="main-nav">
+                <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+                {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Settings <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
+                        <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
+                        <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
+                    </div>
+                </div>
+                {% endif %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Employee Management <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Employees</a>
+                    </div>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
+                </div>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link nav-link-active">Leave Management <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+                        <a href="{{ url_for('routes.leave_settings_list') }}" class="dropdown-item">Leave Settings</a>
+                        <a href="{{ url_for('routes.leave_credits_list') }}" class="dropdown-item">Leave Credits</a>
+                        <hr class="dropdown-separator">
+                        {% endif %}
+                        <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply for Leave</a>
+                        <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
+                        {% if (current_user.role or '')|lower == 'manager' %}
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.leave_approvals') }}" class="dropdown-item">Leave Approvals</a>
+                        {% endif %}
+                    </div>
+                </div>
+                <a href="#" class="nav-link">Reports</a>
+            </nav>
+            <div class="user-dropdown">
+                <a href="#" class="user-info">
+                    {% if employee %}
+                        {{ employee.full_name }} ({{ current_user.role|title }})
+                    {% else %}
+                        {{ current_user.username }} ({{ current_user.role|title }})
+                    {% endif %}
+                    <span class="dropdown-arrow">▼</span>
+                </a>
+                <div class="dropdown-menu dropdown-menu-right">
+                    <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
+                    <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
+                        <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="dashboard-content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible">
+                        <span>{{ message }}</span>
+                        <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="page-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
+            <h1 class="page-title" style="margin: 0; font-size: 1.5rem;">Leave Credits</h1>
+            <form method="POST" action="{{ url_for('routes.leave_credits_run_accrual') }}" class="leave-accrual-form"
+                  style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.5rem 0.75rem; max-width: 100%;"
+                  onsubmit="return confirm('Run accrual for the selected month? This posts VL/SL (and in January: Jan 1 SPL/WL; in December: year-end SPL/WL lapse). Existing rows with the same particulars/date are skipped.');">
+                <div style="display: flex; flex-direction: column; gap: 0.2rem;">
+                    <label for="accrual_year" style="font-size: 0.75rem; color: var(--medium-gray, #666);">Year (optional)</label>
+                    <input type="number" id="accrual_year" name="accrual_year" class="search-input" min="2000" max="2100" step="1" placeholder="e.g. 2026" style="width: 12rem; min-width: 10rem; min-height: 2.25rem;">
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 0.2rem;">
+                    <label for="accrual_month" style="font-size: 0.75rem; color: var(--medium-gray, #666);">Month 1–12 (optional)</label>
+                    <input type="number" id="accrual_month" name="accrual_month" class="search-input" min="1" max="12" step="1" placeholder="e.g. 4" style="width: 10rem; min-width: 8rem; min-height: 2.25rem;">
+                </div>
+                <button type="submit" class="btn-primary" style="white-space: nowrap;">Run accrual</button>
+            </form>
+        </div>
+        <p style="margin: -0.75rem 0 1.25rem; font-size: 0.8rem; color: var(--medium-gray, #666); max-width: 46rem;">
+            Leave year and month blank to accrue the <strong>previous calendar month</strong> for all eligible employees (same list as below). VL/SL rows use the last day of that month. <strong>January</strong> accrual also posts Jan 1 grants of 3 SPL and 5 WL (for anyone appointed before that Jan 1; Jan 1 hires get those only via the appointment ledger row). <strong>December</strong> accrual posts Dec 31 rows to zero out unused SPL/WL. New SPL/WL on appointment are recorded when an eligible employee is saved with an appointment date.
+        </p>
+
+        <div class="table-section">
+            <div class="search-bar" style="margin-bottom: 1rem;">
+                <input type="text" id="searchLeaveCredits" class="search-input" placeholder="Search by employee ID, name, or status of appointment...">
+                <span class="search-icon">🔍</span>
+            </div>
+            <div class="table-container">
+                <table class="data-table" id="leaveCreditsTable">
+                    <thead>
+                        <tr>
+                            <th>Employee ID</th>
+                            <th>Name</th>
+                            <th>Status of Appointment</th>
+                            <th>Department</th>
+                        </tr>
+                    </thead>
+                    <tbody id="leaveCreditsTableBody">
+                        {% for emp in employees %}
+                        <tr class="table-row"
+                            data-href="{{ url_for('routes.leave_credits_card', id=emp.id) }}"
+                            data-search="{{ emp.employee_id|lower }} {{ emp.full_name|lower }} {{ (emp.status_of_appointment or '')|lower }} {{ (emp.department.name if emp.department else '')|lower }}">
+                            <td>{{ emp.employee_id }}</td>
+                            <td>{{ emp.full_name }}</td>
+                            <td>{{ emp.status_of_appointment or '—' }}</td>
+                            <td>{{ emp.department.name if emp.department else '—' }}</td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="4" class="no-data">No employees found with status Permanent, Casual, Temporary, or Elective.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <p style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--medium-gray, #666);">
+                Click a row to open the employee's leave card.
+            </p>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    var rows = document.querySelectorAll('#leaveCreditsTableBody .table-row');
+    rows.forEach(function(tr) {
+        tr.style.cursor = 'pointer';
+        tr.addEventListener('click', function() {
+            var href = this.getAttribute('data-href');
+            if (href) window.location.href = href;
+        });
+    });
+
+    var searchInput = document.getElementById('searchLeaveCredits');
+    searchInput.addEventListener('input', function() {
+        var q = (this.value || '').trim().toLowerCase();
+        rows.forEach(function(tr) {
+            var text = (tr.getAttribute('data-search') || '').toLowerCase();
+            tr.style.display = !q || text.indexOf(q) !== -1 ? '' : 'none';
+        });
+    });
+})();
+</script>
+{% endblock %}
+

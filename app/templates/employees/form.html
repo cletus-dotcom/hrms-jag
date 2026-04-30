@@ -9,6 +9,7 @@
             <span class="logo-text">HRMS</span>
             <nav class="main-nav">
                 <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+                {% if (current_user.role or '')|lower in ('admin', 'hr') %}
                 <div class="nav-dropdown">
                     <a href="#" class="nav-link">Settings <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">
@@ -16,9 +17,12 @@
                         <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
                         <hr class="dropdown-separator">
                         <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
-                        <a href="#" class="dropdown-item">Salary Grade</a>
+                        <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
                     </div>
                 </div>
+                {% endif %}
                 <div class="nav-dropdown">
                     <a href="#" class="nav-link nav-link-active">Employee Management <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">
@@ -26,9 +30,24 @@
                     </div>
                 </div>
                 <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Attendance <span class="dropdown-arrow">▼</span></a>
+                    <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
                 </div>
-                <a href="#" class="nav-link">Leave Requests</a>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Leave Management <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+                        <a href="{{ url_for('routes.leave_settings_list') }}" class="dropdown-item">Leave Settings</a>
+                        <a href="{{ url_for('routes.leave_credits_list') }}" class="dropdown-item">Leave Credits</a>
+                        <hr class="dropdown-separator">
+                        {% endif %}
+                        <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply for Leave</a>
+                        <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
+                        {% if (current_user.role or '')|lower == 'manager' %}
+                        <hr class="dropdown-separator">
+                        <a href="{{ url_for('routes.leave_approvals') }}" class="dropdown-item">Leave Approvals</a>
+                        {% endif %}
+                    </div>
+                </div>
                 <a href="#" class="nav-link">Reports</a>
             </nav>
             <div class="user-dropdown">
@@ -41,7 +60,10 @@
                     <span class="dropdown-arrow">▼</span>
                 </a>
                 <div class="dropdown-menu dropdown-menu-right">
-                    <a href="{{ url_for('routes.logout') }}" class="dropdown-item">Logout</a>
+                    <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
+                    <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
+                    <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
+                </form>
                 </div>
             </div>
         </div>
@@ -111,7 +133,7 @@
                         <select id="department_id" name="department_id" class="form-control">
                             <option value="">Select Department</option>
                             {% for dept in departments %}
-                                <option value="{{ dept.id }}" {% if emp and emp.department_id == dept.id %}selected{% endif %}>
+                                <option value="{{ dept.id }}" data-name="{{ dept.name }}" {% if emp and emp.department_id == dept.id %}selected{% endif %}>
                                     {{ dept.name }}
                                 </option>
                             {% endfor %}
@@ -158,10 +180,84 @@
                             <option value="">Select</option>
                             <option value="Original" {% if emp and emp.nature_of_appointment == 'Original' %}selected{% endif %}>Original</option>
                             <option value="Reemployment" {% if emp and emp.nature_of_appointment == 'Reemployment' %}selected{% endif %}>Reemployment</option>
+                            <option value="Reappointment" {% if emp and emp.nature_of_appointment == 'Reappointment' %}selected{% endif %}>Reappointment</option>
                             <option value="Transfer" {% if emp and emp.nature_of_appointment == 'Transfer' %}selected{% endif %}>Transfer</option>
                             <option value="Promotion" {% if emp and emp.nature_of_appointment == 'Promotion' %}selected{% endif %}>Promotion</option>
                             <option value="Demotion" {% if emp and emp.nature_of_appointment == 'Demotion' %}selected{% endif %}>Demotion</option>
                         </select>
+                    </div>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group" style="grid-column: 1 / -1;">
+                        <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: 600;">
+                            <input type="checkbox" name="flexible_worktime" value="1" {% if emp and emp.flexible_worktime %}checked{% endif %}>
+                            Flexible Worktime
+                        </label>
+                        <small style="color: var(--medium-gray);">If enabled, fixed 5-day/4-day schedule late-undertime auto-computation is skipped for this employee.</small>
+                    </div>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="flexible_start_time">Flexible Start Time</label>
+                        <input type="time" id="flexible_start_time" name="flexible_start_time" class="form-control"
+                               value="{{ emp.flexible_start_time.strftime('%H:%M') if emp and emp.flexible_start_time else '' }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="flexible_end_time">Flexible End Time</label>
+                        <input type="time" id="flexible_end_time" name="flexible_end_time" class="form-control"
+                               value="{{ emp.flexible_end_time.strftime('%H:%M') if emp and emp.flexible_end_time else '' }}">
+                    </div>
+                </div>
+                
+                <div style="border-top: 1px solid var(--light-gray); margin: 1.5rem 0; padding-top: 1.5rem;"></div>
+                
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="agency_display">Agency</label>
+                        <input type="text" id="agency_display" class="form-control" readonly placeholder="Set by department"
+                               value="{{ emp.agency if emp and emp.agency else '' }}">
+                    </div>
+                    <div class="form-group">
+                        <label for="lgu_class_level">LGU Class Level</label>
+                        <select id="lgu_class_level" name="lgu_class_level" class="form-control">
+                            <option value="">Select</option>
+                            <option value="1st" {% if emp and emp.lgu_class_level == '1st' %}selected{% endif %}>1st</option>
+                            <option value="2nd" {% if emp and emp.lgu_class_level == '2nd' %}selected{% elif not emp %}selected{% endif %}>2nd</option>
+                            <option value="3rd" {% if emp and emp.lgu_class_level == '3rd' %}selected{% endif %}>3rd</option>
+                            <option value="4th" {% if emp and emp.lgu_class_level == '4th' %}selected{% endif %}>4th</option>
+                            <option value="5th" {% if emp and emp.lgu_class_level == '5th' %}selected{% endif %}>5th</option>
+                            <option value="6th" {% if emp and emp.lgu_class_level == '6th' %}selected{% endif %}>6th</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="salary_tranche">Salary Tranche</label>
+                        <select id="salary_tranche" name="salary_tranche" class="form-control">
+                            <option value="">Select</option>
+                            <option value="1st" {% if emp and emp.salary_tranche == '1st' %}selected{% endif %}>1st</option>
+                            <option value="2nd" {% if emp and emp.salary_tranche == '2nd' %}selected{% endif %}>2nd</option>
+                            <option value="3rd" {% if emp and emp.salary_tranche == '3rd' %}selected{% endif %}>3rd</option>
+                            <option value="4th" {% if emp and emp.salary_tranche == '4th' %}selected{% endif %}>4th</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="salary_grade">Salary Grade</label>
+                        <select id="salary_grade" name="salary_grade" class="form-control" data-initial="{{ emp.salary_grade if emp and emp.salary_grade is not none else '' }}">
+                            <option value="">Select</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="salary_step">Salary Step</label>
+                        <select id="salary_step" name="salary_step" class="form-control">
+                            {% for s in range(1, 9) %}
+                            <option value="{{ s }}" {% if emp and emp.salary_step == s %}selected{% endif %}>{{ s }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="salary_amount_display">Amount</label>
+                        <input type="text" id="salary_amount_display" class="form-control" readonly placeholder="From salary grade">
                     </div>
                 </div>
                 
@@ -230,8 +326,86 @@
     </div>
 </div>
 
+<script type="application/json" id="salary-grades-json">{{ salary_grades_json | tojson }}</script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // Salary grade data and agency/salary UI
+    var salaryGradesData = [];
+    try {
+        var el = document.getElementById('salary-grades-json');
+        if (el && el.textContent) salaryGradesData = JSON.parse(el.textContent);
+    } catch (e) {}
+    var agencyDisplay = document.getElementById('agency_display');
+    var departmentSelect = document.getElementById('department_id');
+    var lguSelect = document.getElementById('lgu_class_level');
+    var trancheSelect = document.getElementById('salary_tranche');
+    var salaryGradeSelect = document.getElementById('salary_grade');
+    var salaryStepSelect = document.getElementById('salary_step');
+    var amountDisplay = document.getElementById('salary_amount_display');
+
+    function updateAgency() {
+        if (!departmentSelect || !agencyDisplay) return;
+        var opt = departmentSelect.options[departmentSelect.selectedIndex];
+        var name = opt ? (opt.getAttribute('data-name') || opt.textContent || '').trim() : '';
+        agencyDisplay.value = (name === 'MHO') ? 'National' : (name ? 'Local' : '');
+    }
+
+    function refreshSalaryGradeOptions() {
+        if (!salaryGradeSelect || !salaryGradesData.length) return;
+        var agency = agencyDisplay ? agencyDisplay.value.trim() : '';
+        var lgu = lguSelect ? lguSelect.value.trim() : '';
+        var tranche = trancheSelect ? trancheSelect.value.trim() : '';
+        var currentVal = salaryGradeSelect.value || (salaryGradeSelect.getAttribute('data-initial') || '');
+        var sgs = [];
+        var seen = {};
+        salaryGradesData.forEach(function(r) {
+            if (r.sg_agency !== agency || r.sg_lgu_class !== lgu || r.sg_tranche !== tranche) return;
+            if (r.sg != null && !seen[r.sg]) { seen[r.sg] = true; sgs.push(r.sg); }
+        });
+        sgs.sort(function(a, b) { return a - b; });
+        salaryGradeSelect.innerHTML = '<option value="">Select</option>';
+        sgs.forEach(function(sg) {
+            var opt = document.createElement('option');
+            opt.value = sg;
+            opt.textContent = sg;
+            if (String(sg) === String(currentVal)) opt.selected = true;
+            salaryGradeSelect.appendChild(opt);
+        });
+        if (salaryGradeSelect.getAttribute('data-initial')) {
+            var initial = salaryGradeSelect.getAttribute('data-initial');
+            if (salaryGradeSelect.querySelector('option[value="' + initial + '"]')) salaryGradeSelect.value = initial;
+            salaryGradeSelect.removeAttribute('data-initial');
+        }
+    }
+
+    function updateAmount() {
+        if (!amountDisplay) return;
+        var agency = agencyDisplay ? agencyDisplay.value.trim() : '';
+        var lgu = lguSelect ? lguSelect.value.trim() : '';
+        var tranche = trancheSelect ? trancheSelect.value.trim() : '';
+        var sg = salaryGradeSelect ? salaryGradeSelect.value : '';
+        var step = salaryStepSelect ? salaryStepSelect.value : '';
+        if (!agency || !lgu || !tranche || !sg || !step) { amountDisplay.value = ''; return; }
+        var stepKey = 'sg_step_' + step;
+        var row = salaryGradesData.find(function(r) {
+            return r.sg_agency === agency && r.sg_lgu_class === lgu && r.sg_tranche === tranche && String(r.sg) === String(sg);
+        });
+        var amt = row && row[stepKey] != null ? row[stepKey] : '';
+        amountDisplay.value = amt !== '' ? Number(amt).toLocaleString('en-PH', { minimumFractionDigits: 2 }) : '';
+    }
+
+    function onAgencyOrSalaryChange() {
+        updateAgency();
+        refreshSalaryGradeOptions();
+        updateAmount();
+    }
+    if (departmentSelect) departmentSelect.addEventListener('change', onAgencyOrSalaryChange);
+    if (lguSelect) lguSelect.addEventListener('change', onAgencyOrSalaryChange);
+    if (trancheSelect) trancheSelect.addEventListener('change', onAgencyOrSalaryChange);
+    if (salaryGradeSelect) salaryGradeSelect.addEventListener('change', updateAmount);
+    if (salaryStepSelect) salaryStepSelect.addEventListener('change', updateAmount);
+    onAgencyOrSalaryChange();
+
     // Bohol municipalities list (alphabetically sorted)
     const boholMunicipalities = [
         'Alburquerque', 'Alicia', 'Anda', 'Antequera', 'Baclayon', 'Balilihan', 'Batuan', 

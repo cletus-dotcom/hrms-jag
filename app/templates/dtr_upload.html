@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}Upload DTR Log - HRMS{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="header-bar">
+        <div class="header-content">
+            <span class="logo-text">HRMS</span>
+            <nav class="main-nav">
+                <a href="{{ url_for('routes.employee_dashboard') }}" class="nav-link">Dashboard</a>
+                <a href="#" class="nav-link">Daily Time Records</a>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Leave <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply Leave</a>
+                        <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
+                    </div>
+                </div>
+                <a href="{{ url_for('routes.dtr_upload') }}" class="nav-link active">Upload DTR Log</a>
+            </nav>
+            <div class="user-dropdown">
+                <a href="#" class="user-info">
+                    {% if employee %}
+                        {{ employee.full_name }} ({{ current_user.role|title }})
+                    {% else %}
+                        {{ current_user.username }} ({{ current_user.role|title }})
+                    {% endif %}
+                    <span class="dropdown-arrow">▼</span>
+                </a>
+                <div class="dropdown-menu dropdown-menu-right">
+                    <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
+                    <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
+                        <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="dashboard-content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible">
+                        <span>{{ message }}</span>
+                        <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="dashboard-header">
+            <h1 class="dashboard-title">
+                <span class="dashboard-icon">📥</span>
+                Upload DTR Log
+            </h1>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('routes.dtr_upload') }}" enctype="multipart/form-data">
+                    <div class="form-group">
+                        <label for="upload_quincena">Upload For Quincena</label>
+                        <select id="upload_quincena" name="upload_quincena" class="form-control" required>
+                            {% for opt in quincena_options %}
+                                <option value="{{ opt.value }}" {% if selected_quincena == opt.value %}selected{% endif %}>{{ opt.label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="dtr_file">Select DTR log file (.dat)</label>
+                        <input type="file" id="dtr_file" name="dtr_file" class="form-control" accept=".dat,.txt" required>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn-primary">Upload</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        {% if parsed_rows %}
+        <div class="card" style="margin-top: 1.5rem;">
+            <div class="card-body">
+                <h2 class="section-title" style="margin-bottom: 1rem;">DTR records – review</h2>
+                <form method="POST" action="{{ url_for('routes.dtr_upload_save') }}">
+                    <input type="hidden" name="upload_quincena" value="{{ selected_quincena }}">
+                    {% if not quincena_ok %}
+                    <div class="alert alert-error" style="margin-bottom: 0.75rem;">
+                        <span>Missing date(s) for selected quincena: {{ quincena_missing_dates_text|join(', ') }}. Please upload a complete file before saving.</span>
+                    </div>
+                    {% endif %}
+                    <div class="table-container" style="overflow-x: auto;">
+                        <table class="dtr-grid-table" style="width: 100%; font-size: 0.9rem; border-collapse: collapse; border: 1px solid #ccc;">
+                            <thead>
+                                <tr>
+                                    <th style="border: 1px solid #ccc; padding: 0.5rem; text-align: left; background: #f0f0f0;">Employee ID</th>
+                                    <th style="border: 1px solid #ccc; padding: 0.5rem; text-align: left; background: #f0f0f0;">Date</th>
+                                    <th style="border: 1px solid #ccc; padding: 0.5rem; text-align: left; background: #f0f0f0;">Check-In (AM-IN)</th>
+                                    <th style="border: 1px solid #ccc; padding: 0.5rem; text-align: left; background: #f0f0f0;">Break-out (AM-OUT)</th>
+                                    <th style="border: 1px solid #ccc; padding: 0.5rem; text-align: left; background: #f0f0f0;">Break-in (PM-IN)</th>
+                                    <th style="border: 1px solid #ccc; padding: 0.5rem; text-align: left; background: #f0f0f0;">Check-out (PM-OUT)</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in parsed_rows %}
+                                <tr>
+                                    <td style="border: 1px solid #ccc; padding: 0.5rem;">
+                                        {{ row.employee_id }}
+                                        <input type="hidden" name="row_{{ loop.index0 }}_employee_id" value="{{ row.employee_id }}">
+                                        <input type="hidden" name="row_{{ loop.index0 }}_date" value="{{ row.date }}">
+                                        <input type="hidden" name="row_{{ loop.index0 }}_check_in" value="{{ row.check_in }}">
+                                        <input type="hidden" name="row_{{ loop.index0 }}_break_out" value="{{ row.break_out }}">
+                                        <input type="hidden" name="row_{{ loop.index0 }}_break_in" value="{{ row.break_in }}">
+                                        <input type="hidden" name="row_{{ loop.index0 }}_check_out" value="{{ row.check_out }}">
+                                    </td>
+                                    <td style="border: 1px solid #ccc; padding: 0.5rem;">{{ row.date[8:10] }}/{{ row.date[5:7] }}/{{ row.date[0:4] }}</td>
+                                    <td style="border: 1px solid #ccc; padding: 0.5rem;">{{ row.check_in_12h|default(row.check_in) }}</td>
+                                    <td style="border: 1px solid #ccc; padding: 0.5rem;">{{ row.break_out_12h|default(row.break_out) }}</td>
+                                    <td style="border: 1px solid #ccc; padding: 0.5rem;">{{ row.break_in_12h|default(row.break_in) }}</td>
+                                    <td style="border: 1px solid #ccc; padding: 0.5rem;">{{ row.check_out_12h|default(row.check_out) }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="form-actions" style="margin-top: 1rem;">
+                        <button type="submit" class="btn-primary" {% if not quincena_ok %}disabled title="Missing dates for selected quincena"{% endif %}>Save to DTR</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+

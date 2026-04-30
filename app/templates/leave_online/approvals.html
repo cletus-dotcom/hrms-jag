@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}Leave Approvals - HRMS{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+  <div class="header-bar">
+    <div class="header-content">
+      <span class="logo-text">HRMS</span>
+      <nav class="main-nav">
+        <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+        <div class="nav-dropdown">
+          <a href="#" class="nav-link nav-link-active">Leave Management <span class="dropdown-arrow">▼</span></a>
+          <div class="dropdown-menu">
+            <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply for Leave</a>
+            <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
+            <hr class="dropdown-separator">
+            <a href="{{ url_for('routes.leave_approvals') }}" class="dropdown-item">Leave Approvals</a>
+          </div>
+        </div>
+      </nav>
+      <div class="user-dropdown">
+        <a href="#" class="user-info">
+          {% if employee %}{{ employee.full_name }}{% else %}{{ current_user.username }}{% endif %} ({{ current_user.role|title }})
+          <span class="dropdown-arrow">▼</span>
+        </a>
+        <div class="dropdown-menu dropdown-menu-right">
+          <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
+          <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
+            <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dashboard-content">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} alert-dismissible">
+            <span>{{ message }}</span>
+            <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="page-header" style="display:flex; justify-content: space-between; align-items:center; gap:1rem; flex-wrap:wrap;">
+      <div>
+        <h1 class="page-title" style="margin:0;">Leave Approvals</h1>
+        <p style="margin:0.25rem 0 0; color: var(--medium-gray, #666); font-size: 0.9rem;">Pending leave applications waiting for your action.</p>
+      </div>
+      {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+      <a href="{{ url_for('routes.leave_list') }}" class="btn-secondary">View All Leave</a>
+      {% endif %}
+    </div>
+
+    <div class="card" style="padding: 1rem 1.25rem;">
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Employee</th>
+              <th>Type</th>
+              <th>Applied Date(s)</th>
+              <th>Submitted</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for l in leaves %}
+            <tr>
+              <td>{{ l.id }}</td>
+              <td>{{ l.employee.full_name if l.employee else '' }}</td>
+              <td>{{ l.leave_type }}</td>
+              <td>{{ l.start_date.strftime('%Y-%m-%d') }}{% if l.end_date and l.end_date != l.start_date %} to {{ l.end_date.strftime('%Y-%m-%d') }}{% endif %}</td>
+              <td>{{ l.created_at.strftime('%Y-%m-%d %H:%M') if l.created_at else '' }}</td>
+              <td style="min-width: 280px;">
+                {% if employee and l.employee_id == employee.id %}
+                  <span class="muted" style="display:inline-block; padding: 0.25rem 0.5rem;">Self (not allowed)</span>
+                  <a href="{{ url_for('routes.leave_detail', id=l.id) }}" class="btn-secondary" style="height: 32px; display:inline-flex; align-items:center; margin-left: 0.35rem;">View</a>
+                {% else %}
+                <form method="POST" action="{{ url_for('routes.leave_approve', id=l.id) }}" style="display:inline;">
+                  <input type="text" name="manager_remarks" class="form-control" placeholder="Remarks (optional)" style="display:inline; width: 160px; height: 32px; font-size: 0.85rem;">
+                  <button type="submit" class="btn-primary" style="height: 32px;">Approve</button>
+                </form>
+                <form method="POST" action="{{ url_for('routes.leave_disapprove', id=l.id) }}" style="display:inline; margin-left: 0.35rem;">
+                  <input type="hidden" name="manager_remarks" value="Dis-approved">
+                  <button type="submit" class="btn-secondary" style="height: 32px;">Dis-approve</button>
+                </form>
+                <a href="{{ url_for('routes.leave_detail', id=l.id) }}" class="btn-secondary" style="height: 32px; display:inline-flex; align-items:center; margin-left: 0.35rem;">View</a>
+                {% endif %}
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6" class="no-data">No pending leave requests.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
