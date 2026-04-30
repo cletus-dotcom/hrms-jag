@@ -7,7 +7,7 @@
 <div class="dashboard-container">
     <div class="header-bar">
         <div class="header-content">
-            <span class="logo-text">HRMS</span>
+            {% include 'includes/navbar_brand.html' %}
             <nav class="main-nav">
                 <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
                 {% if (current_user.role or '')|lower in ('admin', 'hr') %}
@@ -32,6 +32,11 @@
                 </div>
                 <div class="nav-dropdown">
                     <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
+                        <a href="{{ url_for('routes.dtr_upload') }}" class="dropdown-item">Upload DTR Log</a>
+                        <a href="{{ url_for('routes.dtr_justifications') }}" class="dropdown-item">DTR Justifications</a>
+                    </div>
                 </div>
                 <div class="nav-dropdown">
                     <a href="#" class="nav-link">Leave Management <span class="dropdown-arrow">▼</span></a>
@@ -49,7 +54,17 @@
                         {% endif %}
                     </div>
                 </div>
+                {% if (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.payroll_summary') }}" class="dropdown-item">Payroll Summary Report</a>
+                        <a href="{{ url_for('routes.payroll_submissions') }}" class="dropdown-item">Submitted Payroll History</a>
+                    </div>
+                </div>
+                {% else %}
                 <a href="#" class="nav-link">Reports</a>
+                {% endif %}
             </nav>
             <div class="user-dropdown">
                 <a href="#" class="user-info">

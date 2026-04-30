@@ -6,10 +6,26 @@
 <div class="dashboard-container">
     <div class="header-bar">
         <div class="header-content">
-            <span class="logo-text">HRMS</span>
+            {% include 'includes/navbar_brand.html' %}
             <nav class="main-nav">
                 <a href="{{ url_for('routes.employee_dashboard') }}" class="nav-link">Dashboard</a>
-                <a href="#" class="nav-link">Daily Time Records</a>
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
+                        <a href="{{ url_for('routes.dtr_upload') }}" class="dropdown-item">Upload DTR Log</a>
+                        <a href="{{ url_for('routes.dtr_justifications') }}" class="dropdown-item">DTR Justifications</a>
+                    </div>
+                </div>
+                {% if (current_user.role or '')|lower in ('payroll_maker', 'admin', 'hr') %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.payroll_summary') }}" class="dropdown-item">Payroll Summary Report</a>
+                        <a href="{{ url_for('routes.payroll_submissions') }}" class="dropdown-item">Submitted Payroll History</a>
+                    </div>
+                </div>
+                {% endif %}
                 <div class="nav-dropdown">
                     <a href="#" class="nav-link">Leave <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">

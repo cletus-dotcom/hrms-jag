@@ -1,0 +1,22 @@
+{% set login_url = url_for('routes.login') %}
+<header class="landing-topnav">
+    <div class="landing-topnav-inner">
+        <a href="{{ url_for('routes.index') }}" class="landing-topnav-logo-link" title="Home — HRMDO System">
+            <img src="{{ url_for('static', filename='navbar_logo.png') }}" alt="" class="landing-topnav-logo" width="40" height="40" decoding="async">
+            <span class="landing-topnav-wordmark">HRMDO</span>
+        </a>
+        <nav class="landing-desktop-nav" aria-label="Main menu">
+            <a href="{{ login_url }}">Dashboard</a>
+            <a href="{{ login_url }}">Employees</a>
+            <a href="{{ login_url }}">Daily time records</a>
+            <a href="{{ login_url }}">Leave</a>
+            <a href="{{ login_url }}">Reports</a>
+        </nav>
+        <div class="landing-topnav-actions">
+            <a href="{{ login_url }}" class="landing-btn-signin landing-desktop-only">Sign in</a>
+            <a href="{{ login_url }}" class="landing-hamburger" aria-label="Sign in to open the system menu">
+                <span class="landing-hamburger-lines" aria-hidden="true"></span>
+            </a>
+        </div>
+    </div>
+</header>

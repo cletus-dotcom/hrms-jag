@@ -6,7 +6,7 @@
 <div class="dashboard-container">
   <div class="header-bar">
     <div class="header-content">
-      <span class="logo-text">HRMS</span>
+      {% include 'includes/navbar_brand.html' %}
       <nav class="main-nav">
         <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
         <div class="nav-dropdown">

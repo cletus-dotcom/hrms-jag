@@ -2,20 +2,30 @@
 
 {% block title %}Login - HRMS{% endblock %}
 
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/landing.css') }}">
+<style>
+  .public-login { padding-top: var(--landing-nav-height); min-height: 100vh; background: var(--brand-bg, #f4f7fb); }
+  .public-login .login-wrapper { padding: 1.25rem 1rem 2.25rem; }
+  .public-login .login-card { width: 100%; max-width: 520px; }
+  .public-login .login-header h1 { font-size: 1.05rem; }
+  .public-login .login-header-content { justify-content: flex-start; }
+  .public-login .login-icon { width: 44px; height: 44px; object-fit: contain; display:block; }
+  @media (min-width: 768px) {
+    .public-login .login-wrapper { padding: 2.25rem 1rem 3rem; }
+  }
+</style>
+{% endblock %}
+
 {% block content %}
-<div class="login-container">
-    <div class="header-bar">
-        <div class="header-content">
-            <span class="logo-text">HRMS</span>
-        </div>
-    </div>
-    
-    <div class="login-wrapper">
+<div class="public-login">
+    {% include 'includes/public_nav.html' %}
+    <div class="login-wrapper" style="max-width: 1200px; margin: 0 auto;">
         <div class="login-card">
             <div class="login-header">
                 <div class="login-header-content">
-                    <img src="{{ url_for('static', filename='favicon.ico') }}" alt="HRMS Icon" class="login-icon">
-                    <h1>Human Resource Management System</h1>
+                    <img src="{{ url_for('static', filename='jagna_logo.png') }}" alt="HRMDO Jagna seal" class="login-icon">
+                    <h1>HRMDO System</h1>
                 </div>
             </div>
             
@@ -56,7 +66,10 @@
                         >
                     </div>
                     
-                    <button type="submit" class="btn-login">Login</button>
+                    <div style="display:flex; gap:0.75rem; align-items:center; margin-top:0.5rem;">
+                        <button type="submit" class="btn-login" style="flex:1;">Login</button>
+                        <a href="{{ url_for('routes.index') }}" class="btn-secondary" style="flex:1; text-align:center; padding:0.875rem; border-radius:6px;">Cancel</a>
+                    </div>
                 </form>
             </div>
             

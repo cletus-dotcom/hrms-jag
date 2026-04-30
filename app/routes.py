@@ -295,11 +295,141 @@ def _managed_department_ids_for_manager():
     return [d.id for d in rows if d and d.id]
 
 
+def _public_landing_stats():
+    """Aggregate counts for the public landing page (best-effort)."""
+    from sqlalchemy import or_
+    stats = {'employees': 0, 'departments': 0, 'leave_requests': 0, 'positions': 0}
+    try:
+        stats['employees'] = Employee.query.filter(
+            or_(Employee.status == 'active', Employee.status == 'on_leave')
+        ).count()
+    except Exception:
+        try:
+            stats['employees'] = Employee.query.count()
+        except Exception:
+            pass
+    try:
+        stats['departments'] = Department.query.count()
+    except Exception:
+        pass
+    try:
+        stats['leave_requests'] = LeaveRequest.query.count()
+    except Exception:
+        pass
+    try:
+        stats['positions'] = Position.query.count()
+    except Exception:
+        pass
+    return stats
+
+
+def _public_birthdays_this_week(limit: int = 12) -> dict:
+    """
+    Public landing helper: return employees with birthdays in the current week.
+    Week is Monday..Sunday in local server time. Uses EmployeePDS.date_of_birth
+    and ignores the year component.
+    """
+    from sqlalchemy import or_
+
+    today = date.today()
+    week_start = today - timedelta(days=today.weekday())  # Monday
+    week_end = week_start + timedelta(days=6)            # Sunday
+
+    def safe_occurrence_for_year(y: int, m: int, d: int) -> date | None:
+        try:
+            return date(y, m, d)
+        except ValueError:
+            # Handle Feb 29 on non-leap years by mapping to Feb 28.
+            if m == 2 and d == 29:
+                return date(y, 2, 28)
+            return None
+
+    results: list[dict] = []
+    try:
+        rows = (db.session.query(Employee, EmployeePDS)
+                .join(EmployeePDS, EmployeePDS.employee_id == Employee.id)
+                .filter(EmployeePDS.date_of_birth.isnot(None))
+                .filter(or_(Employee.status == 'active', Employee.status == 'on_leave'))
+                .all())
+
+        for emp, pds in rows:
+            dob = getattr(pds, 'date_of_birth', None)
+            if not dob:
+                continue
+
+            occ = safe_occurrence_for_year(week_start.year, dob.month, dob.day)
+            # If the week crosses year boundary, also check the next year.
+            if occ is None or occ < week_start:
+                occ2 = safe_occurrence_for_year(week_end.year, dob.month, dob.day)
+                occ = occ2 if occ2 else occ
+
+            if occ and week_start <= occ <= week_end:
+                results.append({
+                    'name': getattr(emp, 'full_name', None) or f"{emp.first_name} {emp.last_name}".strip(),
+                    'when': occ,
+                })
+
+        results.sort(key=lambda r: (r['when'], r['name'].lower()))
+    except Exception:
+        # Best-effort only; landing page should still render.
+        results = []
+
+    items = results[: max(0, int(limit))]
+    return {
+        'week_start': week_start,
+        'week_end': week_end,
+        'items': items,
+    }
+
+
+def _public_on_leave_this_week(limit: int = 12) -> dict:
+    """
+    Public landing helper: return employees with approved leave overlapping
+    the current week (Monday..Sunday).
+    """
+    today = date.today()
+    week_start = today - timedelta(days=today.weekday())  # Monday
+    week_end = week_start + timedelta(days=6)            # Sunday
+
+    results: list[dict] = []
+    try:
+        rows = (db.session.query(LeaveRequest, Employee)
+                .join(Employee, LeaveRequest.employee_id == Employee.id)
+                .filter(LeaveRequest.status == 'approved')
+                .filter(LeaveRequest.start_date <= week_end)
+                .filter(LeaveRequest.end_date >= week_start)
+                .all())
+
+        for lr, emp in rows:
+            results.append({
+                'name': getattr(emp, 'full_name', None) or f"{emp.first_name} {emp.last_name}".strip(),
+                'leave_type': (getattr(lr, 'leave_type', '') or '').strip(),
+                'start': getattr(lr, 'start_date', None),
+                'end': getattr(lr, 'end_date', None),
+            })
+
+        results.sort(key=lambda r: (r['start'] or week_start, r['name'].lower()))
+    except Exception:
+        results = []
+
+    items = results[: max(0, int(limit))]
+    return {
+        'week_start': week_start,
+        'week_end': week_end,
+        'items': items,
+    }
+
+
 @bp.route('/')
 def index():
     if current_user.is_authenticated:
         return redirect(url_for(_dashboard_for_user(current_user)))
-    return redirect(url_for('routes.login'))
+    return render_template(
+        'landing.html',
+        stats=_public_landing_stats(),
+        birthdays=_public_birthdays_this_week(),
+        on_leave=_public_on_leave_this_week(),
+    )
 
 @bp.route('/login', methods=['GET', 'POST'])
 def login():
@@ -353,7 +483,7 @@ def logout():
     session.modified = True
     flash('You have been logged out successfully.', 'info')
     # Redirect to login with flag so login view can force-clear session if cookie didn't update
-    return redirect(url_for('routes.login', logged_out=1), code=303)
+    return redirect(url_for('routes.index'), code=303)
 
 
 @bp.route('/change-password', methods=['POST'])

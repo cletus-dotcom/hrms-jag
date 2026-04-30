@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+
+{% block title %}HRMDO System — Human Resource Management and Development Office{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/landing.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="landing-page">
+    <a class="landing-skip-link" href="#main-content">Skip to content</a>
+    {% include 'includes/public_nav.html' %}
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="landing-flash-wrap">
+            {% for category, message in messages %}
+            <div class="alert alert-{{ category }} alert-dismissible">
+                <span>{{ message }}</span>
+                <button type="button" class="alert-close" onclick="this.parentElement.style.display='none'" aria-label="Dismiss">×</button>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    {% endwith %}
+
+    <main id="main-content" class="landing-main">
+        <section class="landing-hero" aria-labelledby="landing-hero-title">
+            <div class="landing-hero-inner">
+                <div class="landing-hero-copy">
+                    <h1 id="landing-hero-title" class="landing-hero-title">HRMDO System</h1>
+                    <p class="landing-hero-sub">Human resource management and development office</p>
+                </div>
+                <div class="landing-hero-visual">
+                    <div class="landing-hero-badge" aria-hidden="true">
+                        <img src="{{ url_for('static', filename='hrmdo_logo_transparent.png') }}" alt="HRMDO Jagna seal" class="landing-hero-seal" width="420" height="420" decoding="async">
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="landing-stats" aria-labelledby="landing-stats-heading">
+            <h2 id="landing-stats-heading" class="visually-hidden">Key figures</h2>
+            <div class="landing-stats-grid">
+                <article class="landing-stat-card">
+                    <div class="landing-stat-value">{{ stats.employees }}</div>
+                    <p class="landing-stat-label">Active &amp; on-leave personnel records</p>
+                </article>
+                <article class="landing-stat-card">
+                    <div class="landing-stat-value">{{ stats.departments }}</div>
+                    <p class="landing-stat-label">Departments / offices in directory</p>
+                </article>
+                <article class="landing-stat-card">
+                    <div class="landing-stat-value">{{ stats.leave_requests }}</div>
+                    <p class="landing-stat-label">Leave applications on file</p>
+                </article>
+                <article class="landing-stat-card">
+                    <div class="landing-stat-value">{{ stats.positions }}</div>
+                    <p class="landing-stat-label">Position titles maintained</p>
+                </article>
+                <article class="landing-stat-card landing-birthday-card" aria-labelledby="landing-bdays-title">
+                    {% set bdays_items = (birthdays['items'] if birthdays and 'items' in birthdays else []) %}
+                    <div class="landing-birthday-head">
+                        <h3 id="landing-bdays-title" class="landing-birthday-title">Birthdays this week</h3>
+                        {% if birthdays and ('week_start' in birthdays) and ('week_end' in birthdays) and birthdays['week_start'] and birthdays['week_end'] %}
+                        <div class="landing-birthday-range">
+                            {{ birthdays['week_start'].strftime('%b %d') }}–{{ birthdays['week_end'].strftime('%b %d') }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% if bdays_items|length %}
+                        <ul class="landing-birthday-list">
+                            {% for b in bdays_items %}
+                            <li class="landing-birthday-item">
+                                <span class="landing-birthday-name">{{ b.name }}</span>
+                                <span class="landing-birthday-date">{{ b.when.strftime('%a, %b %d') }}</span>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <p class="landing-birthday-empty">No birthdays scheduled for this week.</p>
+                    {% endif %}
+                </article>
+                <article class="landing-stat-card landing-onleave-card" aria-labelledby="landing-onleave-title">
+                    {% set onleave_items = (on_leave['items'] if on_leave and 'items' in on_leave else []) %}
+                    <div class="landing-birthday-head">
+                        <h3 id="landing-onleave-title" class="landing-birthday-title">On leave this week</h3>
+                        {% if on_leave and ('week_start' in on_leave) and ('week_end' in on_leave) and on_leave['week_start'] and on_leave['week_end'] %}
+                        <div class="landing-birthday-range">
+                            {{ on_leave['week_start'].strftime('%b %d') }}–{{ on_leave['week_end'].strftime('%b %d') }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% if onleave_items|length %}
+                        <ul class="landing-birthday-list">
+                            {% for r in onleave_items %}
+                            <li class="landing-birthday-item">
+                                <span class="landing-birthday-name">{{ r.name }}</span>
+                                <span class="landing-birthday-date">
+                                    {% if r.start and r.end and r.start != r.end %}
+                                        {{ r.start.strftime('%b %d') }}–{{ r.end.strftime('%b %d') }}
+                                    {% elif r.start %}
+                                        {{ r.start.strftime('%a, %b %d') }}
+                                    {% else %}
+                                        —
+                                    {% endif %}
+                                    {% if r.leave_type %} · {{ r.leave_type }}{% endif %}
+                                </span>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <p class="landing-birthday-empty">No approved leaves scheduled for this week.</p>
+                    {% endif %}
+                </article>
+            </div>
+        </section>
+    </main>
+
+    <footer class="landing-footer" role="contentinfo">
+        <div class="landing-footer-inner">
+            <div>
+                <h2>Republic of the Philippines</h2>
+                <p>All content is in the public domain unless otherwise stated.</p>
+                <p>Official Philippine government information and services may be accessed through the national portal.</p>
+                <ul class="landing-footer-links">
+                    <li><a href="https://www.gov.ph/" target="_blank" rel="noopener noreferrer">Gov.ph</a></li>
+                    <li><a href="https://data.gov.ph/" target="_blank" rel="noopener noreferrer">Open Data</a></li>
+                    <li><a href="https://www.foi.gov.ph/" target="_blank" rel="noopener noreferrer">Freedom of Information</a></li>
+                    <li><a href="https://www.officialgazette.gov.ph/" target="_blank" rel="noopener noreferrer">Official Gazette</a></li>
+                </ul>
+            </div>
+            <div>
+                <h2>Transparency</h2>
+                <p>This portal supports internal human resource processes of the local government unit. Published figures are aggregate system indicators and may be updated without prior notice.</p>
+                <p>For concerns on data privacy, refer to the <a href="https://privacy.gov.ph/" target="_blank" rel="noopener noreferrer">National Privacy Commission (NPC)</a> and applicable issuances of the <a href="https://www.dilg.gov.ph/" target="_blank" rel="noopener noreferrer">Department of the Interior and Local Government (DILG)</a>.</p>
+            </div>
+            <div class="landing-footer-seal-col" aria-label="Municipality of Jagna, Bohol">
+                <img src="{{ url_for('static', filename='jagna_logo.png') }}" alt="Jagna, Bohol seal" class="landing-footer-seal" width="120" height="120" decoding="async">
+                <p class="landing-footer-seal-text">Municipality of Jagna, Bohol</p>
+                <p class="landing-footer-seal-subtext">© 2026 All rights reserved.</p>
+            </div>
+            <p class="landing-footer-disclaimer">
+                This application is operated for official LGU business. Unauthorized access or misuse is subject to administrative and criminal penalties under applicable laws. Some features require authentication; contact your HRMDO for access.
+            </p>
+        </div>
+    </footer>
+</div>
+{% endblock %}

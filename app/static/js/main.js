@@ -1,6 +1,140 @@
 // Main JavaScript file for HRMS
 
 document.addEventListener('DOMContentLoaded', function() {
+    const headerBar = document.querySelector('.header-bar');
+    const landingTopnav = document.querySelector('.landing-topnav');
+
+    function attachAutoHideOnScroll(el, hiddenClass, opts) {
+        if (!el) return;
+        const hideDelayMs = (opts && opts.hideDelayMs) || 260;
+        const minScrollDiff = (opts && opts.minScrollDiff) || 8;
+        const keepVisibleUntilY = (opts && opts.keepVisibleUntilY) || 20;
+
+        let lastScrollY = window.scrollY || window.pageYOffset;
+        let hideTimeout = null;
+
+        window.addEventListener('scroll', function () {
+            const y = window.scrollY || window.pageYOffset;
+            if (y < keepVisibleUntilY) {
+                if (hideTimeout) {
+                    clearTimeout(hideTimeout);
+                    hideTimeout = null;
+                }
+                el.classList.remove(hiddenClass);
+                lastScrollY = y;
+                return;
+            }
+
+            const diff = y - lastScrollY;
+            if (Math.abs(diff) < minScrollDiff) return;
+
+            if (diff > 0) {
+                if (hideTimeout) clearTimeout(hideTimeout);
+                hideTimeout = window.setTimeout(function () {
+                    el.classList.add(hiddenClass);
+                    hideTimeout = null;
+                }, hideDelayMs);
+            } else {
+                if (hideTimeout) {
+                    clearTimeout(hideTimeout);
+                    hideTimeout = null;
+                }
+                el.classList.remove(hiddenClass);
+            }
+
+            lastScrollY = y;
+        }, { passive: true });
+    }
+
+    function isPublicPage() {
+        return Boolean(document.querySelector('.landing-page, .public-login'));
+    }
+
+    function titleize(seg) {
+        if (!seg) return '';
+        const cleaned = seg.replace(/[-_]+/g, ' ').trim();
+        if (!cleaned) return '';
+        return cleaned.replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    function buildBreadcrumbs() {
+        if (!headerBar || isPublicPage()) return;
+        const userDropdown = headerBar.querySelector('.user-dropdown');
+        if (!userDropdown) return;
+        const userInfo = userDropdown.querySelector('.user-info');
+        if (!userInfo) return;
+
+        const path = (window.location.pathname || '/').split('?')[0].split('#')[0];
+        const segs = path.split('/').filter(Boolean);
+        if (segs.length === 0) return;
+
+        const LABELS = {
+            'dashboard': 'Dashboard',
+            'employee-dashboard': 'Dashboard',
+            'employees': 'Employees',
+            'departments': 'Departments',
+            'positions': 'Positions',
+            'users': 'Users',
+            'salary-grades': 'Salary Grades',
+            'status-of-appointment': 'Status of Appointment',
+            'leave-settings': 'Leave Settings',
+            'leave-credits': 'Leave Credits',
+            'leave-online': 'Leave',
+            'dtr-records': 'DTR Records',
+            'dtr-upload': 'DTR Upload',
+            'dtr-justifications': 'DTR Justifications',
+            'payroll': 'Payroll',
+        };
+
+        const items = [];
+        let accum = '';
+        for (let i = 0; i < segs.length; i++) {
+            accum += '/' + segs[i];
+            const raw = segs[i];
+            const label = LABELS[raw] || (raw.match(/^\d+$/) ? `#${raw}` : titleize(raw));
+            items.push({ label, url: accum });
+        }
+
+        const crumbs = document.createElement('div');
+        crumbs.className = 'header-breadcrumbs header-breadcrumbs--visible header-breadcrumbs--nav';
+
+        items.forEach((it, idx) => {
+            const isLast = idx === items.length - 1;
+            if (!isLast) {
+                const a = document.createElement('a');
+                a.href = it.url;
+                a.textContent = it.label;
+                crumbs.appendChild(a);
+                const sep = document.createElement('span');
+                sep.className = 'breadcrumb-sep';
+                sep.textContent = '›';
+                crumbs.appendChild(sep);
+            } else {
+                const cur = document.createElement('span');
+                cur.textContent = it.label;
+                crumbs.appendChild(cur);
+            }
+        });
+        // Place breadcrumbs under the session username, bottom-right of navbar
+        userInfo.insertAdjacentElement('afterend', crumbs);
+    }
+
+    function syncHeaderBarHeight() {
+        if (!headerBar) return;
+        document.documentElement.style.setProperty('--header-bar-height', headerBar.offsetHeight + 'px');
+    }
+    if (headerBar) {
+        syncHeaderBarHeight();
+        window.addEventListener('resize', syncHeaderBarHeight, { passive: true });
+        window.addEventListener('load', syncHeaderBarHeight, { passive: true });
+
+        attachAutoHideOnScroll(headerBar, 'header-bar--hidden', { hideDelayMs: 380, minScrollDiff: 8, keepVisibleUntilY: 20 });
+    }
+
+    // Landing page public navbar
+    attachAutoHideOnScroll(landingTopnav, 'landing-topnav--hidden', { hideDelayMs: 220, minScrollDiff: 6, keepVisibleUntilY: 8 });
+    buildBreadcrumbs();
+
     // Auto-dismiss alerts after 5 seconds
     const alerts = document.querySelectorAll('.alert:not(.alert-dismissible)');
     alerts.forEach(alert => {
@@ -11,14 +145,31 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 5000);
     });
     
-    // Handle dropdown menus - keep open on hover
-    const dropdowns = document.querySelectorAll('.nav-dropdown');
-    dropdowns.forEach(dropdown => {
-        const link = dropdown.querySelector('.nav-link');
-        // Prevent default only if it's a hash link
-        if (link && link.getAttribute('href') === '#') {
-            link.addEventListener('click', function(e) {
+    // Nav dropdowns: click to toggle (works on mobile); hover still supported via CSS
+    const navDropdowns = document.querySelectorAll('.nav-dropdown');
+    navDropdowns.forEach(dropdown => {
+        const link = dropdown.querySelector(':scope > .nav-link');
+        const menu = dropdown.querySelector(':scope > .dropdown-menu');
+        if (!link || !menu) return;
+
+        // If the dropdown trigger is a hash link, treat it as a toggle button.
+        if ((link.getAttribute('href') || '') === '#') {
+            link.setAttribute('role', 'button');
+            link.setAttribute('aria-haspopup', 'menu');
+            link.setAttribute('aria-expanded', 'false');
+
+            link.addEventListener('click', function (e) {
                 e.preventDefault();
+                e.stopPropagation();
+
+                // Close other open nav dropdowns first
+                document.querySelectorAll('.nav-dropdown .dropdown-menu.show').forEach(other => {
+                    if (other !== menu) other.classList.remove('show');
+                });
+
+                const isOpen = menu.classList.contains('show');
+                menu.classList.toggle('show', !isOpen);
+                link.setAttribute('aria-expanded', String(!isOpen));
             });
         }
     });
@@ -39,6 +190,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         menu.style.display = 'none';
                         menu.classList.remove('show');
                     } else {
+                        // Close any open nav dropdowns so menus don't overlap
+                        document.querySelectorAll('.nav-dropdown .dropdown-menu.show').forEach(other => other.classList.remove('show'));
                         menu.style.display = 'block';
                         menu.classList.add('show');
                     }
@@ -71,6 +224,13 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Close dropdowns when clicking outside
     document.addEventListener('click', function(e) {
+        if (!e.target.closest('.nav-dropdown')) {
+            document.querySelectorAll('.nav-dropdown .dropdown-menu.show').forEach(menu => {
+                menu.classList.remove('show');
+                const trigger = menu.closest('.nav-dropdown')?.querySelector(':scope > .nav-link');
+                if (trigger) trigger.setAttribute('aria-expanded', 'false');
+            });
+        }
         if (!e.target.closest('.user-dropdown')) {
             const openMenus = document.querySelectorAll('.user-dropdown .dropdown-menu.show');
             openMenus.forEach(menu => {
