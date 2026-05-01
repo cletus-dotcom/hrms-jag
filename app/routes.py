@@ -8,6 +8,7 @@ import io
 import os
 from app import db
 from app.leave_ledger_service import (
+    LEAVE_CREDITS_STATUSES,
     accrue_monthly_vl_sl_for_month,
     ensure_appointment_spl_wl_grant,
     record_leave_ledger_deletion,
@@ -367,7 +368,8 @@ def _public_personnel_breakdown() -> dict:
         ("Contractual", "contractual"),
         ("Temporary", "temporary"),
         ("Coterminus", "coterminus"),
-        ("Provisional", "provisional"),
+        # Display label "Probational"; match new spelling and legacy "Provisional" in DB.
+        ("Probational", ("probational", "provisional")),
         ("Elective", "elective"),
     ]
     nonplantilla_statuses = [
@@ -384,7 +386,11 @@ def _public_personnel_breakdown() -> dict:
 
     try:
         for label, key in plantilla_statuses:
-            c = base.filter(norm(Employee.status_of_appointment) == key).count()
+            if isinstance(key, tuple):
+                cond = or_(*[norm(Employee.status_of_appointment) == k for k in key])
+                c = base.filter(cond).count()
+            else:
+                c = base.filter(norm(Employee.status_of_appointment) == key).count()
             breakdown_plantilla.append({"label": label, "count": int(c)})
             total_plantilla += int(c)
 
@@ -1754,13 +1760,12 @@ def _leave_accrual_target_period(year_raw: str | None, month_raw: str | None) ->
 @bp.route('/leave-credits')
 @login_required
 def leave_credits_list():
-    """List employees (Permanent, Casual, Temporary, Elective) for leave credits management."""
+    """List employees eligible for leave credits (plantilla-style statuses; see LEAVE_CREDITS_STATUSES)."""
     denied = _require_admin_or_hr()
     if denied:
         return denied
-    statuses = ['Permanent', 'Casual', 'Temporary', 'Elective']
     employees = (Employee.query
-                 .filter(Employee.status_of_appointment.in_(statuses))
+                 .filter(Employee.status_of_appointment.in_(LEAVE_CREDITS_STATUSES))
                  .order_by(Employee.last_name, Employee.first_name)
                  .all())
     employee = current_user.employee if current_user.employee else None

@@ -52,6 +52,70 @@
     gap: 0.75rem;
 }
 
+/* Program launchers (hero, under subtitle) */
+.landing-hero-progs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 0.45rem 0.55rem;
+    margin-top: clamp(1rem, 3vw, 1.65rem);
+    max-width: 36rem;
+}
+
+.landing-prog-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    text-decoration: none;
+    flex: 1 1 7.5rem;
+    min-width: min(100%, 7.25rem);
+    max-width: 11rem;
+    padding: 0.4rem 0.45rem 0.45rem;
+    border-radius: 10px;
+    color: #fff;
+    background: linear-gradient(145deg, var(--landing-blue) 0%, var(--landing-navy-mid) 55%, var(--landing-navy) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: 0 2px 10px rgba(13, 40, 71, 0.18);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+
+.landing-prog-btn:hover,
+.landing-prog-btn:focus-visible {
+    transform: translateY(-1px);
+    box-shadow: 0 5px 16px rgba(13, 40, 71, 0.28);
+    filter: brightness(1.04);
+    outline: none;
+}
+
+.landing-prog-btn-title {
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    line-height: 1.2;
+}
+
+.landing-prog-btn-sub {
+    margin-top: 0.2rem;
+    font-size: 0.52rem;
+    font-weight: 500;
+    line-height: 1.25;
+    color: rgba(240, 244, 250, 0.88);
+    letter-spacing: 0.02em;
+}
+
+@media (min-width: 900px) {
+    .landing-prog-btn-title {
+        font-size: 0.72rem;
+    }
+
+    .landing-prog-btn-sub {
+        font-size: 0.56rem;
+    }
+}
+
 .landing-topnav-logo-link {
     display: flex;
     align-items: center;
@@ -258,6 +322,24 @@
     line-height: 1.45;
     margin: 0;
     max-width: 32rem;
+}
+
+/* Slightly larger tap targets on the blue hero */
+.landing-hero .landing-prog-btn {
+    background: linear-gradient(
+        145deg,
+        rgba(255, 255, 255, 0.14) 0%,
+        rgba(255, 255, 255, 0.06) 45%,
+        rgba(10, 22, 40, 0.35) 100%
+    );
+    border-color: rgba(255, 255, 255, 0.22);
+    box-shadow: 0 2px 14px rgba(0, 0, 0, 0.2);
+}
+
+.landing-hero .landing-prog-btn:hover,
+.landing-hero .landing-prog-btn:focus-visible {
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.28);
+    filter: brightness(1.08);
 }
 
 .landing-hero-visual {

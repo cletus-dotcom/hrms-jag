@@ -190,7 +190,7 @@
                             <option value="Contractual" {% if emp and emp.status_of_appointment == 'Contractual' %}selected{% endif %}>Contractual</option>
                             <option value="Temporary" {% if emp and emp.status_of_appointment == 'Temporary' %}selected{% endif %}>Temporary</option>
                             <option value="Coterminus" {% if emp and emp.status_of_appointment == 'Coterminus' %}selected{% endif %}>Coterminus</option>
-                            <option value="Provisional" {% if emp and emp.status_of_appointment == 'Provisional' %}selected{% endif %}>Provisional</option>
+                            <option value="Probational" {% if emp and emp.status_of_appointment in ('Provisional', 'Probational') %}selected{% endif %}>Probational</option>
                             <option value="Elective" {% if emp and emp.status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
                             <option value="Contract of Service" {% if emp and emp.status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                             <option value="Job Order" {% if emp and emp.status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>

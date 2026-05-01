@@ -27,8 +27,18 @@ from app.leave_utils import (
 )
 from app.models import Employee, LeaveLedger, LeaveLedgerDeletion
 
-# Same eligibility as leave_credits_list
-LEAVE_CREDITS_STATUSES = ('Permanent', 'Casual', 'Temporary', 'Elective')
+# Same eligibility as leave_credits_list — plantilla-style statuses that earn VL/SL ledger credits.
+# "Provisional" kept for legacy rows; employee form uses "Probational".
+LEAVE_CREDITS_STATUSES = (
+    'Permanent',
+    'Casual',
+    'Temporary',
+    'Elective',
+    'Probational',
+    'Provisional',
+    'Coterminus',
+    'Contractual',
+)
 
 
 def monthly_accrual_particulars(year: int, month: int) -> str:

@@ -1705,7 +1705,7 @@
                                                     <option value="Contract of Service" {% if pds and pds.work_exp1_status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                                                     <option value="Job Order" {% if pds and pds.work_exp1_status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
                                                     <option value="Elective" {% if pds and pds.work_exp1_status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
-                                                    <option value="Provisional" {% if pds and pds.work_exp1_status_of_appointment == 'Provisional' %}selected{% endif %}>Provisional</option>
+                                                    <option value="Probational" {% if pds and pds.work_exp1_status_of_appointment in ('Provisional', 'Probational') %}selected{% endif %}>Probational</option>
                                                 </select>
                                             </td>
                                             <td style="padding: 0.3rem; border: 1px solid #ccc;">
@@ -1736,7 +1736,7 @@
                                                     <option value="Contract of Service" {% if pds and pds.work_exp2_status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                                                     <option value="Job Order" {% if pds and pds.work_exp2_status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
                                                     <option value="Elective" {% if pds and pds.work_exp2_status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
-                                                    <option value="Provisional" {% if pds and pds.work_exp2_status_of_appointment == 'Provisional' %}selected{% endif %}>Provisional</option>
+                                                    <option value="Probational" {% if pds and pds.work_exp2_status_of_appointment in ('Provisional', 'Probational') %}selected{% endif %}>Probational</option>
                                                 </select>
                                             </td>
                                             <td style="padding: 0.3rem; border: 1px solid #ccc;"><input type="text" name="work_exp2_govt_service" value="{{ pds.work_exp2_govt_service if pds and pds.work_exp2_govt_service else '' }}" class="form-input" style="width: 100%; padding: 0.3rem; font-size: 0.85rem;" placeholder="Y/N"></td>
@@ -1773,7 +1773,7 @@
                                                     <option value="Contract of Service" {% if pds and pds.work_exp3_status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                                                     <option value="Job Order" {% if pds and pds.work_exp3_status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
                                                     <option value="Elective" {% if pds and pds.work_exp3_status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
-                                                    <option value="Provisional" {% if pds and pds.work_exp3_status_of_appointment == 'Provisional' %}selected{% endif %}>Provisional</option>
+                                                    <option value="Probational" {% if pds and pds.work_exp3_status_of_appointment in ('Provisional', 'Probational') %}selected{% endif %}>Probational</option>
                                                 </select>
                                             </td>
                                             <td style="padding: 0.3rem; border: 1px solid #ccc;">
@@ -1813,7 +1813,7 @@
                                                     <option value="Contract of Service" {% if pds and pds.work_exp4_status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                                                     <option value="Job Order" {% if pds and pds.work_exp4_status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
                                                     <option value="Elective" {% if pds and pds.work_exp4_status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
-                                                    <option value="Provisional" {% if pds and pds.work_exp4_status_of_appointment == 'Provisional' %}selected{% endif %}>Provisional</option>
+                                                    <option value="Probational" {% if pds and pds.work_exp4_status_of_appointment in ('Provisional', 'Probational') %}selected{% endif %}>Probational</option>
                                                 </select>
                                             </td>
                                             <td style="padding: 0.3rem; border: 1px solid #ccc;">
@@ -1853,7 +1853,7 @@
                                                     <option value="Contract of Service" {% if pds and pds.work_exp5_status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                                                     <option value="Job Order" {% if pds and pds.work_exp5_status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
                                                     <option value="Elective" {% if pds and pds.work_exp5_status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
-                                                    <option value="Provisional" {% if pds and pds.work_exp5_status_of_appointment == 'Provisional' %}selected{% endif %}>Provisional</option>
+                                                    <option value="Probational" {% if pds and pds.work_exp5_status_of_appointment in ('Provisional', 'Probational') %}selected{% endif %}>Probational</option>
                                                 </select>
                                             </td>
                                             <td style="padding: 0.3rem; border: 1px solid #ccc;">
@@ -1893,7 +1893,7 @@
                                                     <option value="Contract of Service" {% if pds and pds.work_exp6_status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                                                     <option value="Job Order" {% if pds and pds.work_exp6_status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
                                                     <option value="Elective" {% if pds and pds.work_exp6_status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
-                                                    <option value="Provisional" {% if pds and pds.work_exp6_status_of_appointment == 'Provisional' %}selected{% endif %}>Provisional</option>
+                                                    <option value="Probational" {% if pds and pds.work_exp6_status_of_appointment in ('Provisional', 'Probational') %}selected{% endif %}>Probational</option>
                                                 </select>
                                             </td>
                                             <td style="padding: 0.3rem; border: 1px solid #ccc;">
@@ -1933,7 +1933,7 @@
                                                     <option value="Contract of Service" {% if pds and pds.work_exp7_status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                                                     <option value="Job Order" {% if pds and pds.work_exp7_status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
                                                     <option value="Elective" {% if pds and pds.work_exp7_status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
-                                                    <option value="Provisional" {% if pds and pds.work_exp7_status_of_appointment == 'Provisional' %}selected{% endif %}>Provisional</option>
+                                                    <option value="Probational" {% if pds and pds.work_exp7_status_of_appointment in ('Provisional', 'Probational') %}selected{% endif %}>Probational</option>
                                                 </select>
                                             </td>
                                             <td style="padding: 0.3rem; border: 1px solid #ccc;">
@@ -1973,7 +1973,7 @@
                                                     <option value="Contract of Service" {% if pds and pds.work_exp8_status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                                                     <option value="Job Order" {% if pds and pds.work_exp8_status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
                                                     <option value="Elective" {% if pds and pds.work_exp8_status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
-                                                    <option value="Provisional" {% if pds and pds.work_exp8_status_of_appointment == 'Provisional' %}selected{% endif %}>Provisional</option>
+                                                    <option value="Probational" {% if pds and pds.work_exp8_status_of_appointment in ('Provisional', 'Probational') %}selected{% endif %}>Probational</option>
                                                 </select>
                                             </td>
                                             <td style="padding: 0.3rem; border: 1px solid #ccc;">
@@ -2013,7 +2013,7 @@
                                                     <option value="Contract of Service" {% if pds and pds.work_exp9_status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                                                     <option value="Job Order" {% if pds and pds.work_exp9_status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
                                                     <option value="Elective" {% if pds and pds.work_exp9_status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
-                                                    <option value="Provisional" {% if pds and pds.work_exp9_status_of_appointment == 'Provisional' %}selected{% endif %}>Provisional</option>
+                                                    <option value="Probational" {% if pds and pds.work_exp9_status_of_appointment in ('Provisional', 'Probational') %}selected{% endif %}>Probational</option>
                                                 </select>
                                             </td>
                                             <td style="padding: 0.3rem; border: 1px solid #ccc;">
@@ -2053,7 +2053,7 @@
                                                     <option value="Contract of Service" {% if pds and pds.work_exp10_status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                                                     <option value="Job Order" {% if pds and pds.work_exp10_status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
                                                     <option value="Elective" {% if pds and pds.work_exp10_status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
-                                                    <option value="Provisional" {% if pds and pds.work_exp10_status_of_appointment == 'Provisional' %}selected{% endif %}>Provisional</option>
+                                                    <option value="Probational" {% if pds and pds.work_exp10_status_of_appointment in ('Provisional', 'Probational') %}selected{% endif %}>Probational</option>
                                                 </select>
                                             </td>
                                             <td style="padding: 0.3rem; border: 1px solid #ccc;">
@@ -2093,7 +2093,7 @@
                                                     <option value="Contract of Service" {% if pds and pds.work_exp11_status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                                                     <option value="Job Order" {% if pds and pds.work_exp11_status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
                                                     <option value="Elective" {% if pds and pds.work_exp11_status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
-                                                    <option value="Provisional" {% if pds and pds.work_exp11_status_of_appointment == 'Provisional' %}selected{% endif %}>Provisional</option>
+                                                    <option value="Probational" {% if pds and pds.work_exp11_status_of_appointment in ('Provisional', 'Probational') %}selected{% endif %}>Probational</option>
                                                 </select>
                                             </td>
                                             <td style="padding: 0.3rem; border: 1px solid #ccc;">
@@ -2133,7 +2133,7 @@
                                                     <option value="Contract of Service" {% if pds and pds.work_exp12_status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                                                     <option value="Job Order" {% if pds and pds.work_exp12_status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
                                                     <option value="Elective" {% if pds and pds.work_exp12_status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
-                                                    <option value="Provisional" {% if pds and pds.work_exp12_status_of_appointment == 'Provisional' %}selected{% endif %}>Provisional</option>
+                                                    <option value="Probational" {% if pds and pds.work_exp12_status_of_appointment in ('Provisional', 'Probational') %}selected{% endif %}>Probational</option>
                                                 </select>
                                             </td>
                                             <td style="padding: 0.3rem; border: 1px solid #ccc;">
@@ -2173,7 +2173,7 @@
                                                     <option value="Contract of Service" {% if pds and pds.work_exp13_status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                                                     <option value="Job Order" {% if pds and pds.work_exp13_status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
                                                     <option value="Elective" {% if pds and pds.work_exp13_status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
-                                                    <option value="Provisional" {% if pds and pds.work_exp13_status_of_appointment == 'Provisional' %}selected{% endif %}>Provisional</option>
+                                                    <option value="Probational" {% if pds and pds.work_exp13_status_of_appointment in ('Provisional', 'Probational') %}selected{% endif %}>Probational</option>
                                                 </select>
                                             </td>
                                             <td style="padding: 0.3rem; border: 1px solid #ccc;">
@@ -2213,7 +2213,7 @@
                                                     <option value="Contract of Service" {% if pds and pds.work_exp14_status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                                                     <option value="Job Order" {% if pds and pds.work_exp14_status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
                                                     <option value="Elective" {% if pds and pds.work_exp14_status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
-                                                    <option value="Provisional" {% if pds and pds.work_exp14_status_of_appointment == 'Provisional' %}selected{% endif %}>Provisional</option>
+                                                    <option value="Probational" {% if pds and pds.work_exp14_status_of_appointment in ('Provisional', 'Probational') %}selected{% endif %}>Probational</option>
                                                 </select>
                                             </td>
                                             <td style="padding: 0.3rem; border: 1px solid #ccc;">
@@ -2253,7 +2253,7 @@
                                                     <option value="Contract of Service" {% if pds and pds.work_exp15_status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                                                     <option value="Job Order" {% if pds and pds.work_exp15_status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
                                                     <option value="Elective" {% if pds and pds.work_exp15_status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
-                                                    <option value="Provisional" {% if pds and pds.work_exp15_status_of_appointment == 'Provisional' %}selected{% endif %}>Provisional</option>
+                                                    <option value="Probational" {% if pds and pds.work_exp15_status_of_appointment in ('Provisional', 'Probational') %}selected{% endif %}>Probational</option>
                                                 </select>
                                             </td>
                                             <td style="padding: 0.3rem; border: 1px solid #ccc;">
@@ -2293,7 +2293,7 @@
                                                     <option value="Contract of Service" {% if pds and pds.work_exp16_status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                                                     <option value="Job Order" {% if pds and pds.work_exp16_status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
                                                     <option value="Elective" {% if pds and pds.work_exp16_status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
-                                                    <option value="Provisional" {% if pds and pds.work_exp16_status_of_appointment == 'Provisional' %}selected{% endif %}>Provisional</option>
+                                                    <option value="Probational" {% if pds and pds.work_exp16_status_of_appointment in ('Provisional', 'Probational') %}selected{% endif %}>Probational</option>
                                                 </select>
                                             </td>
                                             <td style="padding: 0.3rem; border: 1px solid #ccc;">
@@ -2333,7 +2333,7 @@
                                                     <option value="Contract of Service" {% if pds and pds.work_exp17_status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                                                     <option value="Job Order" {% if pds and pds.work_exp17_status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
                                                     <option value="Elective" {% if pds and pds.work_exp17_status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
-                                                    <option value="Provisional" {% if pds and pds.work_exp17_status_of_appointment == 'Provisional' %}selected{% endif %}>Provisional</option>
+                                                    <option value="Probational" {% if pds and pds.work_exp17_status_of_appointment in ('Provisional', 'Probational') %}selected{% endif %}>Probational</option>
                                                 </select>
                                             </td>
                                             <td style="padding: 0.3rem; border: 1px solid #ccc;">
@@ -2373,7 +2373,7 @@
                                                     <option value="Contract of Service" {% if pds and pds.work_exp18_status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                                                     <option value="Job Order" {% if pds and pds.work_exp18_status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
                                                     <option value="Elective" {% if pds and pds.work_exp18_status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
-                                                    <option value="Provisional" {% if pds and pds.work_exp18_status_of_appointment == 'Provisional' %}selected{% endif %}>Provisional</option>
+                                                    <option value="Probational" {% if pds and pds.work_exp18_status_of_appointment in ('Provisional', 'Probational') %}selected{% endif %}>Probational</option>
                                                 </select>
                                             </td>
                                             <td style="padding: 0.3rem; border: 1px solid #ccc;">
@@ -2413,7 +2413,7 @@
                                                     <option value="Contract of Service" {% if pds and pds.work_exp19_status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                                                     <option value="Job Order" {% if pds and pds.work_exp19_status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
                                                     <option value="Elective" {% if pds and pds.work_exp19_status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
-                                                    <option value="Provisional" {% if pds and pds.work_exp19_status_of_appointment == 'Provisional' %}selected{% endif %}>Provisional</option>
+                                                    <option value="Probational" {% if pds and pds.work_exp19_status_of_appointment in ('Provisional', 'Probational') %}selected{% endif %}>Probational</option>
                                                 </select>
                                             </td>
                                             <td style="padding: 0.3rem; border: 1px solid #ccc;">
@@ -2453,7 +2453,7 @@
                                                     <option value="Contract of Service" {% if pds and pds.work_exp20_status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                                                     <option value="Job Order" {% if pds and pds.work_exp20_status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
                                                     <option value="Elective" {% if pds and pds.work_exp20_status_of_appointment == 'Elective' %}selected{% endif %}>Elective</option>
-                                                    <option value="Provisional" {% if pds and pds.work_exp20_status_of_appointment == 'Provisional' %}selected{% endif %}>Provisional</option>
+                                                    <option value="Probational" {% if pds and pds.work_exp20_status_of_appointment in ('Provisional', 'Probational') %}selected{% endif %}>Probational</option>
                                                 </select>
                                             </td>
                                             <td style="padding: 0.3rem; border: 1px solid #ccc;">
