@@ -17,6 +17,7 @@
                         <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
                         <hr class="dropdown-separator">
                         <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
+                        <a href="{{ url_for('routes.jo_cos_designations_list') }}" class="dropdown-item">JO/COS designations</a>
                         <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
                         <hr class="dropdown-separator">
                         <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
@@ -162,26 +163,6 @@
                         </select>
                     </div>
                     <div class="form-group">
-                        <label for="position">Current Position</label>
-                        <select id="position" name="position" class="form-control">
-                            <option value="">Select position</option>
-                            {% if emp and emp.position and positions and emp.position not in (positions|map(attribute='title')|list) %}
-                                <option value="{{ emp.position }}" selected>{{ emp.position }}</option>
-                            {% endif %}
-                            {% for pos in positions %}
-                                <option value="{{ pos.title }}" {% if emp and emp.position == pos.title %}selected{% endif %}>{{ pos.title }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                </div>
-                
-                <div class="form-grid">
-                    <div class="form-group">
-                        <label for="appointment_date">Appointment Date</label>
-                        <input type="date" id="appointment_date" name="appointment_date" class="form-control" 
-                               value="{{ emp.appointment_date.strftime('%Y-%m-%d') if emp and emp.appointment_date else '' }}">
-                    </div>
-                    <div class="form-group">
                         <label for="status_of_appointment">Status of Appointment</label>
                         <select id="status_of_appointment" name="status_of_appointment" class="form-control">
                             <option value="">Select</option>
@@ -195,6 +176,42 @@
                             <option value="Contract of Service" {% if emp and emp.status_of_appointment == 'Contract of Service' %}selected{% endif %}>Contract of Service</option>
                             <option value="Job Order" {% if emp and emp.status_of_appointment == 'Job Order' %}selected{% endif %}>Job Order</option>
                         </select>
+                    </div>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group" id="position_regular_group" style="grid-column: 1 / -1;">
+                        <label for="position">Current Position</label>
+                        <select id="position" name="position" class="form-control">
+                            <option value="">Select position</option>
+                            {% if emp and emp.position and positions and emp.position not in (positions|map(attribute='title')|list) %}
+                                {% if emp.status_of_appointment not in ('Job Order', 'Contract of Service') or not emp.jo_cos_designation_id %}
+                                <option value="{{ emp.position }}" selected>{{ emp.position }}</option>
+                                {% endif %}
+                            {% endif %}
+                            {% for pos in positions %}
+                                <option value="{{ pos.title }}" {% if emp and emp.position == pos.title and (emp.status_of_appointment not in ('Job Order', 'Contract of Service') or not emp.jo_cos_designation_id) %}selected{% endif %}>{{ pos.title }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group" id="position_jocos_group" style="grid-column: 1 / -1; display: none;">
+                        <label for="jo_cos_designation_id">Current position (Job Order / COS)</label>
+                        <select id="jo_cos_designation_id" name="jo_cos_designation_id" class="form-control" disabled>
+                            <option value="">Select designation</option>
+                            {% for d in (jo_cos_designations or []) %}
+                                <option value="{{ d.id }}" {% if emp and (emp.jo_cos_designation_id == d.id or (not emp.jo_cos_designation_id and emp.status_of_appointment in ('Job Order', 'Contract of Service') and emp.position == d.designation)) %}selected{% endif %}>{{ d.designation }}</option>
+                            {% endfor %}
+                        </select>
+                        {% if not (jo_cos_designations or []) %}
+                        <small style="color: var(--medium-gray);">No designations loaded. HR/Admin: run <code>python migrate_jo_cos_designation.py</code> (see Settings → JO/COS designations).</small>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="appointment_date">Appointment Date</label>
+                        <input type="date" id="appointment_date" name="appointment_date" class="form-control" 
+                               value="{{ emp.appointment_date.strftime('%Y-%m-%d') if emp and emp.appointment_date else '' }}">
                     </div>
                     <div class="form-group">
                         <label for="nature_of_appointment">Nature of Appointment</label>
@@ -622,6 +639,24 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }, 200);
     }
+
+    // Job Order / COS: plantilla position vs designation dropdown
+    var statusAppt = document.getElementById('status_of_appointment');
+    var regGroup = document.getElementById('position_regular_group');
+    var jocosGroup = document.getElementById('position_jocos_group');
+    var regSel = document.getElementById('position');
+    var jocosSel = document.getElementById('jo_cos_designation_id');
+    function syncPositionAppointmentUI() {
+        if (!statusAppt) return;
+        var v = statusAppt.value;
+        var isJo = (v === 'Job Order' || v === 'Contract of Service');
+        if (regGroup) regGroup.style.display = isJo ? 'none' : '';
+        if (jocosGroup) jocosGroup.style.display = isJo ? '' : 'none';
+        if (regSel) regSel.disabled = isJo;
+        if (jocosSel) jocosSel.disabled = !isJo;
+    }
+    if (statusAppt) statusAppt.addEventListener('change', syncPositionAppointmentUI);
+    syncPositionAppointmentUI();
 });
 </script>
 {% endblock %}

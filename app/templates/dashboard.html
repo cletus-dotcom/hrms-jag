@@ -2,6 +2,62 @@
 
 {% block title %}Dashboard - HRMS{% endblock %}
 
+{% block extra_css %}
+{% if (current_user.role or '')|lower in ('admin', 'hr') %}
+<style>
+  .dtr-generate-status-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10200;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    background: rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+  .dtr-generate-status-overlay.is-visible {
+    display: flex;
+  }
+  .dtr-generate-status-card {
+    max-width: 22rem;
+    width: 100%;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.05);
+    padding: 1.75rem 1.5rem 1.5rem;
+    text-align: center;
+  }
+  .dtr-generate-status-spinner {
+    width: 2.5rem;
+    height: 2.5rem;
+    margin: 0 auto 1.1rem;
+    border: 3px solid #e5e7eb;
+    border-top-color: #1e40af;
+    border-radius: 50%;
+    animation: dtr-generate-spin 0.75s linear infinite;
+  }
+  @keyframes dtr-generate-spin {
+    to { transform: rotate(360deg); }
+  }
+  .dtr-generate-status-title {
+    margin: 0 0 0.35rem;
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: #111827;
+    letter-spacing: -0.02em;
+  }
+  .dtr-generate-status-sub {
+    margin: 0;
+    font-size: 0.9rem;
+    color: #6b7280;
+    line-height: 1.45;
+  }
+</style>
+{% endif %}
+{% endblock %}
+
 {% block content %}
 <div class="dashboard-container">
     <div class="header-bar">
@@ -203,81 +259,114 @@
       <h2 class="change-password-modal-title">Generate DTR</h2>
       <button type="button" class="change-password-modal-close" onclick="document.getElementById('generateDtrModal').style.display='none'">&times;</button>
     </div>
-    <form method="POST" action="{{ url_for('routes.dtr_generate') }}">
+    <form id="generateDtrForm" method="POST" action="{{ url_for('routes.dtr_generate') }}" data-dashboard-url="{{ url_for('routes.dashboard') }}">
       <div class="change-password-modal-body">
-        <div class="generate-dtr-modal-grid">
-          <div class="form-group">
-            <label>Generation Type</label>
-            <select name="mode" id="dtrMode" class="form-control" onchange="(function(){const q=document.getElementById('quincenaWrap'); q.style.display=(document.getElementById('dtrMode').value==='quincena'?'block':'none');})()">
-              <option value="quincena">Quincena (Non-Plantilla)</option>
-              <option value="month">Month (Plantilla)</option>
-            </select>
+        <div class="generate-dtr-modal-layout">
+          <div class="generate-dtr-modal-col generate-dtr-modal-col-left">
+            <p class="generate-dtr-modal-col-heading">Period</p>
+            <div class="generate-dtr-modal-grid-period">
+              <div class="form-group generate-dtr-period-mode">
+                <label>Generation Type</label>
+                <select name="mode" id="dtrMode" class="form-control" onchange="(function(){const q=document.getElementById('quincenaWrap'); q.style.display=(document.getElementById('dtrMode').value==='quincena'?'block':'none');})()">
+                  <option value="quincena">Quincena (Non-Plantilla)</option>
+                  <option value="month">Month (Plantilla)</option>
+                </select>
+              </div>
+              <div class="form-group generate-dtr-period-quincena" id="quincenaWrap">
+                <label>Quincena</label>
+                <select name="quincena" id="dtrGenQuincena" class="form-control">
+                  <option value="1">1st Quincena (1-15)</option>
+                  <option value="2">2nd Quincena (16-31)</option>
+                </select>
+              </div>
+              <div class="form-group generate-dtr-period-month">
+                <label>Month</label>
+                <select name="month" id="dtrGenMonth" class="form-control" required>
+                  <option value="1">January</option>
+                  <option value="2">February</option>
+                  <option value="3">March</option>
+                  <option value="4">April</option>
+                  <option value="5">May</option>
+                  <option value="6">June</option>
+                  <option value="7">July</option>
+                  <option value="8">August</option>
+                  <option value="9">September</option>
+                  <option value="10">October</option>
+                  <option value="11">November</option>
+                  <option value="12">December</option>
+                </select>
+              </div>
+              <div class="form-group generate-dtr-period-year">
+                <label>Year</label>
+                <input type="number" min="2000" max="2100" name="year" id="dtrGenYear" class="form-control" required>
+              </div>
+            </div>
+            <div class="generate-dtr-modal-period-footer" role="group" aria-label="Generate DTR actions">
+              <button type="button" class="btn-secondary" onclick="document.getElementById('generateDtrModal').style.display='none'">Cancel</button>
+              <button type="submit" class="btn-primary">Generate</button>
+            </div>
           </div>
-          <div class="form-group" id="quincenaWrap">
-            <label>Quincena</label>
-            <select name="quincena" class="form-control">
-              <option value="1">1st Quincena (1-15)</option>
-              <option value="2">2nd Quincena (16-31)</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Month</label>
-            <select name="month" id="dtrGenMonth" class="form-control" required>
-              <option value="1">January</option>
-              <option value="2">February</option>
-              <option value="3">March</option>
-              <option value="4">April</option>
-              <option value="5">May</option>
-              <option value="6">June</option>
-              <option value="7">July</option>
-              <option value="8">August</option>
-              <option value="9">September</option>
-              <option value="10">October</option>
-              <option value="11">November</option>
-              <option value="12">December</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Year</label>
-            <input type="number" min="2000" max="2100" name="year" id="dtrGenYear" class="form-control" required>
-          </div>
-          <div class="form-group generate-dtr-modal-span-full">
-            <label class="generate-dtr-modal-section-title">Compressed Workweek Settings (optional)</label>
-            <p class="generate-dtr-modal-note">
-              5-day: 8:00 / 12:00 / 13:00 / 17:00 · 4-day: 7:00 / 12:00 / 13:00 / 18:00
-            </p>
-          </div>
-          <div class="form-group">
-            <label>Model</label>
-            <select name="arrangement_model" class="form-control">
-              <option value="">-- No change --</option>
-              <option value="5day">5-day compressed</option>
-              <option value="4day">4-day compressed</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Applies To</label>
-            <select name="arrangement_applies_to" class="form-control">
-              <option value="all">All employees</option>
-              <option value="regular">Plantilla only</option>
-              <option value="jo_cos">Non-Plantilla only</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Start Date</label>
-            <input type="date" name="arrangement_start_date" class="form-control">
-          </div>
-          <div class="form-group">
-            <label>End Date</label>
-            <input type="date" name="arrangement_end_date" class="form-control">
+          <div class="generate-dtr-modal-col generate-dtr-modal-col-right">
+            <p class="generate-dtr-modal-col-heading">Workweek &amp; holidays</p>
+            <div class="form-group">
+              <label class="generate-dtr-modal-section-title">Compressed Workweek Settings (optional)</label>
+              <p class="generate-dtr-modal-note">
+                5-day: 8:00 / 12:00 / 13:00 / 17:00 · 4-day: 7:00 / 12:00 / 13:00 / 18:00
+              </p>
+            </div>
+            <div class="generate-dtr-modal-grid-workweek">
+              <div class="form-group">
+                <label>Model</label>
+                <select name="arrangement_model" class="form-control">
+                  <option value="">-- No change --</option>
+                  <option value="5day">5-day compressed</option>
+                  <option value="4day">4-day compressed</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Applies To</label>
+                <select name="arrangement_applies_to" class="form-control">
+                  <option value="all">All employees</option>
+                  <option value="regular">Plantilla only</option>
+                  <option value="jo_cos">Non-Plantilla only</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Start Date</label>
+                <input type="date" name="arrangement_start_date" class="form-control">
+              </div>
+              <div class="form-group">
+                <label>End Date</label>
+                <input type="date" name="arrangement_end_date" class="form-control">
+              </div>
+            </div>
+            <div class="form-group generate-dtr-modal-holidays-block">
+              <label class="generate-dtr-modal-section-title">Holidays (optional)</label>
+              <p class="generate-dtr-modal-note">
+                Use the calendar to add dates, or type them manually. One date per line, or separated by commas.
+                Format: <strong>YYYY-MM-DD</strong> (e.g. 2026-05-01) or <strong>DD/MM/YYYY</strong>. Dates outside the generated period are ignored.
+              </p>
+              <div class="generate-dtr-holiday-calendar-row" aria-label="Add holiday by calendar">
+                <div class="generate-dtr-holiday-date-wrap form-group">
+                  <label for="dtrHolidayCalendar">Pick a date</label>
+                  <input type="date" id="dtrHolidayCalendar" class="form-control" autocomplete="off">
+                </div>
+                <button type="button" id="dtrHolidayAddBtn" class="btn-secondary">Add to list</button>
+              </div>
+              <label for="dtrHolidayDatesText">Holiday dates</label>
+              <textarea name="holiday_dates" id="dtrHolidayDatesText" class="form-control" rows="4" placeholder="2026-05-01&#10;2026-05-25"></textarea>
+            </div>
           </div>
         </div>
       </div>
-      <div class="change-password-modal-footer">
-        <button type="button" class="btn-secondary" onclick="document.getElementById('generateDtrModal').style.display='none'">Cancel</button>
-        <button type="submit" class="btn-primary">Generate</button>
-      </div>
     </form>
+  </div>
+</div>
+<div id="dtr-generate-status" class="dtr-generate-status-overlay" role="status" aria-live="polite" aria-hidden="true">
+  <div class="dtr-generate-status-card">
+    <div class="dtr-generate-status-spinner" aria-hidden="true"></div>
+    <p class="dtr-generate-status-title">Generating DTR</p>
+    <p class="dtr-generate-status-sub">Please wait a moment.</p>
   </div>
 </div>
 {% endif %}
@@ -294,9 +383,126 @@ document.addEventListener('DOMContentLoaded', function () {
     monthEl.value = String(now.getMonth() + 1);
     yearEl.value = String(now.getFullYear());
   }
+  var dtrModeInit = document.getElementById('dtrMode');
+  var dtrQWrapInit = document.getElementById('quincenaWrap');
+  if (dtrModeInit && dtrQWrapInit) {
+    dtrQWrapInit.style.display = (dtrModeInit.value === 'quincena' ? 'block' : 'none');
+  }
   if (modal) {
     modal.addEventListener('click', function (e) {
       if (e.target === modal) modal.style.display = 'none';
+    });
+  }
+
+  var holidayCal = document.getElementById('dtrHolidayCalendar');
+  var holidayTa = document.getElementById('dtrHolidayDatesText');
+  var holidayAddBtn = document.getElementById('dtrHolidayAddBtn');
+  var modeEl = document.getElementById('dtrMode');
+  var quincenaEl = document.getElementById('dtrGenQuincena');
+
+  function dtrPad2(n) {
+    return String(n).padStart(2, '0');
+  }
+  function dtrLastDayOfMonth(year, month1to12) {
+    return new Date(year, month1to12, 0).getDate();
+  }
+  function dtrYmd(year, month1to12, day) {
+    return year + '-' + dtrPad2(month1to12) + '-' + dtrPad2(day);
+  }
+  function dtrHolidayPeriodBounds() {
+    var y = parseInt(yearEl && yearEl.value, 10);
+    var m = parseInt(monthEl && monthEl.value, 10);
+    if (!y || !m || m < 1 || m > 12) return null;
+    var mode = (modeEl && modeEl.value) || 'quincena';
+    var last = dtrLastDayOfMonth(y, m);
+    if (mode === 'month') {
+      return { min: dtrYmd(y, m, 1), max: dtrYmd(y, m, last) };
+    }
+    var q = (quincenaEl && quincenaEl.value) || '1';
+    if (q === '2') {
+      return { min: dtrYmd(y, m, 16), max: dtrYmd(y, m, last) };
+    }
+    return { min: dtrYmd(y, m, 1), max: dtrYmd(y, m, 15) };
+  }
+  function syncHolidayCalendarBounds() {
+    if (!holidayCal) return;
+    var b = dtrHolidayPeriodBounds();
+    if (!b) return;
+    holidayCal.min = b.min;
+    holidayCal.max = b.max;
+    var v = holidayCal.value;
+    if (v && (v < b.min || v > b.max)) holidayCal.value = b.min;
+  }
+  function dtrHolidayTokensFromTextarea() {
+    if (!holidayTa || !holidayTa.value) return [];
+    return holidayTa.value
+      .split(/[\n,;]+/)
+      .map(function (s) { return s.trim(); })
+      .filter(Boolean);
+  }
+  function addHolidayFromCalendar() {
+    if (!holidayCal || !holidayTa) return;
+    var d = holidayCal.value;
+    if (!d) return;
+    var existing = dtrHolidayTokensFromTextarea();
+    if (existing.indexOf(d) !== -1) return;
+    holidayTa.value = holidayTa.value.replace(/\s+$/, '');
+    if (holidayTa.value.length) holidayTa.value += '\n';
+    holidayTa.value += d;
+  }
+
+  if (holidayCal && holidayTa && holidayAddBtn) {
+    holidayAddBtn.addEventListener('click', addHolidayFromCalendar);
+    holidayCal.addEventListener('focus', syncHolidayCalendarBounds);
+    holidayCal.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        addHolidayFromCalendar();
+      }
+    });
+    [monthEl, yearEl, modeEl, quincenaEl].forEach(function (el) {
+      if (el) el.addEventListener('change', syncHolidayCalendarBounds);
+    });
+    if (yearEl) yearEl.addEventListener('input', syncHolidayCalendarBounds);
+    syncHolidayCalendarBounds();
+  }
+
+  var genForm = document.getElementById('generateDtrForm');
+  var genOverlay = document.getElementById('dtr-generate-status');
+  if (genForm && genOverlay) {
+    function showGenOverlay() {
+      genOverlay.classList.add('is-visible');
+      genOverlay.setAttribute('aria-hidden', 'false');
+    }
+    function hideGenOverlay() {
+      genOverlay.classList.remove('is-visible');
+      genOverlay.setAttribute('aria-hidden', 'true');
+    }
+    genForm.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var submitBtn = genForm.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      showGenOverlay();
+      fetch(genForm.action, {
+        method: 'POST',
+        body: new FormData(genForm),
+        credentials: 'same-origin',
+        redirect: 'follow'
+      })
+        .then(function (res) {
+          if (res.ok) {
+            window.location.href = res.url || genForm.getAttribute('data-dashboard-url') || '/';
+            return;
+          }
+          hideGenOverlay();
+          if (submitBtn) submitBtn.disabled = false;
+          alert('DTR generation could not be completed. Please check your inputs and try again.');
+        })
+        .catch(function (err) {
+          hideGenOverlay();
+          if (submitBtn) submitBtn.disabled = false;
+          alert('Network error. Please try again.');
+        });
     });
   }
 });

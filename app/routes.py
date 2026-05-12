@@ -1,8 +1,9 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, session, Response, jsonify, send_file, abort
 from flask_login import login_user, logout_user, login_required, current_user
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, time, timedelta
 import calendar
 import json
+import re
 import csv
 import io
 import os
@@ -15,7 +16,7 @@ from app.leave_ledger_service import (
     recompute_leave_ledger_balances,
     undo_monthly_accrual_for_month,
 )
-from app.models import User, Employee, Department, Position, SalaryGrade, Attendance, LeaveRequest, LeaveType, LeaveBalance, EmployeePDS, EmployeeAppointmentHistory, DailyTimeRecord, LeaveLedger, DtrWorkArrangementSetting, DtrJustification, PayrollSubmission
+from app.models import User, Employee, Department, Position, SalaryGrade, Attendance, LeaveRequest, LeaveType, LeaveBalance, EmployeePDS, EmployeeAppointmentHistory, DailyTimeRecord, LeaveLedger, DtrWorkArrangementSetting, DtrJustification, PayrollSubmission, JoCosDesignation
 from app.dtr_parse import parse_dtr_dat_file as _parse_dtr_dat_file
 from decimal import Decimal
 from werkzeug.utils import secure_filename
@@ -23,6 +24,37 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
 bp = Blueprint('routes', __name__)
+
+
+def _jo_cos_designations_ordered():
+    return JoCosDesignation.query.order_by(JoCosDesignation.sort_order, JoCosDesignation.id).all()
+
+
+def _is_jo_or_cos_status(status):
+    s = (status or '').strip().lower()
+    return s in ('job order', 'contract of service')
+
+
+def _resolve_position_and_jo_cos_fk(status_of_appointment, position_form_val, jo_cos_id_form_val):
+    """
+    For Job Order / Contract of Service, current position comes from jo_cos_designation_id when set.
+    Otherwise use the plantilla/positions dropdown value.
+    """
+    pos_in = (position_form_val or '').strip()
+    jraw = (jo_cos_id_form_val or '').strip()
+    if _is_jo_or_cos_status(status_of_appointment):
+        jid = None
+        if jraw:
+            try:
+                jid = int(jraw)
+            except ValueError:
+                jid = None
+        row = JoCosDesignation.query.get(jid) if jid else None
+        if row:
+            des = (row.designation or '').strip()
+            return (des if des else None), row.id
+        return (pos_in or None), None
+    return (pos_in or None), None
 
 def _next_employee_id_6digit() -> str:
     """
@@ -664,6 +696,23 @@ def _is_jo_cos_employee(emp: Employee) -> bool:
     return ('job order' in text) or ('contract of service' in text) or ('cos' in text) or text == 'jo'
 
 
+def _is_cos_employee(emp: Employee) -> bool:
+    """Contract of Service (aligned with plantilla for 4-day duty anchors). Not Job Order."""
+    t = ((emp.status_of_appointment or '') + ' ' + (emp.nature_of_appointment or '')).strip().lower()
+    if 'contract of service' in t:
+        return True
+    if 'job order' in t:
+        return False
+    return 'cos' in t or t == 'c.o.s.'
+
+
+def _is_jo_only_employee(emp: Employee) -> bool:
+    """Job Order only (8:00 / 17:00 defaults under 4-day); excludes COS."""
+    if not _is_jo_cos_employee(emp):
+        return False
+    return not _is_cos_employee(emp)
+
+
 def _is_regular_employee(emp: Employee) -> bool:
     soa = (emp.status_of_appointment or '').strip().lower()
     if soa:
@@ -713,6 +762,45 @@ def _pick_work_arrangement_for_date(emp: Employee, d: date):
         if applies == 'jo_cos' and not is_regular:
             return _DTR_DUTY_MODELS.get(row.model_code) or _DTR_DUTY_MODELS['5day']
     return _DTR_DUTY_MODELS['5day']
+
+
+def _employee_matches_dtr_applies_to(emp: Employee, applies_to: str) -> bool:
+    applies = (applies_to or 'all').strip().lower()
+    if applies == 'all':
+        return True
+    if applies == 'regular':
+        return _is_regular_employee(emp)
+    if applies == 'jo_cos':
+        return _is_jo_cos_employee(emp)
+    return True
+
+
+def _arrangement_model_code_for_date(emp: Employee, d: date) -> str:
+    """Effective duty model code for late/undertime (e.g. '4day', '5day'); 'flex' if flexible_worktime."""
+    if bool(getattr(emp, 'flexible_worktime', False)):
+        return 'flex'
+    is_regular = _is_regular_employee(emp)
+    rows = (DtrWorkArrangementSetting.query
+            .filter(DtrWorkArrangementSetting.start_date <= d)
+            .filter(DtrWorkArrangementSetting.end_date >= d)
+            .order_by(DtrWorkArrangementSetting.created_at.desc(), DtrWorkArrangementSetting.id.desc())
+            .all())
+    for row in rows:
+        applies = (row.applies_to or 'all').strip().lower()
+        if applies == 'all' or (applies == 'regular' and is_regular) or (applies == 'jo_cos' and not is_regular):
+            return ((row.model_code or '5day').strip().lower() or '5day')
+    return '5day'
+
+
+def _pick_late_undertime_schedule(emp: Employee, d: date):
+    """
+    Schedule used only for late/undertime computation.
+    Job Order only: under effective 4-day compressed, use 5-day anchors (8:00–17:00) so default
+    8 AM / 5 PM stamps match targets. COS and plantilla use true 4-day (7:00–18:00) targets.
+    """
+    if _is_jo_only_employee(emp) and _arrangement_model_code_for_date(emp, d) == '4day':
+        return _DTR_DUTY_MODELS['5day']
+    return _pick_work_arrangement_for_date(emp, d)
 
 
 def _late_undertime_minutes_for_record(rec, schedule):
@@ -811,7 +899,7 @@ def _payroll_summary_rows_for_user(role: str, viewer_emp, start_d: date, end_d: 
         work_mins = 0
         late_under_mins = 0
         while curr <= end_d:
-            sched = _pick_work_arrangement_for_date(emp, curr)
+            sched = _pick_late_undertime_schedule(emp, curr)
             if sched:
                 target_day = (sched['am_out'][0] * 60 + sched['am_out'][1]) - (sched['am_in'][0] * 60 + sched['am_in'][1])
                 target_day += (sched['pm_out'][0] * 60 + sched['pm_out'][1]) - (sched['pm_in'][0] * 60 + sched['pm_in'][1])
@@ -947,6 +1035,176 @@ def _missing_dates_for_quincena(row_dates: set[date], year: int, month: int, qui
     return missing
 
 
+def _resolve_dtr_am_out_pm_in_conflict(am_out, pm_in):
+    """If AM break-out and PM break-in cross, align timestamps (same employee/date)."""
+    if am_out is None or pm_in is None:
+        return am_out, pm_in
+    if am_out > pm_in:
+        pm_in = am_out
+    if pm_in < am_out:
+        am_out = pm_in
+    return am_out, pm_in
+
+
+def _merge_two_dtr_times_pick_min(existing, new):
+    """When both clocks exist, keep earlier (arrival / back-from-break style)."""
+    if new is None:
+        return existing
+    if existing is None:
+        return new
+    return existing if existing <= new else new
+
+
+def _merge_two_dtr_times_pick_max(existing, new):
+    """When both clocks exist, keep later (departure / end-of-interval style)."""
+    if new is None:
+        return existing
+    if existing is None:
+        return new
+    return existing if existing >= new else new
+
+
+def _merge_dtr_times_with_upload(existing_am_in, existing_am_out, existing_pm_in, existing_pm_out,
+                                   upload_am_in, upload_am_out, upload_pm_in, upload_pm_out):
+    """Merge stored DTR with upload: fill blanks; combine duplicates via min/max; normalize break."""
+    am_in = _merge_two_dtr_times_pick_min(existing_am_in, upload_am_in)
+    am_out = _merge_two_dtr_times_pick_max(existing_am_out, upload_am_out)
+    pm_in = _merge_two_dtr_times_pick_min(existing_pm_in, upload_pm_in)
+    pm_out = _merge_two_dtr_times_pick_max(existing_pm_out, upload_pm_out)
+    am_out, pm_in = _resolve_dtr_am_out_pm_in_conflict(am_out, pm_in)
+    return am_in, am_out, pm_in, pm_out
+
+
+def _parse_holiday_dates_for_generate(raw: str, start_d: date, end_d: date) -> list[date]:
+    """
+    Parse optional holiday list from Generate DTR (commas, semicolons, or newlines).
+    Accepts YYYY-MM-DD or DD/MM/YYYY. Only dates within the generated period are kept.
+    """
+    if not (raw or '').strip():
+        return []
+    parts = re.split(r'[\s,;]+', raw.strip())
+    out: list[date] = []
+    seen: set[date] = set()
+    for p in parts:
+        p = p.strip()
+        if not p:
+            continue
+        d = None
+        for fmt in ('%Y-%m-%d', '%d/%m/%Y'):
+            try:
+                d = datetime.strptime(p, fmt).date()
+                break
+            except ValueError:
+                continue
+        if d is None or d < start_d or d > end_d or d in seen:
+            continue
+        seen.add(d)
+        out.append(d)
+    out.sort()
+    return out
+
+
+def _parse_dtr_upload_form_date(raw: str):
+    """Parse date from DTR upload form (YYYY-MM-DD or DD/MM/YYYY)."""
+    raw = (raw or '').strip()
+    if not raw:
+        return None
+    for fmt in ('%Y-%m-%d', '%d/%m/%Y'):
+        try:
+            return datetime.strptime(raw, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _dtr_find_row_by_employee_day_readonly(emp: Employee, rec_date: date):
+    """Return existing DTR row for this calendar day if any (by employees.id or legacy badge-as-FK). Does not mutate."""
+    row = DailyTimeRecord.query.filter_by(employee_id=emp.id, record_date=rec_date).first()
+    if row:
+        return row
+    badge = (emp.employee_id or '').strip()
+    if badge.isdigit():
+        bid = int(badge)
+        if bid != emp.id:
+            return DailyTimeRecord.query.filter_by(employee_id=bid, record_date=rec_date).first()
+    return None
+
+
+def _dtr_for_upload_employee_day(emp: Employee, rec_date: date):
+    """
+    Existing DailyTimeRecord for canonical employee pk and day.
+    If a legacy row used numeric badge as daily_time_record.employee_id, repoint to emp.id.
+    """
+    row = DailyTimeRecord.query.filter_by(employee_id=emp.id, record_date=rec_date).first()
+    if row:
+        return row
+    badge = (emp.employee_id or '').strip()
+    if badge.isdigit():
+        bid = int(badge)
+        if bid != emp.id:
+            legacy = DailyTimeRecord.query.filter_by(employee_id=bid, record_date=rec_date).first()
+            if legacy:
+                legacy.employee_id = emp.id
+                return legacy
+    return None
+
+
+def _dtr_save_payload_from_upload_rows(parsed_rows):
+    """Minimal serializable rows for compact POST (JSON in one field)."""
+    return [
+        {
+            'employee_id': str(r.get('employee_id') or '').strip(),
+            'date': str(r.get('date') or '').strip(),
+            'check_in': str(r.get('check_in') or '').strip(),
+            'break_out': str(r.get('break_out') or '').strip(),
+            'break_in': str(r.get('break_in') or '').strip(),
+            'check_out': str(r.get('check_out') or '').strip(),
+        }
+        for r in parsed_rows
+    ]
+
+
+def _dtr_rows_from_payload_list(rows_raw):
+    """Normalize decoded JSON list of row dicts. Returns (rows, error_message)."""
+    if rows_raw is None:
+        return [], 'Missing rows.'
+    if not isinstance(rows_raw, list):
+        return [], 'Invalid rows (expected a list).'
+    rows = []
+    for item in rows_raw:
+        if not isinstance(item, dict):
+            continue
+        rows.append({
+            'employee_id': str(item.get('employee_id') or '').strip(),
+            'date': str(item.get('date') or '').strip(),
+            'check_in': str(item.get('check_in') or '').strip(),
+            'break_out': str(item.get('break_out') or '').strip(),
+            'break_in': str(item.get('break_in') or '').strip(),
+            'check_out': str(item.get('check_out') or '').strip(),
+        })
+    return rows, None
+
+
+def _dtr_upload_save_parse_form_rows(req):
+    """Return (row_dicts, error_message). Prefer JSON payload over legacy row_* keys."""
+    json_raw = (req.form.get('dtr_rows_json') or '').strip()
+    if json_raw:
+        try:
+            payload = json.loads(json_raw)
+        except json.JSONDecodeError:
+            return [], 'Invalid DTR rows payload (JSON).'
+        return _dtr_rows_from_payload_list(payload)
+    row_data = []
+    for key in req.form:
+        m = re.match(r'row_(\d+)_(employee_id|date|check_in|break_out|break_in|check_out)', key)
+        if m:
+            idx, field = m.group(1), m.group(2)
+            while len(row_data) <= int(idx):
+                row_data.append({})
+            row_data[int(idx)][field] = req.form.get(key, '').strip()
+    return row_data, None
+
+
 def _dtr_rows_for_employee(emp: Employee, start_d: date, end_d: date):
     """Load DailyTimeRecord rows for date range. Uses employees.id; optional legacy badge-as-int."""
     q = (DailyTimeRecord.query
@@ -1005,7 +1263,6 @@ def dtr_upload():
     quincena_options = _build_quincena_upload_options(today)
     default_quincena = f'{today.year:04d}-{today.month:02d}-{"1" if today.day <= 15 else "2"}'
     selected_quincena = default_quincena
-    quincena_ok = True
     quincena_missing_dates = []
     if request.method == 'POST':
         selected_quincena = (request.form.get('upload_quincena') or '').strip() or default_quincena
@@ -1035,14 +1292,12 @@ def dtr_upload():
                             continue
                     quincena_missing_dates = _missing_dates_for_quincena(row_dates, q_year, q_month, q_half)
                     if quincena_missing_dates:
-                        quincena_ok = False
                         flash(
-                            'Selected quincena has missing date(s): '
-                            + ', '.join(d.strftime('%Y-%m-%d') for d in quincena_missing_dates),
-                            'error'
+                            'Selected quincena has calendar day(s) not present in this file: '
+                            + ', '.join(d.strftime('%Y-%m-%d') for d in quincena_missing_dates)
+                            + '. You can still save the parsed rows to DTR.',
+                            'info',
                         )
-                    else:
-                        quincena_ok = True
                     flash(f'Parsed {len(parsed_rows)} record(s). Review and edit below, then click Save to DTR.', 'success')
             except Exception as e:
                 flash(f'Error reading file: {str(e)}', 'error')
@@ -1050,9 +1305,9 @@ def dtr_upload():
         'dtr_upload.html',
         employee=employee,
         parsed_rows=parsed_rows,
+        dtr_rows_save_payload=_dtr_save_payload_from_upload_rows(parsed_rows),
         quincena_options=quincena_options,
         selected_quincena=selected_quincena,
-        quincena_ok=quincena_ok,
         quincena_missing_dates=quincena_missing_dates,
         quincena_missing_dates_text=[d.strftime('%Y-%m-%d') for d in quincena_missing_dates],
     )
@@ -1065,99 +1320,98 @@ def dtr_upload_save():
     if role != 'dtr_uploader':
         flash('Access denied.', 'error')
         return redirect(url_for(_dashboard_for_user(current_user)))
-    try:
+
+    ct = (request.content_type or '').lower()
+    wants_json = ct.startswith('application/json')
+
+    if wants_json:
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return jsonify(ok=False, error='Invalid JSON body'), 400
+        upload_quincena = (body.get('upload_quincena') or '').strip()
+        row_data, parse_err = _dtr_rows_from_payload_list(body.get('rows'))
+    else:
         upload_quincena = (request.form.get('upload_quincena') or '').strip()
-        q_year, q_month, q_half = _parse_quincena_upload_value(upload_quincena)
-        if q_year is None:
-            flash('Missing or invalid quincena selection.', 'error')
-            return redirect(url_for('routes.dtr_upload'))
+        row_data, parse_err = _dtr_upload_save_parse_form_rows(request)
 
-        # Expect form fields: row_N_employee_id, row_N_date, row_N_check_in, row_N_break_out, row_N_break_in, row_N_check_out
-        import re
-        row_data = []
-        for key in request.form:
-            m = re.match(r'row_(\d+)_(employee_id|date|check_in|break_out|break_in|check_out)', key)
-            if m:
-                idx, field = m.group(1), m.group(2)
-                while len(row_data) <= int(idx):
-                    row_data.append({})
-                row_data[int(idx)][field] = request.form.get(key, '').strip()
+    if _parse_quincena_upload_value(upload_quincena)[0] is None:
+        msg = 'Missing or invalid quincena selection.'
+        if wants_json:
+            return jsonify(ok=False, error=msg), 400
+        flash(msg, 'error')
+        return redirect(url_for('routes.dtr_upload'))
 
-        row_dates = set()
-        for r in row_data:
-            raw_date = (r.get('date') or '').strip()
-            if not raw_date:
-                continue
-            for fmt in ('%Y-%m-%d', '%d/%m/%Y'):
-                try:
-                    row_dates.add(datetime.strptime(raw_date, fmt).date())
-                    break
-                except ValueError:
-                    continue
-        missing_dates = _missing_dates_for_quincena(row_dates, q_year, q_month, q_half)
-        if missing_dates:
-            flash(
-                'Cannot save: selected quincena has missing date(s): '
-                + ', '.join(d.strftime('%Y-%m-%d') for d in missing_dates),
-                'error'
-            )
-            return redirect(url_for('routes.dtr_upload'))
+    if parse_err:
+        if wants_json:
+            return jsonify(ok=False, error=parse_err), 400
+        flash(parse_err, 'error')
+        return redirect(url_for('routes.dtr_upload'))
 
-        # Deduplicate by (employee_id, date) and parse times
-        seen = set()
+    try:
+        # Dedupe by (employees.id, record_date)—raw form pairs can duplicate the same day
+        # (e.g. 2026-03-29 vs 29/03/2026) and caused duplicate INSERT unique violations.
+        seen_normalized = set()
         saved = 0
         errors = []
-        for r in row_data:
-            if not r.get('employee_id') or not r.get('date'):
-                continue
-            key = (r['employee_id'], r['date'])
-            if key in seen:
-                continue
-            seen.add(key)
-            emp = Employee.query.filter_by(employee_id=r['employee_id']).first()
-            if not emp:
-                errors.append(f"Employee ID {r['employee_id']} not found.")
-                continue
-            # Accept both YYYY-MM-DD and DD/MM/YYYY from the form
-            rec_date = None
-            for fmt in ('%Y-%m-%d', '%d/%m/%Y'):
-                if rec_date is not None:
-                    break
-                try:
-                    rec_date = datetime.strptime(r['date'], fmt).date()
-                except ValueError:
-                    rec_date = None
-            if rec_date is None:
-                errors.append(f"Invalid date {r['date']} for employee {r['employee_id']}.")
-                continue
-            def parse_t(s):
-                if not s:
-                    return None
-                s = s.strip()
-                for fmt in ('%H:%M', '%H:%M:%S'):
-                    try:
-                        return datetime.strptime(s, fmt).time()
-                    except ValueError:
-                        continue
+
+        def parse_t(s):
+            if not s:
                 return None
-            am_in = parse_t(r.get('check_in'))
-            am_out = parse_t(r.get('break_out'))
-            pm_in = parse_t(r.get('break_in'))
-            pm_out = parse_t(r.get('check_out'))
-            dtr = DailyTimeRecord.query.filter_by(employee_id=emp.id, record_date=rec_date).first()
+            s = s.strip()
+            for fmt in ('%H:%M', '%H:%M:%S'):
+                try:
+                    return datetime.strptime(s, fmt).time()
+                except ValueError:
+                    continue
+            return None
+
+        for r in row_data:
+            eid_raw = (r.get('employee_id') or '').strip()
+            date_raw = (r.get('date') or '').strip()
+            if not eid_raw or not date_raw:
+                continue
+            emp = Employee.query.filter_by(employee_id=eid_raw).first()
+            if not emp:
+                errors.append(f"Employee ID {eid_raw} not found.")
+                continue
+            rec_date = _parse_dtr_upload_form_date(date_raw)
+            if rec_date is None:
+                errors.append(f"Invalid date {date_raw!r} for employee {eid_raw}.")
+                continue
+            norm_key = (emp.id, rec_date)
+            if norm_key in seen_normalized:
+                continue
+            seen_normalized.add(norm_key)
+
+            am_in_u = parse_t(r.get('check_in'))
+            am_out_u = parse_t(r.get('break_out'))
+            pm_in_u = parse_t(r.get('break_in'))
+            pm_out_u = parse_t(r.get('check_out'))
+            dtr = _dtr_for_upload_employee_day(emp, rec_date)
             if dtr:
+                am_in, am_out, pm_in, pm_out = _merge_dtr_times_with_upload(
+                    dtr.am_in,
+                    dtr.am_out,
+                    dtr.pm_in,
+                    dtr.pm_out,
+                    am_in_u,
+                    am_out_u,
+                    pm_in_u,
+                    pm_out_u,
+                )
                 dtr.am_in = am_in
                 dtr.am_out = am_out
                 dtr.pm_in = pm_in
                 dtr.pm_out = pm_out
             else:
+                am_out_u, pm_in_u = _resolve_dtr_am_out_pm_in_conflict(am_out_u, pm_in_u)
                 dtr = DailyTimeRecord(
                     employee_id=emp.id,
                     record_date=rec_date,
-                    am_in=am_in,
-                    am_out=am_out,
-                    pm_in=pm_in,
-                    pm_out=pm_out,
+                    am_in=am_in_u,
+                    am_out=am_out_u,
+                    pm_in=pm_in_u,
+                    pm_out=pm_out_u,
                 )
                 db.session.add(dtr)
             saved += 1
@@ -1166,10 +1420,15 @@ def dtr_upload_save():
                 flash(e, 'error')
         db.session.commit()
         flash(f'Saved {saved} DTR record(s).', 'success')
+        if wants_json:
+            return jsonify(ok=True, redirect=url_for('routes.dtr_upload'))
+        return redirect(url_for('routes.dtr_upload'))
     except Exception as e:
         db.session.rollback()
+        if wants_json:
+            return jsonify(ok=False, error=f'Error saving DTR: {str(e)}'), 500
         flash(f'Error saving DTR: {str(e)}', 'error')
-    return redirect(url_for('routes.dtr_upload'))
+        return redirect(url_for('routes.dtr_upload'))
 
 
 @bp.route('/dtr/generate', methods=['POST'])
@@ -1193,6 +1452,8 @@ def dtr_generate():
         flash('Invalid generation mode.', 'error')
         return redirect(url_for('routes.dashboard'))
 
+    arrangement_start = None
+    arrangement_end = None
     try:
         if arrangement_model:
             if arrangement_model not in _DTR_DUTY_MODELS:
@@ -1229,24 +1490,112 @@ def dtr_generate():
             start_d, end_d = _month_date_range(year, month)
             employees = [e for e in Employee.query.filter_by(status='active').all() if _is_regular_employee(e)]
 
+        # One entry per employee id (avoids duplicate INSERT same key in one batch).
+        employees = list({e.id: e for e in employees}.values())
+        employees.sort(key=lambda e: ((e.last_name or '').lower(), (e.first_name or '').lower(), e.id))
+
         created = 0
-        curr = start_d
-        while curr <= end_d:
-            for emp in employees:
-                exists = DailyTimeRecord.query.filter_by(employee_id=emp.id, record_date=curr).first()
-                if not exists:
-                    db.session.add(DailyTimeRecord(employee_id=emp.id, record_date=curr))
-                    created += 1
-            curr += timedelta(days=1)
+        with db.session.no_autoflush:
+            curr = start_d
+            while curr <= end_d:
+                for emp in employees:
+                    exists = _dtr_find_row_by_employee_day_readonly(emp, curr)
+                    if not exists:
+                        db.session.add(DailyTimeRecord(employee_id=emp.id, record_date=curr))
+                        created += 1
+                curr += timedelta(days=1)
+
+        # 4-day compressed: Fridays in the arrangement window are rest days (remarks), not absences.
+        if arrangement_model == '4day' and arrangement_start is not None and arrangement_end is not None:
+            db.session.flush()
+            rng_start = max(start_d, arrangement_start)
+            rng_end = min(end_d, arrangement_end)
+            d = rng_start
+            while d <= rng_end:
+                if d.weekday() == 4:  # Friday
+                    for emp in employees:
+                        if not _employee_matches_dtr_applies_to(emp, arrangement_applies_to):
+                            continue
+                        rec = _dtr_find_row_by_employee_day_readonly(emp, d)
+                        if rec and not any([rec.am_in, rec.am_out, rec.pm_in, rec.pm_out]):
+                            rec.remarks = 'REST DAY'
+                d += timedelta(days=1)
+
+            # 4-day: default AM/PM anchors on Mon–Thu in arrangement window (Fri = REST DAY above).
+            # Quincena — JO only: 8:00 / 17:00; COS: same as plantilla 7:00 / 18:00.
+            # Month (plantilla): 7:00 / 18:00.
+            db.session.flush()
+            t_jo_am, t_jo_pm = time(8, 0), time(17, 0)
+            t_four_am, t_four_pm = time(7, 0), time(18, 0)
+            wd0 = max(start_d, arrangement_start)
+            wd1 = min(end_d, arrangement_end)
+            d = wd0
+            while d <= wd1:
+                if d.weekday() >= 5 or d.weekday() == 4:
+                    d += timedelta(days=1)
+                    continue
+                for emp in employees:
+                    if not _employee_matches_dtr_applies_to(emp, arrangement_applies_to):
+                        continue
+                    rec = _dtr_find_row_by_employee_day_readonly(emp, d)
+                    if not rec or any([rec.am_in, rec.am_out, rec.pm_in, rec.pm_out]):
+                        continue
+                    if mode == 'quincena':
+                        if _is_jo_only_employee(emp):
+                            rec.am_in, rec.pm_out = t_jo_am, t_jo_pm
+                        else:
+                            rec.am_in, rec.pm_out = t_four_am, t_four_pm
+                    else:
+                        rec.am_in, rec.pm_out = t_four_am, t_four_pm
+                d += timedelta(days=1)
+
+        # 5-day compressed: all employees in batch — 8:00 / 17:00 on weekdays (Mon–Fri).
+        if arrangement_model == '5day' and arrangement_start is not None and arrangement_end is not None:
+            db.session.flush()
+            t8, t17 = time(8, 0), time(17, 0)
+            w0 = max(start_d, arrangement_start)
+            w1 = min(end_d, arrangement_end)
+            d = w0
+            while d <= w1:
+                if d.weekday() >= 5:
+                    d += timedelta(days=1)
+                    continue
+                for emp in employees:
+                    if not _employee_matches_dtr_applies_to(emp, arrangement_applies_to):
+                        continue
+                    rec = _dtr_find_row_by_employee_day_readonly(emp, d)
+                    if not rec or any([rec.am_in, rec.am_out, rec.pm_in, rec.pm_out]):
+                        continue
+                    rec.am_in, rec.pm_out = t8, t17
+                d += timedelta(days=1)
+
+        holiday_raw = (request.form.get('holiday_dates') or '').strip()
+        holiday_dates = _parse_holiday_dates_for_generate(holiday_raw, start_d, end_d)
+        holiday_marked = 0
+        if holiday_dates:
+            db.session.flush()
+            for h in holiday_dates:
+                for emp in employees:
+                    rec = _dtr_find_row_by_employee_day_readonly(emp, h)
+                    if not rec:
+                        continue
+                    rec.remarks = 'HOLIDAY'
+                    rec.am_in = rec.am_out = rec.pm_in = rec.pm_out = None
+                    rec.undertime_hrs = 0
+                    rec.undertime_mins = 0
+                    holiday_marked += 1
+
         db.session.commit()
         if arrangement_model:
-            flash(
+            msg = (
                 f'DTR generated for {len(employees)} employee(s). New rows created: {created}. '
-                f'Work arrangement saved: {arrangement_model.upper()} ({arrangement_start_raw} to {arrangement_end_raw}, {arrangement_applies_to}).',
-                'success'
+                f'Work arrangement saved: {arrangement_model.upper()} ({arrangement_start_raw} to {arrangement_end_raw}, {arrangement_applies_to}).'
             )
         else:
-            flash(f'DTR generated for {len(employees)} employee(s). New rows created: {created}.', 'success')
+            msg = f'DTR generated for {len(employees)} employee(s). New rows created: {created}.'
+        if holiday_dates:
+            msg += f' Holidays marked: {len(holiday_dates)} day(s), {holiday_marked} row(s).'
+        flash(msg, 'success')
     except Exception as e:
         db.session.rollback()
         flash(f'Error generating DTR: {str(e)}', 'error')
@@ -1318,6 +1667,13 @@ def dtr_records():
             remarks = (rec.remarks if rec and rec.remarks else ('SATURDAY' if dow == 5 else ('SUNDAY' if dow == 6 else '')))
             if curr in approved_leave_dates and not remarks:
                 remarks = 'APPROVED LEAVE'
+            elif (
+                not remarks
+                and curr.weekday() == 4
+                and _arrangement_model_code_for_date(selected_employee, curr) == '4day'
+                and not (rec and any([rec.am_in, rec.am_out, rec.pm_in, rec.pm_out]))
+            ):
+                remarks = 'REST DAY'
             late = False
             undertime = False
             absent = False
@@ -1325,7 +1681,7 @@ def dtr_records():
             undertime_mins = 0
             if not is_weekend:
                 if rec:
-                    schedule = _pick_work_arrangement_for_date(selected_employee, curr)
+                    schedule = _pick_late_undertime_schedule(selected_employee, curr)
                     late_mins, undertime_mins = _late_undertime_minutes_for_record(rec, schedule)
                     late = late_mins > 0
                     undertime = undertime_mins > 0
@@ -1526,7 +1882,7 @@ def dtr_recompute():
         while curr <= end_d:
             rec = by_date.get(curr)
             if rec:
-                sched = _pick_work_arrangement_for_date(emp, curr)
+                sched = _pick_late_undertime_schedule(emp, curr)
                 late_mins, undertime_mins = _late_undertime_minutes_for_record(rec, sched)
                 total = late_mins + undertime_mins
                 rec.undertime_hrs = total // 60
@@ -2968,9 +3324,13 @@ def employee_add():
             first_name = request.form.get('first_name', '').strip()
             last_name = request.form.get('last_name', '').strip()
             middle_name = request.form.get('middle_name', '').strip()
-            position = request.form.get('position', '').strip()
             department_id = request.form.get('department_id')
             status_of_appointment = request.form.get('status_of_appointment', '').strip()
+            position_raw = request.form.get('position', '').strip()
+            jo_cos_raw = request.form.get('jo_cos_designation_id', '').strip()
+            position, jo_cos_designation_id_val = _resolve_position_and_jo_cos_fk(
+                status_of_appointment, position_raw, jo_cos_raw
+            )
             nature_of_appointment = request.form.get('nature_of_appointment', '').strip()
             appointment_date = request.form.get('appointment_date')
             phone = request.form.get('phone', '').strip()
@@ -3020,6 +3380,7 @@ def employee_add():
                         positions=positions,
                         salary_grades=salary_grades,
                         salary_grades_json=salary_grades_json,
+                        jo_cos_designations=_jo_cos_designations_ordered(),
                         next_employee_id=_next_employee_id_6digit(),
                         employee=employee,
                     )
@@ -3036,6 +3397,7 @@ def employee_add():
                         last_name=last_name,
                         middle_name=middle_name if middle_name else None,
                         position=position if position else None,
+                        jo_cos_designation_id=jo_cos_designation_id_val,
                         department_id=int(department_id) if department_id else None,
                         status_of_appointment=status_of_appointment if status_of_appointment else None,
                         nature_of_appointment=nature_of_appointment if nature_of_appointment else None,
@@ -3118,6 +3480,7 @@ def employee_add():
                 positions=positions,
                 salary_grades=salary_grades,
                 salary_grades_json=salary_grades_json,
+                jo_cos_designations=_jo_cos_designations_ordered(),
                 next_employee_id=_next_employee_id_6digit(),
                 employee=employee,
             )
@@ -3133,6 +3496,7 @@ def employee_add():
         positions=positions,
         salary_grades=salary_grades,
         salary_grades_json=salary_grades_json,
+        jo_cos_designations=_jo_cos_designations_ordered(),
         next_employee_id=_next_employee_id_6digit(),
         employee=employee,
     )
@@ -3151,9 +3515,13 @@ def employee_edit(id):
             first_name = request.form.get('first_name', '').strip()
             last_name = request.form.get('last_name', '').strip()
             middle_name = request.form.get('middle_name', '').strip()
-            position = request.form.get('position', '').strip()
             department_id = request.form.get('department_id')
             status_of_appointment = request.form.get('status_of_appointment', '').strip()
+            position_raw = request.form.get('position', '').strip()
+            jo_cos_raw = request.form.get('jo_cos_designation_id', '').strip()
+            position, jo_cos_designation_id_val = _resolve_position_and_jo_cos_fk(
+                status_of_appointment, position_raw, jo_cos_raw
+            )
             nature_of_appointment = request.form.get('nature_of_appointment', '').strip()
             appointment_date = request.form.get('appointment_date')
             phone = request.form.get('phone', '').strip()
@@ -3185,7 +3553,7 @@ def employee_edit(id):
                 salary_grades = SalaryGrade.query.all()
                 employee = current_user.employee if current_user.employee else None
                 salary_grades_json = _serialize_salary_grades(salary_grades)
-                return render_template('employees/form.html', emp=emp, departments=departments, positions=positions, salary_grades=salary_grades, salary_grades_json=salary_grades_json, employee=employee)
+                return render_template('employees/form.html', emp=emp, departments=departments, positions=positions, salary_grades=salary_grades, salary_grades_json=salary_grades_json, jo_cos_designations=_jo_cos_designations_ordered(), employee=employee)
 
             # Capture old appointment-related values for history (before update)
             old_appointment_date = emp.appointment_date
@@ -3227,7 +3595,7 @@ def employee_edit(id):
                     salary_grades = SalaryGrade.query.all()
                     employee = current_user.employee if current_user.employee else None
                     salary_grades_json = _serialize_salary_grades(salary_grades)
-                    return render_template('employees/form.html', emp=emp, departments=departments, positions=positions, salary_grades=salary_grades, salary_grades_json=salary_grades_json, employee=employee)
+                    return render_template('employees/form.html', emp=emp, departments=departments, positions=positions, salary_grades=salary_grades, salary_grades_json=salary_grades_json, jo_cos_designations=_jo_cos_designations_ordered(), employee=employee)
 
             # Update employee
             emp.employee_id = employee_id
@@ -3235,6 +3603,7 @@ def employee_edit(id):
             emp.last_name = last_name
             emp.middle_name = middle_name if middle_name else None
             emp.position = position if position else None
+            emp.jo_cos_designation_id = jo_cos_designation_id_val
             emp.department_id = int(department_id) if department_id else None
             emp.status_of_appointment = status_of_appointment if status_of_appointment else None
             emp.nature_of_appointment = nature_of_appointment if nature_of_appointment else None
@@ -3356,14 +3725,14 @@ def employee_edit(id):
             salary_grades = SalaryGrade.query.all()
             employee = current_user.employee if current_user.employee else None
             salary_grades_json = _serialize_salary_grades(salary_grades)
-            return render_template('employees/form.html', emp=emp, departments=departments, positions=positions, salary_grades=salary_grades, salary_grades_json=salary_grades_json, employee=employee)
+            return render_template('employees/form.html', emp=emp, departments=departments, positions=positions, salary_grades=salary_grades, salary_grades_json=salary_grades_json, jo_cos_designations=_jo_cos_designations_ordered(), employee=employee)
     
     departments = Department.query.all()
     positions = Position.query.order_by(Position.title).all()
     salary_grades = SalaryGrade.query.all()
     employee = current_user.employee if current_user.employee else None
     salary_grades_json = _serialize_salary_grades(salary_grades)
-    return render_template('employees/form.html', emp=emp, departments=departments, positions=positions, salary_grades=salary_grades, salary_grades_json=salary_grades_json, employee=employee)
+    return render_template('employees/form.html', emp=emp, departments=departments, positions=positions, salary_grades=salary_grades, salary_grades_json=salary_grades_json, jo_cos_designations=_jo_cos_designations_ordered(), employee=employee)
 
 @bp.route('/employees/delete/<int:id>', methods=['POST'])
 @login_required
@@ -4195,6 +4564,17 @@ def position_delete(id):
         db.session.rollback()
         flash(f'Error deleting position: {str(e)}', 'error')
     return redirect(url_for('routes.positions_list'))
+
+
+@bp.route('/jo-cos-designations')
+@login_required
+def jo_cos_designations_list():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    rows = JoCosDesignation.query.order_by(JoCosDesignation.sort_order, JoCosDesignation.id).all()
+    employee = current_user.employee if current_user.employee else None
+    return render_template('jo_cos_designations/list.html', designations=rows, employee=employee)
 
 
 def _current_salary_amount(emp):

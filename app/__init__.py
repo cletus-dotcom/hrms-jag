@@ -2,6 +2,7 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
 from app.config import Config
+from app.request_policy import HRMSRequest
 import os
 import sys
 
@@ -20,7 +21,8 @@ def create_app(config_class=Config):
     else:
         app = Flask(__name__)
     app.config.from_object(config_class)
-    
+    app.request_class = HRMSRequest
+
     db.init_app(app)
     login_manager.init_app(app)
     login_manager.login_view = 'routes.login'
@@ -40,8 +42,9 @@ def create_app(config_class=Config):
             from app import models  # register all models so create_all() creates every table
             db.create_all()
             # Ensure leave_ledger_deletion exists (audit log); create_all can miss new tables in some setups
-            from app.models import LeaveLedgerDeletion
+            from app.models import LeaveLedgerDeletion, JoCosDesignation
             LeaveLedgerDeletion.__table__.create(db.engine, checkfirst=True)
+            JoCosDesignation.__table__.create(db.engine, checkfirst=True)
             # Ensure employees table has agency, lgu_class_level, salary_* columns (add if missing)
             from sqlalchemy import text
             from sqlalchemy import inspect
@@ -62,6 +65,14 @@ def create_app(config_class=Config):
                         if name not in columns:
                             db.session.execute(text(f"ALTER TABLE employees ADD COLUMN {name} {typ}"))
                             db.session.commit()
+                    if "jo_cos_designation_id" not in columns:
+                        db.session.execute(
+                            text(
+                                "ALTER TABLE employees ADD COLUMN jo_cos_designation_id INTEGER "
+                                "REFERENCES jo_cos_designation(id) ON DELETE SET NULL"
+                            )
+                        )
+                        db.session.commit()
             except Exception as e:
                 db.session.rollback()
                 print(f"Warning: Could not add employee salary columns: {e}")

@@ -775,10 +775,10 @@ body {
 }
 
 #generateDtrModal .change-password-modal-dialog {
-    max-width: min(720px, calc(100vw - 2rem));
+    max-width: min(1080px, calc(100vw - 2rem));
     width: 100%;
     margin: auto;
-    max-height: min(92vh, 880px);
+    max-height: min(92vh, 820px);
     display: flex;
     flex-direction: column;
 }
@@ -796,44 +796,105 @@ body {
     }
 }
 
-#generateDtrModal .change-password-modal-footer {
-    flex-wrap: wrap;
-    gap: 0.75rem;
+#generateDtrModal .generate-dtr-modal-period-footer {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 1.25rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--brand-border);
 }
 
-#generateDtrModal .change-password-modal-footer .btn-secondary,
-#generateDtrModal .change-password-modal-footer .btn-primary {
-    flex: 1 1 auto;
-    min-width: min(100%, 9rem);
+#generateDtrModal .generate-dtr-modal-period-footer .btn-secondary,
+#generateDtrModal .generate-dtr-modal-period-footer .btn-primary {
+    width: 100%;
 }
 
-.generate-dtr-modal-grid {
+/* Generate DTR — two-column body (period left, workweek + holidays right) */
+.generate-dtr-modal-layout {
     display: grid;
+    gap: 1.25rem;
     grid-template-columns: 1fr;
-    gap: 1rem;
-    margin-bottom: 0;
+    align-items: start;
 }
 
-@media (min-width: 560px) {
-    .generate-dtr-modal-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 1rem 1.25rem;
+@media (min-width: 720px) {
+    .generate-dtr-modal-layout {
+        grid-template-columns: minmax(240px, 0.38fr) minmax(0, 1fr);
+        gap: 1.25rem 1.75rem;
+    }
+
+    .generate-dtr-modal-col-left {
+        padding-right: 1.25rem;
+        border-right: 1px solid var(--brand-border);
     }
 }
 
-.generate-dtr-modal-grid .generate-dtr-modal-span-full {
+.generate-dtr-modal-col-heading {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--medium-gray);
+    margin: 0 0 0.625rem 0;
+}
+
+.generate-dtr-modal-grid-period {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.generate-dtr-period-mode,
+.generate-dtr-period-quincena {
     grid-column: 1 / -1;
 }
 
-.generate-dtr-modal-grid .generate-dtr-modal-note {
+.generate-dtr-modal-grid-workweek {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 0.25rem;
+}
+
+@media (max-width: 719px) {
+    .generate-dtr-modal-grid-workweek {
+        grid-template-columns: 1fr;
+    }
+}
+
+.generate-dtr-modal-holidays-block {
+    margin-top: 0.25rem;
+}
+
+#generateDtrModal .generate-dtr-modal-note {
     font-size: 0.8125rem;
     color: var(--medium-gray);
     line-height: 1.45;
     margin: 0;
 }
 
-.generate-dtr-modal-grid .generate-dtr-modal-section-title {
+#generateDtrModal .generate-dtr-modal-section-title {
     margin: 0;
+}
+
+.generate-dtr-holiday-calendar-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.generate-dtr-holiday-calendar-row .generate-dtr-holiday-date-wrap {
+    flex: 1 1 12rem;
+    min-width: 0;
+    margin: 0;
+}
+
+.generate-dtr-holiday-calendar-row > .btn-secondary {
+    flex: 0 0 auto;
+    margin-bottom: 0.125rem;
 }
 
 .form-group {

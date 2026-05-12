@@ -40,6 +40,7 @@ class Employee(db.Model):
     last_name = db.Column(db.String(100), nullable=False)
     middle_name = db.Column(db.String(100))
     position = db.Column(db.String(100))
+    jo_cos_designation_id = db.Column(db.Integer, db.ForeignKey('jo_cos_designation.id', ondelete='SET NULL'), nullable=True)
     department_id = db.Column(db.Integer, db.ForeignKey('departments.id'))
     status_of_appointment = db.Column(db.String(50))  # Permanent, Casual, Contractual, etc.
     nature_of_appointment = db.Column(db.String(50))  # Original, Reemployment, Transfer, etc.
@@ -71,6 +72,7 @@ class Employee(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
+    jo_cos_designation = db.relationship('JoCosDesignation', backref='employees')
     department = db.relationship('Department', foreign_keys=[department_id], backref='employees')
     attendance_records = db.relationship('Attendance', backref='employee', lazy='dynamic')
     leave_requests = db.relationship('LeaveRequest', backref='employee', lazy='dynamic')
@@ -163,6 +165,19 @@ class Position(db.Model):
 
     def __repr__(self):
         return f'<Position {self.title}>'
+
+
+class JoCosDesignation(db.Model):
+    """Reference designations for Job Order and Contract of Service (current position picker)."""
+    __tablename__ = 'jo_cos_designation'
+
+    id = db.Column(db.Integer, primary_key=True)
+    designation = db.Column(db.String(500), nullable=False, unique=True)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+
+    def __repr__(self):
+        t = (self.designation or "")[:48]
+        return f"<JoCosDesignation id={self.id} {t!r}>"
 
 class Attendance(db.Model):
     __tablename__ = 'attendance'
