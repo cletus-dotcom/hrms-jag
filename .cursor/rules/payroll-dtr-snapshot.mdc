@@ -1,0 +1,23 @@
+---
+description: Quincena payroll uses DTR regeneration snapshot when stored rows exist
+globs: app/routes.py,app/templates/payroll/**
+alwaysApply: false
+---
+
+# Payroll and DTR quincena snapshots
+
+Quincena payroll views (**Worktime Summary**, **JO/COS Payroll**) read **`work_hours`** and **`DtrQuincenaWorktimeSummary`** produced by DTR regeneration for the selected year, month, and quincena half.
+
+**Gross worktime base** (`_dtr_gross_minutes_for_day`): credit scheduled shift minutes per payable weekday — 5-day = 8 hrs (8–12, 1–5), 4-day = 10 hrs (7–12, 1–6). Full credit for present days (any punch, incl. generated 8-in/5-out only), approved leave, holidays, and work suspensions; half credit for half-day holiday/suspension; 0 for weekends, REST DAY (4-day Friday), and unexcused absences. **4-day REST Friday** that is holiday / approved leave / work suspension (no punches): initial pass 0, then **`_dtr_rebalance_fourday_rest_friday_holiday_credits`** assigns **480 min (8h)** to that day and subtracts the same total from Mon–Thu so the quincena stays **80h / 10 days** (e.g. May 1 holiday in May Q1). **Net (JO/COS)** = gross − late − undertime − absence minutes; **plantilla net** = gross (VL deductions posted on `leave_ledger`).
+
+**Daily history:** `_run_dtr_quincena_regeneration` also writes one **`work_hours`** row per employee per calendar day in the quincena (`gross_work_mins`, `late_mins`, `undertime_mins`, `absence_mins`, `net_rendered_mins`, `remarks`, plus `year` / `month` / `quincena_half`). Re-running regeneration replaces rows for that quincena date window.
+
+**Flexible worktime (`flexible_worktime` table):** Set per quincena on **Daily Time Records → Flexible Worktime** before regeneration. Employees on the list use assigned **inclusive date ranges** (including **weekends** for night-shift units such as MDRRMO) and custom in / break-out / break-in / out for gross and late/undertime during regeneration. **Overnight shifts** (clock-out earlier than clock-in on the same row, e.g. 8:00 pm → 5:00 am) use two segments with midnight wrap; scheduled length comes from `_scheduled_shift_minutes_from_duty_schedule`. **Gross is only minutes within those schedule windows** (capped at the shift total — punches before in or after out do not add credit). Employees **not** on the list use 5-day / 4-day compressed rules; weekends, Saturdays, Sundays, and 4-day REST DAY Fridays are **not counted** even when DTR rows exist.
+
+**JO/COS daily wage payroll:** Paid days = **gross work minutes** ÷ shift length (480 min default, or average flexi shift minutes when the employee is on the flexible worktime list for that quincena), **rounded to the nearest whole day**. Gross salary = days × rate per day. Late/undertime deduction is computed separately from gross (not from net-rendered minutes, to avoid double-counting). Re-run **Regenerate DTR** after changing flexible schedules.
+
+**Overtime authorization — plantilla (`overtime_authorization` table):** Set per quincena on **Daily Time Records → Overtime Authorization - Plantilla**. Does **not** affect worktime / `work_hours` / payroll hours. Regeneration posts **CTO earned** on `leave_ledger` only when the employee has DTR punches **within** the authorized schedule windows on each inclusive date (minutes capped to those windows via `_worked_minutes_within_flexi_schedule`; no punch or no overlap → 0 CTO for that date), converted via `minutes_to_day_equivalent`, tagged with the same quincena regen remarks as VL/SL deductions.
+
+**X-Service authorization — JO/COS (`jo_cos_extend_service` table):** Set per quincena on **Daily Time Records → X-Service Authorization - JO/COS**. JO/COS employees **not** on this list use 5-day / 4-day compressed rules during regeneration; weekends, Saturdays, Sundays, and 4-day REST DAY Fridays are **not counted** toward worktime even when DTR rows exist. Employees **on** the list: authorized inclusive dates are excluded from regular worktime and credited separately to **`jo_cos_overtime`** only when DTR punches fall **within** the authorized schedule windows (no punch or no overlap → 0 OT for that date). OT does **not** add to `work_hours` or payroll hours.
+
+Changing regeneration rules, snapshot fields, or this wiring should stay aligned: update **`_employee_dtr_worktime_day_rows`** / **`_aggregate_employee_dtr_worktime`** (shared by regeneration, `work_hours`, and payroll fallback).

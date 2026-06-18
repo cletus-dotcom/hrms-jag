@@ -1,0 +1,422 @@
+{% extends "base.html" %}
+
+{% block title %}X-Service Authorization - JO/COS - HRMS{% endblock %}
+
+{% block extra_css %}
+<style>
+  .flexi-table-wrap { overflow-x: auto; }
+  .flexi-table { font-size: 0.85rem; }
+  .flexi-table th, .flexi-table td { white-space: nowrap; vertical-align: middle; }
+  .flexi-add-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.75rem;
+    align-items: end;
+  }
+  .flexi-emp-picker { position: relative; min-width: 220px; }
+  .flexi-emp-results {
+    display: none;
+    position: absolute;
+    z-index: 20;
+    left: 0; right: 0;
+    max-height: 12rem;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid var(--brand-border, #e5e7eb);
+    border-radius: 6px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.08);
+  }
+  .flexi-emp-results.is-open { display: block; }
+  .flexi-emp-option {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 0.45rem 0.65rem;
+    border: none;
+    background: none;
+    cursor: pointer;
+    font: inherit;
+  }
+  .flexi-emp-option:hover { background: #f3f4f6; }
+  .flexi-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+  <div class="header-bar">
+    <div class="header-content">
+      {% include 'includes/navbar_brand.html' %}
+      <nav class="main-nav">
+        <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+        {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+        <div class="nav-dropdown">
+          <a href="#" class="nav-link">Settings <span class="dropdown-arrow">▼</span></a>
+          <div class="dropdown-menu">
+            <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
+            <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Manage Employees</a>
+            <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
+            <hr class="dropdown-separator">
+            <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
+            <a href="{{ url_for('routes.jo_cos_designations_list') }}" class="dropdown-item">JO/COS designations</a>
+            <a href="{{ url_for('routes.jo_cos_rates_list') }}" class="dropdown-item">JO and COS Rates</a>
+            <a href="{{ url_for('routes.flexi_time_schedule_list') }}" class="dropdown-item">Flexi-time schedule</a>
+            <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
+            <hr class="dropdown-separator">
+            <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
+          </div>
+        </div>
+        {% endif %}
+        <div class="nav-dropdown">
+          <a href="#" class="nav-link nav-link-active">Daily Time Records <span class="dropdown-arrow">▼</span></a>
+          <div class="dropdown-menu">
+            <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
+            {% include 'includes/nav_dtr_upload_link.html' %}
+            <a href="{{ url_for('routes.dtr_justifications') }}" class="dropdown-item">DTR Justifications</a>
+            {% include 'includes/nav_dtr_edit_link.html' %}
+            {% include 'includes/nav_dtr_regenerate_link.html' %}
+          </div>
+        </div>
+        <div class="nav-dropdown">
+          <a href="#" class="nav-link">Leave Management <span class="dropdown-arrow">▼</span></a>
+          <div class="dropdown-menu">
+            {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+            <a href="{{ url_for('routes.leave_settings_list') }}" class="dropdown-item">Leave Settings</a>
+            <a href="{{ url_for('routes.leave_credits_list') }}" class="dropdown-item">Leave Credits</a>
+            <hr class="dropdown-separator">
+            {% endif %}
+            <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply for Leave</a>
+            <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
+          </div>
+        </div>
+        {% include 'includes/nav_payroll_top_menu.html' %}
+        {% if (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') %}
+        <div class="nav-dropdown">
+          <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
+          <div class="dropdown-menu">
+            {% include 'includes/reports_dropdown_links.html' %}
+          </div>
+        </div>
+        {% endif %}
+        <div class="nav-dropdown">
+          <a href="#" class="nav-link">ABOUT <span class="dropdown-arrow">▼</span></a>
+          <div class="dropdown-menu">
+            <a href="{{ url_for('routes.users_manual') }}" class="dropdown-item">User's Manual</a>
+            <a href="{{ url_for('routes.hrmdo_manual') }}" class="dropdown-item">HRMDO Manual</a>
+          </div>
+        </div>
+      </nav>
+      <div class="user-dropdown">
+        <a href="#" class="user-info">
+          {% if employee %}{{ employee.full_name }} ({{ current_user.role|title }}){% else %}{{ current_user.username }} ({{ current_user.role|title }}){% endif %}
+          <span class="dropdown-arrow">▼</span>
+        </a>
+        <div class="dropdown-menu dropdown-menu-right">
+          <button type="button" class="dropdown-item btn-change-password" style="width:100%; text-align:left; background:none; border:none; cursor:pointer; font:inherit; padding:0.5rem 1rem;">Change password</button>
+          <form method="POST" action="{{ url_for('routes.logout') }}" style="margin:0;">
+            <button type="submit" class="dropdown-item" style="width:100%; text-align:left; background:none; border:none; cursor:pointer; font:inherit; padding:0.5rem 1rem;">Logout</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dashboard-content">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} alert-dismissible">
+            <span>{{ message }}</span>
+            <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="page-header" style="flex-wrap: wrap; gap: 0.75rem;">
+      <h1 class="page-title">X-Service Authorization — JO/COS</h1>
+      <div class="flexi-actions">
+        <a href="{{ url_for('routes.dtr_overtime_authorization') }}" class="btn-secondary">Overtime Authorization — Plantilla</a>
+        <a href="{{ url_for('routes.dtr_regenerate') }}" class="btn-secondary">Regenerate DTR</a>
+        <a href="{{ url_for('routes.dashboard') }}" class="btn-secondary">Dashboard</a>
+      </div>
+    </div>
+
+    <p style="color: var(--medium-gray); margin-bottom: 1rem; font-size: 0.9rem;">
+      Authorize JO/COS extended-service (overtime) schedules per quincena, saved to <code>jo_cos_extend_service</code>.
+      Used during <strong>Regenerate DTR</strong> to credit <strong>JO/COS overtime</strong> on <code>jo_cos_overtime</code>
+      when the employee has DTR punches within the authorized in / break-out / break-in / out windows on each scheduled date.
+      No punch (or no time within the authorized schedule) means no overtime credit for that date.
+      Authorized dates do <strong>not</strong> add to regular worktime summaries or payroll hours.
+      JO/COS employees not on this list are computed under 5-day or 4-day compressed rules; rest days, Saturdays, and Sundays
+      are not counted toward worktime even when DTR rows exist.
+      {{ period_label }}
+    </p>
+
+    <div class="table-section" style="margin-bottom: 1rem;">
+      <form method="GET" action="{{ url_for('routes.dtr_jo_cos_extend_service') }}" class="form-section" style="padding: 1rem 1.25rem; border: 1px solid var(--brand-border, #e5e7eb); border-radius: 8px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1rem; align-items: end;">
+          <div class="form-group" style="margin: 0;">
+            <label for="filterYear">Year</label>
+            <input type="number" name="year" id="filterYear" class="form-control" min="2000" max="2100" value="{{ filters.year }}">
+          </div>
+          <div class="form-group" style="margin: 0;">
+            <label for="filterMonth">Month</label>
+            <select name="month" id="filterMonth" class="form-control">
+              {% for m in range(1, 13) %}
+              <option value="{{ m }}" {% if filters.month == m %}selected{% endif %}>{{ '%02d'|format(m) }} — {{ ['','January','February','March','April','May','June','July','August','September','October','November','December'][m] }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group" style="margin: 0;">
+            <label for="filterQuincena">Quincena</label>
+            <select name="quincena" id="filterQuincena" class="form-control">
+              <option value="1" {% if filters.quincena == '1' %}selected{% endif %}>1st (days 1–15)</option>
+              <option value="2" {% if filters['quincena'] == '2' %}selected{% endif %}>2nd (days 16–end)</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin: 0;">
+            <button type="submit" class="btn-primary">Load quincena</button>
+          </div>
+        </div>
+      </form>
+    </div>
+
+    <form method="POST" action="{{ url_for('routes.dtr_jo_cos_extend_service') }}" id="xsSaveForm">
+      <input type="hidden" name="year" value="{{ filters.year }}">
+      <input type="hidden" name="month" value="{{ filters.month }}">
+      <input type="hidden" name="quincena" value="{{ filters.quincena }}">
+      <input type="hidden" name="entries_json" id="entriesJson" value="">
+
+      <div class="table-section" style="margin-bottom: 1rem;">
+        <h2 style="font-size: 1rem; margin: 0 0 0.75rem;">Add entry</h2>
+        <div class="flexi-add-grid">
+          <div class="form-group flexi-emp-picker" style="margin: 0; grid-column: span 2;">
+            <label for="addEmpSearch">Employee (JO/COS)</label>
+            <input type="text" id="addEmpSearch" class="form-control" placeholder="Search employee ID, first or last name…" autocomplete="off">
+            <input type="hidden" id="addEmpId" value="">
+            <div id="addEmpResults" class="flexi-emp-results"></div>
+          </div>
+          <div class="form-group" style="margin: 0;">
+            <label for="addDateStart">Date from</label>
+            <input type="date" id="addDateStart" class="form-control" min="{{ quincena_start }}" max="{{ quincena_end }}">
+          </div>
+          <div class="form-group" style="margin: 0;">
+            <label for="addDateEnd">Date to</label>
+            <input type="date" id="addDateEnd" class="form-control" min="{{ quincena_start }}" max="{{ quincena_end }}">
+          </div>
+          <div class="form-group" style="margin: 0;">
+            <label for="addTimeIn">Time in</label>
+            <input type="time" id="addTimeIn" class="form-control" value="08:00">
+          </div>
+          <div class="form-group" style="margin: 0;">
+            <label for="addBreakOut">Break out</label>
+            <input type="time" id="addBreakOut" class="form-control" value="12:00">
+          </div>
+          <div class="form-group" style="margin: 0;">
+            <label for="addBreakIn">Break in</label>
+            <input type="time" id="addBreakIn" class="form-control" value="13:00">
+          </div>
+          <div class="form-group" style="margin: 0;">
+            <label for="addTimeOut">Time out</label>
+            <input type="time" id="addTimeOut" class="form-control" value="17:00">
+          </div>
+          <div class="form-group" style="margin: 0;">
+            <button type="button" class="btn-secondary" id="btnAddEntry">Add to list</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="table-section">
+        <div class="search-bar" style="flex-wrap: wrap; margin-bottom: 0.75rem;">
+          <input type="text" id="xsSearch" class="search-input" placeholder="Search list…" style="min-width: 220px;" autocomplete="off">
+          <span class="search-icon">🔍</span>
+          <div class="flexi-actions" style="margin-left: auto;">
+            <button type="submit" class="btn-primary">Save for this quincena</button>
+          </div>
+        </div>
+
+        <div class="table-container flexi-table-wrap">
+          <table class="data-table flexi-table" id="xsTable">
+            <thead>
+              <tr>
+                <th>Employee ID</th>
+                <th>Name</th>
+                <th>Date from</th>
+                <th>Date to</th>
+                <th>In</th>
+                <th>Break out</th>
+                <th>Break in</th>
+                <th>Out</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="xsTableBody"></tbody>
+          </table>
+        </div>
+        <p id="xsEmptyMsg" style="margin-top: 0.75rem; color: var(--medium-gray); font-size: 0.9rem;">No X-Service authorization entries for this quincena yet.</p>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+  var employees = {{ employees_for_js|tojson }};
+  var entries = {{ entries_json|safe }};
+  var quincenaStart = {{ quincena_start|tojson }};
+  var quincenaEnd = {{ quincena_end|tojson }};
+
+  var tbody = document.getElementById('xsTableBody');
+  var entriesJson = document.getElementById('entriesJson');
+  var emptyMsg = document.getElementById('xsEmptyMsg');
+  var addEmpSearch = document.getElementById('addEmpSearch');
+  var addEmpId = document.getElementById('addEmpId');
+  var addEmpResults = document.getElementById('addEmpResults');
+
+  function esc(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  }
+
+  function syncHidden() {
+    entriesJson.value = JSON.stringify(entries);
+    emptyMsg.style.display = entries.length ? 'none' : 'block';
+  }
+
+  function renderTable(filter) {
+    var q = (filter || '').toLowerCase().trim();
+    tbody.innerHTML = '';
+    entries.forEach(function (row, idx) {
+      var text = (row.employee_code + ' ' + row.employee_name).toLowerCase();
+      if (q && text.indexOf(q) === -1) return;
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td>' + esc(row.employee_code) + '</td>' +
+        '<td>' + esc(row.employee_name) + '</td>' +
+        '<td><input type="date" class="form-control" data-field="date_start" data-idx="' + idx + '" min="' + quincenaStart + '" max="' + quincenaEnd + '" value="' + esc(row.date_start) + '"></td>' +
+        '<td><input type="date" class="form-control" data-field="date_end" data-idx="' + idx + '" min="' + quincenaStart + '" max="' + quincenaEnd + '" value="' + esc(row.date_end) + '"></td>' +
+        '<td><input type="time" class="form-control" data-field="time_in" data-idx="' + idx + '" value="' + esc(row.time_in) + '"></td>' +
+        '<td><input type="time" class="form-control" data-field="break_out" data-idx="' + idx + '" value="' + esc(row.break_out) + '"></td>' +
+        '<td><input type="time" class="form-control" data-field="break_in" data-idx="' + idx + '" value="' + esc(row.break_in) + '"></td>' +
+        '<td><input type="time" class="form-control" data-field="time_out" data-idx="' + idx + '" value="' + esc(row.time_out) + '"></td>' +
+        '<td><button type="button" class="btn-secondary btn-sm" data-remove="' + idx + '">Remove</button></td>';
+      tbody.appendChild(tr);
+    });
+    syncHidden();
+  }
+
+  tbody.addEventListener('change', function (e) {
+    var t = e.target;
+    if (!t.dataset.field) return;
+    var idx = parseInt(t.dataset.idx, 10);
+    entries[idx][t.dataset.field] = t.value;
+    syncHidden();
+  });
+
+  tbody.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-remove]');
+    if (!btn) return;
+    entries.splice(parseInt(btn.getAttribute('data-remove'), 10), 1);
+    renderTable(document.getElementById('xsSearch').value);
+  });
+
+  function filterEmployees(q) {
+    q = (q || '').toLowerCase().trim();
+    if (!q) return employees.slice(0, 20);
+    return employees.filter(function (e) {
+      return (
+        String(e.employee_id).toLowerCase().indexOf(q) !== -1 ||
+        String(e.first_name).toLowerCase().indexOf(q) !== -1 ||
+        String(e.last_name).toLowerCase().indexOf(q) !== -1 ||
+        String(e.label).toLowerCase().indexOf(q) !== -1
+      );
+    }).slice(0, 20);
+  }
+
+  function showEmpResults(list) {
+    addEmpResults.innerHTML = '';
+    if (!list.length) {
+      addEmpResults.classList.remove('is-open');
+      return;
+    }
+    list.forEach(function (e) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'flexi-emp-option';
+      btn.textContent = e.label;
+      btn.addEventListener('click', function () {
+        addEmpId.value = String(e.id);
+        addEmpSearch.value = e.label;
+        addEmpResults.classList.remove('is-open');
+      });
+      addEmpResults.appendChild(btn);
+    });
+    addEmpResults.classList.add('is-open');
+  }
+
+  addEmpSearch.addEventListener('input', function () {
+    addEmpId.value = '';
+    showEmpResults(filterEmployees(this.value));
+  });
+  addEmpSearch.addEventListener('focus', function () {
+    showEmpResults(filterEmployees(this.value));
+  });
+  document.addEventListener('click', function (e) {
+    if (!addEmpResults.contains(e.target) && e.target !== addEmpSearch) {
+      addEmpResults.classList.remove('is-open');
+    }
+  });
+
+  document.getElementById('btnAddEntry').addEventListener('click', function () {
+    if (!addEmpId.value) {
+      alert('Select a JO/COS employee from the search results.');
+      return;
+    }
+    var emp = employees.find(function (e) { return String(e.id) === String(addEmpId.value); });
+    if (!emp) return;
+    var d0 = document.getElementById('addDateStart').value;
+    var d1 = document.getElementById('addDateEnd').value;
+    if (!d0 || !d1) {
+      alert('Enter date from and date to within the quincena.');
+      return;
+    }
+    if (d0 < quincenaStart || d1 > quincenaEnd || d0 > d1) {
+      alert('Dates must be within the quincena and start on or before end.');
+      return;
+    }
+    entries.push({
+      employee_id: emp.id,
+      employee_code: emp.employee_id,
+      employee_name: emp.last_name + ', ' + emp.first_name,
+      date_start: d0,
+      date_end: d1,
+      time_in: document.getElementById('addTimeIn').value,
+      break_out: document.getElementById('addBreakOut').value,
+      break_in: document.getElementById('addBreakIn').value,
+      time_out: document.getElementById('addTimeOut').value
+    });
+    renderTable(document.getElementById('xsSearch').value);
+  });
+
+  document.getElementById('xsSearch').addEventListener('input', function () {
+    renderTable(this.value);
+  });
+
+  document.getElementById('xsSaveForm').addEventListener('submit', function () {
+    entriesJson.value = JSON.stringify(entries.map(function (r) {
+      return {
+        employee_id: r.employee_id,
+        date_start: r.date_start,
+        date_end: r.date_end,
+        time_in: r.time_in,
+        break_out: r.break_out,
+        break_in: r.break_in,
+        time_out: r.time_out
+      };
+    }));
+  });
+
+  renderTable('');
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+
+{% block title %}JO/COS Payroll - HRMS{% endblock %}
+
+{% block extra_css %}
+<style>
+  .jo-cos-payroll-wrap { overflow-x: auto; }
+  .jo-cos-payroll-table { font-size: 0.8rem; min-width: 680px; }
+  .jo-cos-payroll-table th,
+  .jo-cos-payroll-table td { white-space: nowrap; padding: 0.45rem 0.5rem; }
+  .jo-cos-payroll-table th { text-align: center; vertical-align: middle; }
+  .jo-cos-payroll-table th.num { text-align: right; }
+  .jo-cos-payroll-table th.deductions-group { text-align: center; }
+  .jo-cos-payroll-table td.num { text-align: right; }
+  .jo-cos-payroll-table td.num-center { text-align: center; }
+  .jo-cos-payroll-table td.name-col { min-width: 10rem; max-width: 14rem; white-space: normal; }
+  .jo-cos-payroll-filters {
+    display: grid;
+    gap: 0.75rem;
+    align-items: end;
+  }
+  @media (min-width: 900px) {
+    .jo-cos-payroll-filters {
+      grid-template-columns: 5.25rem minmax(6.5rem, 7.5rem) minmax(8.5rem, 9.5rem) minmax(12rem, 1fr) auto;
+    }
+  }
+  @media (max-width: 899px) {
+    .jo-cos-payroll-filters {
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    }
+  }
+  .jo-cos-payroll-header {
+    text-align: center;
+    margin-bottom: 1rem;
+    padding: 1rem;
+    border: 1px solid var(--brand-border, #e5e7eb);
+    border-radius: 8px;
+    background: #fafafa;
+  }
+  .jo-cos-payroll-header h2 {
+    margin: 0 0 0.5rem;
+    font-size: 1.25rem;
+    letter-spacing: 0.04em;
+  }
+  .jo-cos-payroll-header p {
+    margin: 0.25rem 0;
+    font-size: 0.9rem;
+    color: var(--medium-gray, #6b7280);
+  }
+  .jo-cos-payroll-totals td {
+    font-weight: 600;
+    border-top: 2px solid var(--brand-border, #e5e7eb);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="header-bar">
+        <div class="header-content">
+            {% include 'includes/navbar_brand.html' %}
+            <nav class="main-nav">
+                <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+                {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Settings <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
+                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Manage Employees</a>
+                        <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
+                    </div>
+                </div>
+                {% endif %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
+                        {% include 'includes/nav_dtr_upload_link.html' %}
+                        {% include 'includes/nav_dtr_regenerate_link.html' %}
+                    </div>
+                </div>
+                {% include 'includes/nav_payroll_top_menu.html' %}
+            </nav>
+            <div class="user-dropdown">
+                <a href="#" class="user-info">
+                    {% if employee %}{{ employee.full_name }} ({{ current_user.role|title }}){% else %}{{ current_user.username }} ({{ current_user.role|title }}){% endif %}
+                    <span class="dropdown-arrow">▼</span>
+                </a>
+                <div class="dropdown-menu dropdown-menu-right">
+                    <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
+                        <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="dashboard-content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible">
+                        <span>{{ message }}</span>
+                        <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="page-header" style="flex-wrap: wrap; gap: 0.75rem;">
+            <h1 class="page-title">JO/COS Payroll</h1>
+            <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                <a href="{{ url_for('routes.payroll_worktime_summary', employee_type='jo_cos') }}" class="btn-secondary">Worktime Summary</a>
+                <a href="{{ url_for('routes.dashboard') }}" class="btn-secondary">Dashboard</a>
+            </div>
+        </div>
+
+        <p style="color: var(--medium-gray); margin-bottom: 1rem; font-size: 0.9rem;">
+            Daily wage payroll for Job Order and Contract of Service employees. Worktime is taken from DTR quincena regeneration (<code>work_hours</code> / snapshot). Rates come from <strong>Settings → JO and COS Rates</strong>.
+        </p>
+
+        <div class="table-section" style="margin-bottom: 1rem;">
+            <form method="GET" action="{{ url_for('routes.payroll_jo_cos') }}" class="form-section" style="padding: 1rem 1.25rem; border: 1px solid var(--brand-border, #e5e7eb); border-radius: 8px;">
+                <input type="hidden" name="load" value="1">
+                <div class="jo-cos-payroll-filters">
+                    <div class="form-group" style="margin: 0;">
+                        <label for="year">Year</label>
+                        <input type="number" name="year" id="year" class="form-control" min="2000" max="2100" value="{{ filters.year }}" required>
+                    </div>
+                    <div class="form-group" style="margin: 0;">
+                        <label for="month">Month</label>
+                        <select name="month" id="month" class="form-control" required>
+                            {% set month_names = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] %}
+                            {% for m in range(1, 13) %}
+                            <option value="{{ m }}" {% if filters.month == m %}selected{% endif %}>{{ '%02d'|format(m) }} {{ month_names[m] }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin: 0;">
+                        <label for="quincena">Quincena</label>
+                        <select name="quincena" id="quincena" class="form-control" required>
+                            <option value="1" {% if filters.quincena == '1' %}selected{% endif %}>1st (1–15)</option>
+                            <option value="2" {% if filters.quincena == '2' %}selected{% endif %}>2nd (16–end)</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin: 0;">
+                        <label for="department_id">Department</label>
+                        <select name="department_id" id="department_id" class="form-control" required>
+                            <option value="" disabled {% if not filters.department_id %}selected{% endif %}>Select department…</option>
+                            {% for d in departments %}
+                            <option value="{{ d.id }}" {% if filters.department_id|string == d.id|string %}selected{% endif %}>{{ d.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin: 0; display: flex; align-items: flex-end;">
+                        <button type="submit" class="btn-primary" style="white-space: nowrap; width: 100%;">Load Payroll</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        {% if dept_selected %}
+        <div class="table-section">
+            <div class="search-bar" style="flex-wrap: wrap; margin-bottom: 0.75rem;">
+                <input type="text" id="joCosPayrollSearch" class="search-input" placeholder="Search employees…" style="min-width: 220px;" autocomplete="off">
+                <span class="search-icon">🔍</span>
+                <div style="margin-left: auto; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
+                    <span style="font-size: 0.85rem; color: var(--medium-gray);"><strong>{{ row_count }}</strong> employee(s)</span>
+                    <a class="btn-secondary" href="{{ url_for('routes.payroll_jo_cos_export', format='pdf', year=filters.year, month=filters.month, quincena=filters.quincena, department_id=filters.department_id, load=1) }}">Export PDF</a>
+                </div>
+            </div>
+
+            <div class="jo-cos-payroll-header">
+                <h2>DAILY WAGE PAYROLL</h2>
+                <p>For labor on <strong>{{ department_name }}</strong>, at <strong>JAGNA, BOHOL</strong></p>
+                <p>Period: <strong>{{ period_label }}</strong> &nbsp;·&nbsp; Payment: <strong>ATM</strong></p>
+            </div>
+
+            <div class="table-container jo-cos-payroll-wrap">
+                <table class="data-table jo-cos-payroll-table" id="joCosPayrollTable">
+                    <thead>
+                        <tr>
+                            <th rowspan="2">Name</th>
+                            <th rowspan="2">No. of Days<br>Worked</th>
+                            <th rowspan="2" class="num">Rate<br>Per Day</th>
+                            <th rowspan="2" class="num">Gross<br>Salary</th>
+                            <th colspan="2" class="deductions-group">Deductions</th>
+                            <th rowspan="2" class="num">Net<br>Amount</th>
+                        </tr>
+                        <tr>
+                            <th>No. of Hours<br>Late</th>
+                            <th class="num">Late</th>
+                        </tr>
+                    </thead>
+                    <tbody id="joCosPayrollBody">
+                        {% for r in rows %}
+                        <tr class="table-row" data-search="{{ r.search_text }}">
+                            <td class="name-col">{{ r.employee_name }}</td>
+                            <td class="num num-center">{{ r.days_worked_display }}</td>
+                            <td class="num">{{ r.rate_per_day_display }}</td>
+                            <td class="num">{{ r.gross_salary_display }}</td>
+                            <td class="num num-center">{{ r.late_hours_display }}</td>
+                            <td class="num">{{ r.late_deduction_display }}</td>
+                            <td class="num">{{ r.net_amount_display }}</td>
+                        </tr>
+                        {% else %}
+                        <tr id="joCosPayrollEmpty">
+                            <td colspan="7" class="no-data">No active JO/COS employees in this department, or no worktime for the selected quincena. Run <strong>Regenerate DTR</strong> first.</td>
+                        </tr>
+                        {% endfor %}
+                        {% if rows %}
+                        <tr class="jo-cos-payroll-totals">
+                            <td colspan="3"><strong>TOTAL</strong></td>
+                            <td class="num">{{ totals.gross_salary }}</td>
+                            <td class="num num-center"></td>
+                            <td class="num">{{ totals.late }}</td>
+                            <td class="num">{{ totals.net }}</td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+            <p id="joCosPayrollNoMatch" style="display: none; margin-top: 0.75rem; color: var(--medium-gray); font-size: 0.9rem;">No rows match your search.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var inp = document.getElementById('joCosPayrollSearch');
+    var body = document.getElementById('joCosPayrollBody');
+    if (!inp || !body) return;
+    inp.addEventListener('input', function () {
+        var q = (inp.value || '').trim().toLowerCase();
+        var rows = body.querySelectorAll('tr.table-row');
+        var shown = 0;
+        rows.forEach(function (tr) {
+            var hay = tr.getAttribute('data-search') || '';
+            var ok = !q || hay.indexOf(q) !== -1;
+            tr.style.display = ok ? '' : 'none';
+            if (ok) shown++;
+        });
+        var noMatch = document.getElementById('joCosPayrollNoMatch');
+        if (noMatch) noMatch.style.display = (q && shown === 0) ? 'block' : 'none';
+    });
+})();
+</script>
+{% endblock %}

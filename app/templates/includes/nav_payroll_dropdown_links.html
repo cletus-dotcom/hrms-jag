@@ -1,0 +1,6 @@
+{% include 'includes/nav_payroll_deductions_submenu.html' %}
+<hr class="dropdown-separator">
+<a href="{{ url_for('routes.payroll_worktime_summary') }}" class="dropdown-item{% if request.endpoint == 'routes.payroll_worktime_summary' %} active{% endif %}">Worktime Summary</a>
+<hr class="dropdown-separator">
+<a href="{{ url_for('routes.payroll_jo_cos') }}" class="dropdown-item{% if request.endpoint == 'routes.payroll_jo_cos' %} active{% endif %}">JO/COS</a>
+<a href="{{ url_for('routes.payroll_plantilla') }}" class="dropdown-item{% if request.endpoint == 'routes.payroll_plantilla' %} active{% endif %}">Plantilla</a>

@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}Overtime Offset Approvals - HRMS{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+  <div class="header-bar">
+    <div class="header-content">
+      {% include 'includes/navbar_brand.html' %}
+      <nav class="main-nav">
+        <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+        {% if (current_user.role or '')|lower == 'manager' %}
+        <a href="{{ url_for('routes.leave_approvals') }}" class="nav-link">Leave Approvals</a>
+        {% endif %}
+        <a href="{{ url_for('routes.jo_cos_overtime_offset_approvals') }}" class="nav-link nav-link-active">Overtime Offset Approvals</a>
+        {% include 'includes/nav_notifications_link.html' %}
+      </nav>
+      <div class="user-dropdown">
+        <a href="#" class="user-info">
+          {% if employee %}{{ employee.full_name }}{% else %}{{ current_user.username }}{% endif %} ({{ current_user.role|title }})
+          <span class="dropdown-arrow">▼</span>
+        </a>
+        <div class="dropdown-menu dropdown-menu-right">
+          <button type="button" class="dropdown-item btn-change-password" style="width:100%;text-align:left;background:none;border:none;cursor:pointer;font:inherit;padding:0.5rem 1rem;">Change password</button>
+          <form method="POST" action="{{ url_for('routes.logout') }}" style="margin:0;">
+            <button type="submit" class="dropdown-item" style="width:100%;text-align:left;background:none;border:none;cursor:pointer;font:inherit;padding:0.5rem 1rem;">Logout</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dashboard-content">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} alert-dismissible">
+            <span>{{ message }}</span>
+            <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:1rem;">
+      <div>
+        <h1 class="page-title" style="margin:0;">JO/COS Overtime Offset Approvals</h1>
+        <p style="margin:0.25rem 0 0;color:var(--medium-gray);font-size:0.9rem;">Pending applications from JO/COS employees.</p>
+      </div>
+      <a href="{{ url_for('routes.dashboard') }}" class="btn-secondary">Back</a>
+    </div>
+
+    <div class="table-section">
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Employee</th>
+              <th>Department</th>
+              <th>Offset dates</th>
+              <th>Mode</th>
+              <th>Hours</th>
+              <th>Submitted</th>
+              <th>Notes</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in pending %}
+            <tr>
+              <td>{{ r.employee.last_name }}, {{ r.employee.first_name }} ({{ r.employee.employee_id }})</td>
+              <td>{{ r.employee.department.name if r.employee.department else '—' }}</td>
+              <td>{{ r.date_start.isoformat() }}{% if r.date_end != r.date_start %} — {{ r.date_end.isoformat() }}{% endif %}</td>
+              <td>{{ (r.offset_mode or '')|upper }}</td>
+              <td>{{ '%.2f'|format(r.total_hours|float) }}</td>
+              <td>{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '—' }}</td>
+              <td>{{ (r.reason or '—')[:80] }}</td>
+              <td style="white-space:nowrap;">
+                <form method="POST" action="{{ url_for('routes.jo_cos_overtime_offset_approve', id=r.id) }}" style="display:inline;">
+                  <button type="submit" class="btn-primary btn-sm">Approve</button>
+                </form>
+                <form method="POST" action="{{ url_for('routes.jo_cos_overtime_offset_reject', id=r.id) }}" style="display:inline;margin-left:0.25rem;" onsubmit="return confirmReject(this);">
+                  <input type="hidden" name="rejection_reason" value="">
+                  <button type="submit" class="btn-secondary btn-sm">Reject</button>
+                </form>
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="8" style="text-align:center;color:var(--medium-gray);">No pending overtime offset applications.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+function confirmReject(form) {
+  var reason = prompt('Rejection reason (optional):', '');
+  if (reason === null) return false;
+  form.querySelector('input[name="rejection_reason"]').value = reason || 'No reason given.';
+  return true;
+}
+(function () {
+  var n = {{ pending|length }};
+  if (n > 0 && 'Notification' in window && Notification.permission === 'granted') {
+    new Notification('HRMS — overtime offset approvals', {
+      body: n + ' pending JO/COS overtime offset application(s) need your review.',
+      tag: 'jo-cos-ot-approvals'
+    });
+  } else if (n > 0 && 'Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+})();
+</script>
+{% endblock %}

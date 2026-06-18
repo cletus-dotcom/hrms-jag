@@ -1,0 +1,319 @@
+{% extends "base.html" %}
+
+{% block title %}Overtime Credits - HRMS{% endblock %}
+
+{% block extra_css %}
+<style>
+  .ot-credits-header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 1rem; }
+  .ot-credits-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+  .ot-balance-cards { display: flex; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.25rem; }
+  .ot-balance-card { padding: 0.85rem 1.1rem; border: 1px solid var(--brand-border, #e5e7eb); border-radius: 8px; min-width: 140px; }
+  .ot-balance-card .label { font-size: 0.8rem; color: var(--medium-gray); }
+  .ot-balance-card .value { font-size: 1.35rem; font-weight: 700; }
+  .ot-ledger-table { font-size: 0.88rem; }
+  .ot-ledger-table th, .ot-ledger-table td { vertical-align: middle; }
+  .ot-row-toggle { cursor: pointer; }
+  .ot-row-toggle:hover { background: #f8fafc; }
+  .ot-detail-row td { background: #f9fafb; padding: 0 !important; }
+  .ot-detail-inner { padding: 0.75rem 1rem 1rem 2rem; }
+  .ot-detail-table { font-size: 0.82rem; width: 100%; max-width: 720px; }
+  .ot-detail-table th, .ot-detail-table td { border: 1px solid #e5e7eb; padding: 0.35rem 0.5rem; }
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; padding: 1rem; }
+  .modal-overlay.active { display: flex; }
+  .modal-content { background: #fff; border-radius: 8px; padding: 1.25rem; max-width: 480px; width: 100%; }
+  .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
+  .modal-close { background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #666; }
+  .pending-badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; background: #fff3cd; font-size: 0.8rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+  <div class="header-bar">
+    <div class="header-content">
+      {% include 'includes/navbar_brand.html' %}
+      <nav class="main-nav">
+        <a href="{{ url_for('routes.employee_dashboard') }}" class="nav-link">Dashboard</a>
+        <div class="nav-dropdown">
+          <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
+          <div class="dropdown-menu">
+            <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
+            <a href="{{ url_for('routes.dtr_justifications') }}" class="dropdown-item">DTR Justifications</a>
+          </div>
+        </div>
+        {% include 'includes/nav_overtime_credits_menu.html' %}
+        <div class="nav-dropdown">
+          <a href="#" class="nav-link">Leave <span class="dropdown-arrow">▼</span></a>
+          <div class="dropdown-menu">
+            <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply Leave</a>
+            <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
+          </div>
+        </div>
+        {% include 'includes/nav_notifications_link.html' %}
+        <div class="nav-dropdown">
+          <a href="#" class="nav-link">ABOUT <span class="dropdown-arrow">▼</span></a>
+          <div class="dropdown-menu">
+            <a href="{{ url_for('routes.users_manual') }}" class="dropdown-item">User's Manual</a>
+            <a href="{{ url_for('routes.hrmdo_manual') }}" class="dropdown-item">HRMDO Manual</a>
+          </div>
+        </div>
+      </nav>
+      <div class="user-dropdown">
+        <a href="#" class="user-info">
+          {{ employee.full_name }} ({{ current_user.role|title }})
+          <span class="dropdown-arrow">▼</span>
+        </a>
+        <div class="dropdown-menu dropdown-menu-right">
+          <button type="button" class="dropdown-item btn-change-password" style="width:100%; text-align:left; background:none; border:none; cursor:pointer; font:inherit; padding:0.5rem 1rem;">Change password</button>
+          <form method="POST" action="{{ url_for('routes.logout') }}" style="margin:0;">
+            <button type="submit" class="dropdown-item" style="width:100%; text-align:left; background:none; border:none; cursor:pointer; font:inherit; padding:0.5rem 1rem;">Logout</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dashboard-content">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} alert-dismissible">
+            <span>{{ message }}</span>
+            <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="ot-credits-header">
+      <div>
+        <h1 class="page-title" style="margin:0;">Overtime Credits</h1>
+        <p style="margin:0.35rem 0 0; color: var(--medium-gray); font-size: 0.9rem;">
+          Credited overtime from Regenerate DTR. Apply offset (minimum 4 hours) for department head / HR / Admin approval.
+        </p>
+      </div>
+      <div class="ot-credits-actions">
+        <button type="button" class="btn-primary" id="btnApplyOffset">Apply Offset</button>
+        <a href="{{ url_for('routes.employee_dashboard') }}" class="btn-secondary">Back</a>
+      </div>
+    </div>
+
+    <div class="ot-balance-cards">
+      <div class="ot-balance-card">
+        <div class="label">Current balance</div>
+        <div class="value">{{ balance_hours }} hrs</div>
+      </div>
+      <div class="ot-balance-card">
+        <div class="label">Available to offset</div>
+        <div class="value">{{ available_hours }} hrs</div>
+      </div>
+    </div>
+
+    {% if pending_requests %}
+    <div class="table-section" style="margin-bottom: 1rem;">
+      <h2 style="font-size: 1rem; margin: 0 0 0.5rem;">Pending offset applications</h2>
+      <div class="table-container">
+        <table class="data-table ot-ledger-table">
+          <thead>
+            <tr>
+              <th>Dates</th>
+              <th>Mode</th>
+              <th>Hours</th>
+              <th>Submitted</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in pending_requests %}
+            <tr>
+              <td>{{ p.date_start.isoformat() }}{% if p.date_end != p.date_start %} — {{ p.date_end.isoformat() }}{% endif %}</td>
+              <td>{{ (p.offset_mode or '')|upper }}</td>
+              <td>{{ '%.2f'|format(p.total_hours|float) }}</td>
+              <td>{{ p.created_at.strftime('%Y-%m-%d %H:%M') if p.created_at else '—' }}</td>
+              <td><span class="pending-badge">Pending</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="table-section">
+      <h2 style="font-size: 1rem; margin: 0 0 0.75rem;">Overtime ledger</h2>
+      <div class="table-container">
+        <table class="data-table ot-ledger-table" id="ledgerTable">
+          <thead>
+            <tr>
+              <th style="width:2rem;"></th>
+              <th>Period</th>
+              <th>Hours earned</th>
+              <th>Offset date</th>
+              <th>Offset hours</th>
+              <th>Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in ledger_rows %}
+            <tr class="ot-row-toggle{% if row.detail_lines %} has-detail{% endif %}" data-detail-id="detail-{{ row.id }}">
+              <td>{% if row.detail_lines %}<span class="ot-chevron">▶</span>{% endif %}</td>
+              <td>{{ row.period }}</td>
+              <td>{{ row.hours_earned }}</td>
+              <td>{{ row.offset_date }}</td>
+              <td>{{ row.offset_hours }}</td>
+              <td><strong>{{ row.balance }}</strong></td>
+            </tr>
+            {% if row.detail_lines %}
+            <tr class="ot-detail-row" id="detail-{{ row.id }}" style="display:none;">
+              <td colspan="6">
+                <div class="ot-detail-inner">
+                  <p style="margin:0 0 0.5rem; font-size:0.85rem; color:var(--medium-gray);">Authorized dates credited for this quincena</p>
+                  <table class="ot-detail-table">
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>In</th>
+                        <th>Break out</th>
+                        <th>Break in</th>
+                        <th>Out</th>
+                        <th>Total hours</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for d in row.detail_lines %}
+                      <tr>
+                        <td>{{ d.work_date }}</td>
+                        <td>{{ d.time_in }}</td>
+                        <td>{{ d.break_out }}</td>
+                        <td>{{ d.break_in }}</td>
+                        <td>{{ d.time_out }}</td>
+                        <td>{{ d.total_hours }}</td>
+                      </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              </td>
+            </tr>
+            {% endif %}
+            {% else %}
+            <tr><td colspan="6" style="text-align:center; color:var(--medium-gray);">No overtime credits recorded yet. Credits appear after HR runs Regenerate DTR for a quincena where you rendered authorized extended service.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="offsetModal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3 style="margin:0;">Apply overtime offset</h3>
+      <button type="button" class="modal-close" id="offsetModalClose">&times;</button>
+    </div>
+    <form method="POST" action="{{ url_for('routes.jo_cos_overtime_apply_offset') }}" id="offsetForm">
+      <div class="form-group">
+        <label for="date_start">Date from (inclusive)</label>
+        <input type="date" name="date_start" id="date_start" class="form-control" required>
+      </div>
+      <div class="form-group">
+        <label for="date_end">Date to (inclusive)</label>
+        <input type="date" name="date_end" id="date_end" class="form-control" required>
+      </div>
+      <div class="form-group">
+        <label>Offset type</label>
+        <div style="display:flex; flex-direction:column; gap:0.35rem;">
+          <label><input type="radio" name="offset_mode" value="FULL" required> Full day (8 hours per date)</label>
+          <label><input type="radio" name="offset_mode" value="AM"> AM half-day (4 hours per date)</label>
+          <label><input type="radio" name="offset_mode" value="PM"> PM half-day (4 hours per date)</label>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="reason">Notes (optional)</label>
+        <textarea name="reason" id="reason" class="form-control" rows="2" placeholder="Purpose or remarks"></textarea>
+      </div>
+      <p id="offsetHoursPreview" style="font-size:0.85rem; color:var(--medium-gray); margin:0 0 1rem;"></p>
+      <p style="font-size:0.8rem; color:var(--medium-gray);">Minimum application: 4 hours. Available balance: <strong>{{ available_hours }}</strong> hrs.</p>
+      <div style="display:flex; gap:0.5rem; justify-content:flex-end;">
+        <button type="button" class="btn-secondary" id="offsetModalCancel">Cancel</button>
+        <button type="submit" class="btn-primary">Submit for approval</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  var available = parseFloat({{ available_hours|tojson }}) || 0;
+  var modal = document.getElementById('offsetModal');
+  function openModal() { modal.classList.add('active'); }
+  function closeModal() { modal.classList.remove('active'); }
+  document.getElementById('btnApplyOffset').addEventListener('click', openModal);
+  document.getElementById('offsetModalClose').addEventListener('click', closeModal);
+  document.getElementById('offsetModalCancel').addEventListener('click', closeModal);
+  modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+
+  document.querySelectorAll('.ot-row-toggle.has-detail').forEach(function (row) {
+    row.addEventListener('click', function () {
+      var id = row.getAttribute('data-detail-id');
+      var detail = document.getElementById(id);
+      if (!detail) return;
+      var open = detail.style.display !== 'none';
+      detail.style.display = open ? 'none' : 'table-row';
+      var ch = row.querySelector('.ot-chevron');
+      if (ch) ch.textContent = open ? '▶' : '▼';
+    });
+  });
+
+  function previewHours() {
+    var d0 = document.getElementById('date_start').value;
+    var d1 = document.getElementById('date_end').value;
+    var mode = (document.querySelector('input[name="offset_mode"]:checked') || {}).value;
+    var el = document.getElementById('offsetHoursPreview');
+    if (!d0 || !d1 || !mode) { el.textContent = ''; return; }
+    var a = new Date(d0 + 'T00:00:00');
+    var b = new Date(d1 + 'T00:00:00');
+    if (b < a) { el.textContent = 'End date must be on or after start date.'; return; }
+    var days = Math.round((b - a) / 86400000) + 1;
+    var per = mode === 'FULL' ? 8 : 4;
+    var total = days * per;
+    el.textContent = 'Total offset: ' + total.toFixed(2) + ' hour(s) over ' + days + ' date(s).';
+    if (total < 4) el.textContent += ' (below 4-hour minimum)';
+    if (total > available) el.textContent += ' (exceeds available balance)';
+  }
+  ['date_start', 'date_end'].forEach(function (id) {
+    document.getElementById(id).addEventListener('change', previewHours);
+  });
+  document.querySelectorAll('input[name="offset_mode"]').forEach(function (r) {
+    r.addEventListener('change', previewHours);
+  });
+
+  document.getElementById('offsetForm').addEventListener('submit', function (e) {
+    var d0 = document.getElementById('date_start').value;
+    var d1 = document.getElementById('date_end').value;
+    var mode = (document.querySelector('input[name="offset_mode"]:checked') || {}).value;
+    if (!mode) return;
+    var a = new Date(d0 + 'T00:00:00');
+    var b = new Date(d1 + 'T00:00:00');
+    var days = Math.round((b - a) / 86400000) + 1;
+    var total = days * (mode === 'FULL' ? 8 : 4);
+    if (total < 4) {
+      e.preventDefault();
+      alert('Offset application must be at least 4 hours.');
+      return;
+    }
+    if (total > available) {
+      e.preventDefault();
+      alert('Requested hours exceed your available overtime balance.');
+    }
+  });
+
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+})();
+</script>
+{% endblock %}

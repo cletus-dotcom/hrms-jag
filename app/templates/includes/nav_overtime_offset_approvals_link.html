@@ -1,0 +1,3 @@
+{% if (current_user.role or '')|lower in ('manager', 'admin', 'hr') %}
+<a href="{{ url_for('routes.jo_cos_overtime_offset_approvals') }}" class="dropdown-item{% if request.endpoint == 'routes.jo_cos_overtime_offset_approvals' %} active{% endif %}">Overtime Offset Approvals</a>
+{% endif %}

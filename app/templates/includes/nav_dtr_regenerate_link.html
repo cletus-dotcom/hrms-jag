@@ -1,0 +1,4 @@
+{% if (current_user.role or '')|lower in ('admin', 'hr') %}
+<hr class="dropdown-separator">
+<a href="{{ url_for('routes.dtr_regenerate') }}" class="dropdown-item">Regenerate DTR (quincena)</a>
+{% endif %}

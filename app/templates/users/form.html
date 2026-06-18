@@ -14,9 +14,13 @@
                     <a href="#" class="nav-link nav-link-active">Settings <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">
                         <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
+                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Manage Employees</a>
                         <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
                         <hr class="dropdown-separator">
                         <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
+                        <a href="{{ url_for('routes.jo_cos_designations_list') }}" class="dropdown-item">JO/COS designations</a>
+                        <a href="{{ url_for('routes.jo_cos_rates_list') }}" class="dropdown-item">JO and COS Rates</a>
+                        <a href="{{ url_for('routes.flexi_time_schedule_list') }}" class="dropdown-item">Flexi-time schedule</a>
                         <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
                         <hr class="dropdown-separator">
                         <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
@@ -24,17 +28,12 @@
                 </div>
                 {% endif %}
                 <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Employee Management <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Employees</a>
-                    </div>
-                </div>
-                <div class="nav-dropdown">
                     <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">
                         <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
-                        <a href="{{ url_for('routes.dtr_upload') }}" class="dropdown-item">Upload DTR Log</a>
+                        {% include 'includes/nav_dtr_upload_link.html' %}
                         <a href="{{ url_for('routes.dtr_justifications') }}" class="dropdown-item">DTR Justifications</a>
+                        {% include 'includes/nav_dtr_edit_link.html' %}
                     </div>
                 </div>
                 <div class="nav-dropdown">
@@ -53,6 +52,17 @@
                         {% endif %}
                     </div>
                 </div>
+                {% include 'includes/nav_payroll_top_menu.html' %}
+                {% if (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        {% include 'includes/reports_dropdown_links.html' %}
+                    </div>
+                </div>
+                {% else %}
+                <a href="#" class="nav-link">Reports</a>
+                {% endif %}
                 <div class="nav-dropdown">
                     <a href="#" class="nav-link">ABOUT <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">
@@ -60,17 +70,6 @@
                         <a href="{{ url_for('routes.hrmdo_manual') }}" class="dropdown-item">HRMDO Manual</a>
                     </div>
                 </div>
-                {% if (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.payroll_summary') }}" class="dropdown-item">Payroll Summary Report</a>
-                        <a href="{{ url_for('routes.payroll_submissions') }}" class="dropdown-item">Submitted Payroll History</a>
-                    </div>
-                </div>
-                {% else %}
-                <a href="#" class="nav-link">Reports</a>
-                {% endif %}
             </nav>
             <div class="user-dropdown">
                 <a href="#" class="user-info">

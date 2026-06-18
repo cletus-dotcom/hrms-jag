@@ -1,0 +1,25 @@
+{% set _deductions_active = request.endpoint in (
+    'routes.payroll_deductions_gsis',
+    'routes.payroll_deductions_plantilla',
+    'routes.payroll_deductions_hdmf',
+    'routes.payroll_deductions_hdmf_contributions_preview',
+    'routes.payroll_deductions_hdmf_contributions_upload_submit',
+    'routes.payroll_deductions_hdmf_contributions_deductions_submit',
+    'routes.payroll_deductions_hdmf_loans_preview',
+    'routes.payroll_deductions_hdmf_loans_upload_submit',
+    'routes.payroll_deductions_hdmf_loans_deductions_submit',
+) %}
+<div class="nav-dropdown-sub{% if _deductions_active %} nav-dropdown-sub-active{% endif %}">
+    <span class="dropdown-item dropdown-item-submenu">Deductions <span class="submenu-arrow">▶</span></span>
+    <div class="dropdown-menu dropdown-submenu">
+        <a href="{{ url_for('routes.payroll_deductions_gsis') }}" class="dropdown-item{% if request.endpoint == 'routes.payroll_deductions_gsis' %} active{% endif %}">GSIS</a>
+        <div class="nav-dropdown-sub{% if request.endpoint and request.endpoint.startswith('routes.payroll_deductions_hdmf') %} nav-dropdown-sub-active{% endif %}">
+            <span class="dropdown-item dropdown-item-submenu">HDMF <span class="submenu-arrow">▶</span></span>
+            <div class="dropdown-menu dropdown-submenu">
+                <a href="{{ url_for('routes.payroll_deductions_hdmf', scope='jo-cos') }}#contribution" class="dropdown-item">JO/COS</a>
+                <a href="{{ url_for('routes.payroll_deductions_hdmf', scope='plantilla') }}#contribution" class="dropdown-item">Plantilla</a>
+            </div>
+        </div>
+        <a href="{{ url_for('routes.payroll_deductions_plantilla') }}" class="dropdown-item{% if request.endpoint == 'routes.payroll_deductions_plantilla' %} active{% endif %}">Plantilla</a>
+    </div>
+</div>

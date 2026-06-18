@@ -42,9 +42,21 @@ def create_app(config_class=Config):
             from app import models  # register all models so create_all() creates every table
             db.create_all()
             # Ensure leave_ledger_deletion exists (audit log); create_all can miss new tables in some setups
-            from app.models import LeaveLedgerDeletion, JoCosDesignation
+            from app.models import LeaveLedgerDeletion, JoCosDesignation, JoCosRate, FlexiTimeSchedule, EmployeeFlexiDay, DtrQuincenaWorktimeSummary, WorkHours, FlexibleWorktime, OvertimeAuthorization, JoCosExtendService, JoCosOvertime, JoCosOvertimeLedger, JoCosOvertimeOffsetRequest, HrmsNotification
             LeaveLedgerDeletion.__table__.create(db.engine, checkfirst=True)
             JoCosDesignation.__table__.create(db.engine, checkfirst=True)
+            JoCosRate.__table__.create(db.engine, checkfirst=True)
+            FlexiTimeSchedule.__table__.create(db.engine, checkfirst=True)
+            EmployeeFlexiDay.__table__.create(db.engine, checkfirst=True)
+            DtrQuincenaWorktimeSummary.__table__.create(db.engine, checkfirst=True)
+            WorkHours.__table__.create(db.engine, checkfirst=True)
+            FlexibleWorktime.__table__.create(db.engine, checkfirst=True)
+            OvertimeAuthorization.__table__.create(db.engine, checkfirst=True)
+            JoCosExtendService.__table__.create(db.engine, checkfirst=True)
+            JoCosOvertime.__table__.create(db.engine, checkfirst=True)
+            JoCosOvertimeOffsetRequest.__table__.create(db.engine, checkfirst=True)
+            JoCosOvertimeLedger.__table__.create(db.engine, checkfirst=True)
+            HrmsNotification.__table__.create(db.engine, checkfirst=True)
             # Ensure employees table has agency, lgu_class_level, salary_* columns (add if missing)
             from sqlalchemy import text
             from sqlalchemy import inspect

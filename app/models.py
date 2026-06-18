@@ -179,6 +179,66 @@ class JoCosDesignation(db.Model):
         t = (self.designation or "")[:48]
         return f"<JoCosDesignation id={self.id} {t!r}>"
 
+
+class JoCosRate(db.Model):
+    """
+    Daily rate for Job Order / Contract of Service by designation label (payroll).
+    Match employees using status_of_appointment + designation text (jo_cos_designation.designation or position).
+    """
+    __tablename__ = 'jo_cos_rate'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'status_of_appointment',
+            'designation_label',
+            name='uq_jo_cos_rate_status_designation',
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    status_of_appointment = db.Column(db.String(50), nullable=False)
+    designation_label = db.Column(db.String(500), nullable=False)
+    rate_per_day = db.Column(db.Numeric(14, 6), nullable=False)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+
+    def __repr__(self):
+        return f"<JoCosRate id={self.id} {self.status_of_appointment!r} {self.designation_label[:40]!r}>"
+
+
+class FlexiTimeSchedule(db.Model):
+    """Reference flexi-time shift codes with display time-in / time-out (DTR / scheduling)."""
+    __tablename__ = 'flexi_time_schedule'
+    __table_args__ = (db.UniqueConstraint('shift_code', name='uq_flexi_time_schedule_shift_code'),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    shift_code = db.Column(db.String(64), nullable=False)
+    time_in = db.Column(db.String(64), nullable=False)
+    time_out = db.Column(db.String(64), nullable=False)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+
+    def __repr__(self):
+        return f"<FlexiTimeSchedule id={self.id} {self.shift_code!r}>"
+
+
+class EmployeeFlexiDay(db.Model):
+    """Per-date flexi shift for an employee (DTR uses schedule time-in/out for that calendar day)."""
+    __tablename__ = 'employee_flexi_day'
+    __table_args__ = (
+        db.UniqueConstraint('employee_id', 'work_date', name='uq_employee_flexi_day_emp_date'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id', ondelete='CASCADE'), nullable=False)
+    work_date = db.Column(db.Date, nullable=False)
+    flexi_time_schedule_id = db.Column(
+        db.Integer, db.ForeignKey('flexi_time_schedule.id', ondelete='CASCADE'), nullable=False
+    )
+
+    flexi_schedule = db.relationship('FlexiTimeSchedule', backref='employee_flexi_days')
+
+    def __repr__(self):
+        return f"<EmployeeFlexiDay emp={self.employee_id} {self.work_date} sch={self.flexi_time_schedule_id}>"
+
+
 class Attendance(db.Model):
     __tablename__ = 'attendance'
     
@@ -279,22 +339,6 @@ class DtrJustification(db.Model):
     __table_args__ = (
         db.UniqueConstraint('employee_id', 'record_date', name='uq_dtr_justification_employee_date'),
     )
-
-
-class PayrollSubmission(db.Model):
-    __tablename__ = 'payroll_submissions'
-
-    id = db.Column(db.Integer, primary_key=True)
-    period_mode = db.Column(db.String(20), nullable=False)  # quincena|month
-    year = db.Column(db.Integer, nullable=False)
-    month = db.Column(db.Integer, nullable=False)
-    quincena = db.Column(db.String(1), nullable=True)
-    summary_json = db.Column(db.Text, nullable=True)
-    submitted_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
-    submitted_to = db.Column(db.String(100), nullable=True, default='Accounting Office')
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
-
-    submitted_by = db.relationship('User', backref=db.backref('payroll_submissions', lazy='dynamic'))
 
 
 class LeaveRequest(db.Model):
@@ -1509,3 +1553,523 @@ class LeaveLedgerDeletion(db.Model):
 
     def __repr__(self):
         return f'<LeaveLedgerDeletion orig_id={self.original_ledger_id} emp={self.employee_id}>'
+
+
+class GsisContribution(db.Model):
+    """
+    GSIS per-quincena contribution rows (Plantilla employees).
+
+    Deductible period: year, month, deductible_quincena (always 2nd quincena).
+    Amounts: ps_amount (9%), gs_amount (12%, reporting), month_amount (PS deducted on 2nd quincena),
+    deducted_amount (PS employee share).
+    """
+    __tablename__ = 'gsis_contributions'
+    __table_args__ = (
+        db.UniqueConstraint('employee_id', 'year', 'month', 'deductible_quincena', name='uq_gsis_contrib_emp_ymq'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    department_id = db.Column(db.Integer, db.ForeignKey('departments.id'), nullable=True)
+
+    year = db.Column(db.Integer, nullable=False)
+    month = db.Column(db.Integer, nullable=False)
+    deductible_quincena = db.Column(db.String(1), nullable=False)  # '1' | '2'
+
+    basic_salary = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    ps_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    gs_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    month_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    quincena_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    total_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    deducted_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('gsis_contributions', lazy='dynamic'))
+    department = db.relationship('Department', backref=db.backref('gsis_contributions', lazy='dynamic'))
+    creator = db.relationship('User', backref=db.backref('gsis_contributions', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<GsisContribution id={self.id} emp={self.employee_id} {self.year}-{self.month:02d} Q{self.deductible_quincena}>'
+
+
+class GsisLoanRecord(db.Model):
+    """Per-employee GSIS loan amounts imported from the monthly GSIS file."""
+    __tablename__ = 'gsis_loan_records'
+    __table_args__ = (
+        db.UniqueConstraint('employee_id', 'year', 'month', name='uq_gsis_loan_record_emp_ym'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    year = db.Column(db.Integer, nullable=False)
+    month = db.Column(db.Integer, nullable=False)
+    bpno = db.Column(db.String(50), nullable=True)
+    ps_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    gs_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    ec_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    consoloan = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    emrgyln = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    plreg = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    gfal = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    mpl = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    cpl = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    mpl_lite = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('gsis_loan_records', lazy='dynamic'))
+    creator = db.relationship('User', backref=db.backref('gsis_loan_records', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<GsisLoanRecord id={self.id} emp={self.employee_id} {self.year}-{self.month:02d}>'
+
+
+class GsisLoanDeduction(db.Model):
+    """Scheduled GSIS loan deduction per employee, loan type, and month."""
+    __tablename__ = 'gsis_loan_deductions'
+    __table_args__ = (
+        db.UniqueConstraint('employee_id', 'year', 'month', 'loan_type', name='uq_gsis_loan_deduction_emp_ym_type'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    department_id = db.Column(db.Integer, db.ForeignKey('departments.id'), nullable=True)
+    year = db.Column(db.Integer, nullable=False)
+    month = db.Column(db.Integer, nullable=False)
+    loan_type = db.Column(db.String(32), nullable=False)
+    month_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    q1_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    q2_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    q1_enabled = db.Column(db.Boolean, nullable=False, default=True)
+    q2_enabled = db.Column(db.Boolean, nullable=False, default=True)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('gsis_loan_deductions', lazy='dynamic'))
+    department = db.relationship('Department', backref=db.backref('gsis_loan_deductions', lazy='dynamic'))
+    creator = db.relationship('User', backref=db.backref('gsis_loan_deductions', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<GsisLoanDeduction id={self.id} emp={self.employee_id} {self.loan_type} {self.year}-{self.month:02d}>'
+
+
+class HdmfContributionRecord(db.Model):
+    """HDMF contribution rows imported from the monthly Pag-IBIG file (Contribution sheet)."""
+    __tablename__ = 'hdmf_contribution_records'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'employee_id', 'year', 'month', 'employment_scope', 'membership_program',
+            name='uq_hdmf_contrib_record_emp_ym_scope_prog',
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    employment_scope = db.Column(db.String(16), nullable=False)  # jo_cos | plantilla
+    classification = db.Column(db.String(64), nullable=True)  # e.g. hdmf_jo_cos_contribution
+    year = db.Column(db.Integer, nullable=False)
+    month = db.Column(db.Integer, nullable=False)
+    mid_no = db.Column(db.String(50), nullable=True)
+    mp2_account_no = db.Column(db.String(50), nullable=True)
+    membership_program = db.Column(db.String(120), nullable=False)
+    percov = db.Column(db.String(10), nullable=True)
+    monthly_compensation = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    er_share = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    ee_share = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('hdmf_contribution_records', lazy='dynamic'))
+    creator = db.relationship('User', backref=db.backref('hdmf_contribution_records', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<HdmfContributionRecord id={self.id} emp={self.employee_id} {self.year}-{self.month:02d}>'
+
+
+class HdmfContributionDeduction(db.Model):
+    """Scheduled HDMF contribution deduction per employee and month (2nd quincena)."""
+    __tablename__ = 'hdmf_contribution_deductions'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'employee_id', 'year', 'month', 'employment_scope',
+            name='uq_hdmf_contrib_deduction_emp_ym_scope',
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    department_id = db.Column(db.Integer, db.ForeignKey('departments.id'), nullable=True)
+    employment_scope = db.Column(db.String(16), nullable=False)
+    classification = db.Column(db.String(64), nullable=True)  # e.g. hdmf_plantilla_contribution
+    year = db.Column(db.Integer, nullable=False)
+    month = db.Column(db.Integer, nullable=False)
+    membership_program = db.Column(db.String(120), nullable=False)
+    ps_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    gs_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    mp2_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    month_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    deductible_quincena = db.Column(db.String(1), nullable=False, default='2')
+    deducted_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('hdmf_contribution_deductions', lazy='dynamic'))
+    department = db.relationship('Department', backref=db.backref('hdmf_contribution_deductions', lazy='dynamic'))
+    creator = db.relationship('User', backref=db.backref('hdmf_contribution_deductions', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<HdmfContributionDeduction id={self.id} emp={self.employee_id} {self.year}-{self.month:02d}>'
+
+
+class HdmfLoanRecord(db.Model):
+    """HDMF loan amounts imported from the monthly Pag-IBIG file (Loan sheet)."""
+    __tablename__ = 'hdmf_loan_records'
+    __table_args__ = (
+        db.UniqueConstraint('employee_id', 'year', 'month', 'employment_scope', name='uq_hdmf_loan_record_emp_ym_scope'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    employment_scope = db.Column(db.String(16), nullable=False)
+    classification = db.Column(db.String(64), nullable=True)  # e.g. hdmf_jo_cos_loan
+    year = db.Column(db.Integer, nullable=False)
+    month = db.Column(db.Integer, nullable=False)
+    mid_no = db.Column(db.String(50), nullable=True)
+    mpl = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    salary = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    housing = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    safe = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('hdmf_loan_records', lazy='dynamic'))
+    creator = db.relationship('User', backref=db.backref('hdmf_loan_records', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<HdmfLoanRecord id={self.id} emp={self.employee_id} {self.year}-{self.month:02d}>'
+
+
+class HdmfLoanDeduction(db.Model):
+    """Scheduled HDMF loan deduction per employee, loan type, and month (2nd quincena)."""
+    __tablename__ = 'hdmf_loan_deductions'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'employee_id', 'year', 'month', 'employment_scope', 'loan_type',
+            name='uq_hdmf_loan_deduction_emp_ym_scope_type',
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    department_id = db.Column(db.Integer, db.ForeignKey('departments.id'), nullable=True)
+    employment_scope = db.Column(db.String(16), nullable=False)
+    classification = db.Column(db.String(64), nullable=True)  # e.g. hdmf_plantilla_loan
+    year = db.Column(db.Integer, nullable=False)
+    month = db.Column(db.Integer, nullable=False)
+    loan_type = db.Column(db.String(32), nullable=False)
+    month_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    q1_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    q2_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    q1_enabled = db.Column(db.Boolean, nullable=False, default=True)
+    q2_enabled = db.Column(db.Boolean, nullable=False, default=True)
+    deductible_quincena = db.Column(db.String(1), nullable=False, default='2')
+    deducted_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('hdmf_loan_deductions', lazy='dynamic'))
+    department = db.relationship('Department', backref=db.backref('hdmf_loan_deductions', lazy='dynamic'))
+    creator = db.relationship('User', backref=db.backref('hdmf_loan_deductions', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<HdmfLoanDeduction id={self.id} emp={self.employee_id} {self.loan_type} {self.year}-{self.month:02d}>'
+
+
+class DtrQuincenaWorktimeSummary(db.Model):
+    """
+    Per-employee quincena worktime snapshot after DTR regeneration (HR/Admin).
+    JO/COS: net_rendered_mins reflects gross minus late, undertime, and absence minutes.
+    Plantilla: net_rendered_mins equals gross_work_mins (VL deductions are posted on leave_ledger).
+    """
+    __tablename__ = 'dtr_quincena_worktime_summary'
+    __table_args__ = (
+        db.UniqueConstraint('employee_id', 'year', 'month', 'quincena_half', name='uq_dtr_qwt_emp_ymq'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id', ondelete='CASCADE'), nullable=False)
+    department_id = db.Column(db.Integer, db.ForeignKey('departments.id', ondelete='SET NULL'), nullable=True)
+    year = db.Column(db.SmallInteger, nullable=False)
+    month = db.Column(db.SmallInteger, nullable=False)
+    quincena_half = db.Column(db.String(1), nullable=False)  # '1' or '2'
+    gross_work_mins = db.Column(db.Integer, nullable=False, default=0)
+    late_mins = db.Column(db.Integer, nullable=False, default=0)
+    undertime_mins = db.Column(db.Integer, nullable=False, default=0)
+    absence_mins = db.Column(db.Integer, nullable=False, default=0)
+    absence_days = db.Column(db.SmallInteger, nullable=False, default=0)
+    net_rendered_mins = db.Column(db.Integer, nullable=False, default=0)
+    processed_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('dtr_quincena_worktime_summaries', lazy='dynamic'))
+    department = db.relationship('Department', backref=db.backref('dtr_quincena_worktime_summaries', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<DtrQuincenaWorktimeSummary emp={self.employee_id} {self.year}-{self.month:02d} Q{self.quincena_half}>'
+
+
+class WorkHours(db.Model):
+    """
+    Per-employee daily worktime history written on DTR quincena regeneration.
+    One row per calendar day within the regenerated quincena window.
+    """
+    __tablename__ = 'work_hours'
+    __table_args__ = (
+        db.UniqueConstraint('employee_id', 'work_date', name='uq_work_hours_emp_date'),
+        db.Index('ix_work_hours_ymq', 'year', 'month', 'quincena_half'),
+        db.Index('ix_work_hours_emp_ymq', 'employee_id', 'year', 'month', 'quincena_half'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id', ondelete='CASCADE'), nullable=False)
+    department_id = db.Column(db.Integer, db.ForeignKey('departments.id', ondelete='SET NULL'), nullable=True)
+    work_date = db.Column(db.Date, nullable=False)
+    year = db.Column(db.SmallInteger, nullable=False)
+    month = db.Column(db.SmallInteger, nullable=False)
+    quincena_half = db.Column(db.String(1), nullable=False)  # '1' or '2'
+    gross_work_mins = db.Column(db.Integer, nullable=False, default=0)
+    late_mins = db.Column(db.Integer, nullable=False, default=0)
+    undertime_mins = db.Column(db.Integer, nullable=False, default=0)
+    absence_mins = db.Column(db.Integer, nullable=False, default=0)
+    net_rendered_mins = db.Column(db.Integer, nullable=False, default=0)
+    remarks = db.Column(db.String(100), nullable=True)
+    processed_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('work_hours_rows', lazy='dynamic'))
+    department = db.relationship('Department', backref=db.backref('work_hours_rows', lazy='dynamic'))
+
+    def __repr__(self):
+        return (
+            f'<WorkHours emp={self.employee_id} {self.work_date} '
+            f'{self.year}-{self.month:02d} Q{self.quincena_half} net={self.net_rendered_mins}>'
+        )
+
+
+class FlexibleWorktime(db.Model):
+    """
+    Quincena-specific flexible worktime assignments used by DTR regeneration.
+    One row = one employee date range (inclusive) with custom in / break-out / break-in / out.
+    """
+    __tablename__ = 'flexible_worktime'
+    __table_args__ = (
+        db.Index('ix_flexible_worktime_ymq', 'year', 'month', 'quincena_half'),
+        db.Index('ix_flexible_worktime_emp_ymq', 'employee_id', 'year', 'month', 'quincena_half'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id', ondelete='CASCADE'), nullable=False)
+    year = db.Column(db.SmallInteger, nullable=False)
+    month = db.Column(db.SmallInteger, nullable=False)
+    quincena_half = db.Column(db.String(1), nullable=False)  # '1' or '2'
+    date_start = db.Column(db.Date, nullable=False)
+    date_end = db.Column(db.Date, nullable=False)
+    time_in = db.Column(db.Time, nullable=False)
+    break_out = db.Column(db.Time, nullable=False)
+    break_in = db.Column(db.Time, nullable=False)
+    time_out = db.Column(db.Time, nullable=False)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('flexible_worktime_rows', lazy='dynamic'))
+    created_by = db.relationship('User', backref=db.backref('flexible_worktime_rows', lazy='dynamic'))
+
+    def __repr__(self):
+        return (
+            f'<FlexibleWorktime emp={self.employee_id} {self.year}-{self.month:02d} '
+            f'{self.quincena_half} {self.date_start}..{self.date_end}>'
+        )
+
+
+class OvertimeAuthorization(db.Model):
+    """
+    Quincena-specific authorized overtime for plantilla employees (DTR regeneration + CTO).
+    One row = one employee date range (inclusive) with custom in / break-out / break-in / out.
+    """
+    __tablename__ = 'overtime_authorization'
+    __table_args__ = (
+        db.Index('ix_overtime_authorization_ymq', 'year', 'month', 'quincena_half'),
+        db.Index('ix_overtime_authorization_emp_ymq', 'employee_id', 'year', 'month', 'quincena_half'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id', ondelete='CASCADE'), nullable=False)
+    year = db.Column(db.SmallInteger, nullable=False)
+    month = db.Column(db.SmallInteger, nullable=False)
+    quincena_half = db.Column(db.String(1), nullable=False)  # '1' or '2'
+    date_start = db.Column(db.Date, nullable=False)
+    date_end = db.Column(db.Date, nullable=False)
+    time_in = db.Column(db.Time, nullable=False)
+    break_out = db.Column(db.Time, nullable=False)
+    break_in = db.Column(db.Time, nullable=False)
+    time_out = db.Column(db.Time, nullable=False)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('overtime_authorization_rows', lazy='dynamic'))
+    created_by = db.relationship('User', backref=db.backref('overtime_authorization_rows', lazy='dynamic'))
+
+    def __repr__(self):
+        return (
+            f'<OvertimeAuthorization emp={self.employee_id} {self.year}-{self.month:02d} '
+            f'Q{self.quincena_half} {self.date_start}..{self.date_end}>'
+        )
+
+
+class JoCosExtendService(db.Model):
+    """
+    Quincena-specific authorized extended-service (overtime) schedule for JO/COS employees.
+    One row = one employee date range (inclusive) with custom in / break-out / break-in / out.
+    """
+    __tablename__ = 'jo_cos_extend_service'
+    __table_args__ = (
+        db.Index('ix_jo_cos_extend_service_ymq', 'year', 'month', 'quincena_half'),
+        db.Index('ix_jo_cos_extend_service_emp_ymq', 'employee_id', 'year', 'month', 'quincena_half'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id', ondelete='CASCADE'), nullable=False)
+    year = db.Column(db.SmallInteger, nullable=False)
+    month = db.Column(db.SmallInteger, nullable=False)
+    quincena_half = db.Column(db.String(1), nullable=False)  # '1' or '2'
+    date_start = db.Column(db.Date, nullable=False)
+    date_end = db.Column(db.Date, nullable=False)
+    time_in = db.Column(db.Time, nullable=False)
+    break_out = db.Column(db.Time, nullable=False)
+    break_in = db.Column(db.Time, nullable=False)
+    time_out = db.Column(db.Time, nullable=False)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('jo_cos_extend_service_rows', lazy='dynamic'))
+    created_by = db.relationship('User', backref=db.backref('jo_cos_extend_service_rows', lazy='dynamic'))
+
+    def __repr__(self):
+        return (
+            f'<JoCosExtendService emp={self.employee_id} {self.year}-{self.month:02d} '
+            f'Q{self.quincena_half} {self.date_start}..{self.date_end}>'
+        )
+
+
+class JoCosOvertime(db.Model):
+    """
+    JO/COS overtime credits from DTR quincena regeneration (minutes within authorized schedule).
+    One row per employee per credited calendar day within the quincena.
+    """
+    __tablename__ = 'jo_cos_overtime'
+    __table_args__ = (
+        db.UniqueConstraint('employee_id', 'work_date', name='uq_jo_cos_overtime_emp_date'),
+        db.Index('ix_jo_cos_overtime_ymq', 'year', 'month', 'quincena_half'),
+        db.Index('ix_jo_cos_overtime_emp_ymq', 'employee_id', 'year', 'month', 'quincena_half'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id', ondelete='CASCADE'), nullable=False)
+    department_id = db.Column(db.Integer, db.ForeignKey('departments.id', ondelete='SET NULL'), nullable=True)
+    work_date = db.Column(db.Date, nullable=False)
+    year = db.Column(db.SmallInteger, nullable=False)
+    month = db.Column(db.SmallInteger, nullable=False)
+    quincena_half = db.Column(db.String(1), nullable=False)  # '1' or '2'
+    overtime_mins = db.Column(db.Integer, nullable=False, default=0)
+    processed_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('jo_cos_overtime_rows', lazy='dynamic'))
+    department = db.relationship('Department', backref=db.backref('jo_cos_overtime_rows', lazy='dynamic'))
+
+    def __repr__(self):
+        return (
+            f'<JoCosOvertime emp={self.employee_id} {self.work_date} '
+            f'{self.overtime_mins}m Q{self.quincena_half}>'
+        )
+
+
+class JoCosOvertimeLedger(db.Model):
+    """
+    JO/COS overtime credit ledger: earned (DTR regen) and offset (approved applications).
+    """
+    __tablename__ = 'jo_cos_overtime_ledger'
+    __table_args__ = (
+        db.Index('ix_jo_cos_ot_ledger_emp', 'employee_id'),
+        db.Index('ix_jo_cos_ot_ledger_ymq', 'year', 'month', 'quincena_half'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id', ondelete='CASCADE'), nullable=False)
+    entry_type = db.Column(db.String(10), nullable=False)  # earned | offset
+    transaction_date = db.Column(db.Date, nullable=False)
+    year = db.Column(db.SmallInteger, nullable=True)
+    month = db.Column(db.SmallInteger, nullable=True)
+    quincena_half = db.Column(db.String(1), nullable=True)
+    hours_earned = db.Column(db.Numeric(8, 2), nullable=True)
+    offset_date_start = db.Column(db.Date, nullable=True)
+    offset_date_end = db.Column(db.Date, nullable=True)
+    offset_mode = db.Column(db.String(10), nullable=True)  # full | AM | PM
+    offset_hours = db.Column(db.Numeric(8, 2), nullable=True)
+    balance_hours = db.Column(db.Numeric(8, 2), nullable=False, default=0)
+    offset_request_id = db.Column(db.Integer, db.ForeignKey('jo_cos_overtime_offset_request.id'), nullable=True)
+    regen_tag = db.Column(db.String(80), nullable=True)
+    particulars = db.Column(db.String(500), nullable=True)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('jo_cos_overtime_ledger_rows', lazy='dynamic'))
+    created_by = db.relationship('User', backref=db.backref('jo_cos_overtime_ledger_created', lazy='dynamic'))
+    offset_request = db.relationship(
+        'JoCosOvertimeOffsetRequest', backref=db.backref('ledger_entries', lazy='dynamic'),
+        foreign_keys=[offset_request_id],
+    )
+
+
+class JoCosOvertimeOffsetRequest(db.Model):
+    """Pending/approved/rejected JO/COS overtime offset application."""
+    __tablename__ = 'jo_cos_overtime_offset_request'
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id', ondelete='CASCADE'), nullable=False)
+    date_start = db.Column(db.Date, nullable=False)
+    date_end = db.Column(db.Date, nullable=False)
+    offset_mode = db.Column(db.String(10), nullable=False)  # full | AM | PM
+    total_hours = db.Column(db.Numeric(8, 2), nullable=False)
+    status = db.Column(db.String(20), default='pending', nullable=False)
+    reason = db.Column(db.Text, nullable=True)
+    submitted_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    reviewed_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    rejection_reason = db.Column(db.Text, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('jo_cos_overtime_offset_requests', lazy='dynamic'))
+    submitted_by = db.relationship('User', foreign_keys=[submitted_by_user_id])
+    reviewed_by = db.relationship('User', foreign_keys=[reviewed_by_user_id])
+
+
+class HrmsNotification(db.Model):
+    """In-app notification for approvals and status updates."""
+    __tablename__ = 'hrms_notifications'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    title = db.Column(db.String(200), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    link_url = db.Column(db.String(500), nullable=True)
+    related_type = db.Column(db.String(50), nullable=True)
+    related_id = db.Column(db.Integer, nullable=True)
+    is_read = db.Column(db.Boolean, default=False, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    user = db.relationship('User', backref=db.backref('hrms_notifications', lazy='dynamic'))

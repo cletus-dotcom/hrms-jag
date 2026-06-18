@@ -4,7 +4,12 @@
 
 {% block extra_css %}
 <style>
-  .dtr-records-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  .dtr-records-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+    table-layout: fixed;
+  }
   .dtr-records-table th,
   .dtr-records-table td {
     border: 1px solid #111827;
@@ -13,8 +18,61 @@
   }
   .dtr-records-table thead th { background: #f3f4f6; font-weight: 600; text-align: center; }
   .dtr-records-table tbody td { text-align: center; }
-  .dtr-records-table tbody td:first-child { font-weight: 600; width: 3rem; }
-  .dtr-records-table tbody td:nth-child(7) { text-align: left; }
+  .dtr-records-table tbody td:first-child,
+  .dtr-records-table thead th:first-child { font-weight: 600; width: 2.75rem; }
+  /* AM In / AM Out / PM In / PM Out */
+  .dtr-records-table th:nth-child(2),
+  .dtr-records-table td:nth-child(2),
+  .dtr-records-table th:nth-child(3),
+  .dtr-records-table td:nth-child(3),
+  .dtr-records-table th:nth-child(4),
+  .dtr-records-table td:nth-child(4),
+  .dtr-records-table th:nth-child(5),
+  .dtr-records-table td:nth-child(5) {
+    width: 5.25rem;
+  }
+  /* Late/Undertime (H/M) — compact */
+  .dtr-records-table th:nth-child(6),
+  .dtr-records-table td:nth-child(6) {
+    width: 4.75rem;
+    max-width: 5rem;
+    padding-left: 0.3rem;
+    padding-right: 0.3rem;
+    font-size: 0.82rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .dtr-records-table thead th:nth-child(6) {
+    white-space: normal;
+    line-height: 1.2;
+    font-size: 0.75rem;
+    font-weight: 600;
+    vertical-align: bottom;
+    padding-top: 0.35rem;
+    padding-bottom: 0.35rem;
+  }
+  .dtr-records-table thead th:nth-child(6) .dtr-th-sub {
+    display: inline-block;
+    font-weight: 600;
+    color: #4b5563;
+  }
+  .dtr-records-table tbody td:nth-child(6) {
+    white-space: nowrap;
+  }
+  /* Remarks — wider for REST DAY / notes */
+  .dtr-records-table th:nth-child(7),
+  .dtr-records-table td:nth-child(7) {
+    width: 36%;
+    min-width: 12rem;
+    text-align: left;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+  }
+  .dtr-records-table thead th:nth-child(7) { text-align: left; }
+  /* Flags */
+  .dtr-records-table th:nth-child(8),
+  .dtr-records-table td:nth-child(8) {
+    width: 8.5rem;
+  }
 
   .dtr-mini-stats {
     display: flex;
@@ -96,6 +154,50 @@
       grid-template-columns: repeat(2, minmax(100px, 1fr));
     }
   }
+
+  .dtr-stamp-cell {
+    vertical-align: top;
+    padding-top: 0.4rem;
+    padding-bottom: 0.4rem;
+  }
+  .dtr-flexi-slot {
+    display: block;
+    font-size: 0.68rem;
+    color: #4338ca;
+    font-weight: 500;
+    margin-top: 0.2rem;
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+  }
+  .dtr-flexi-flag {
+    background: #e0e7ff;
+    color: #312e81;
+  }
+  .dtr-edit-time {
+    width: 100%;
+    max-width: 5.5rem;
+    margin: 0 auto;
+    padding: 0.2rem 0.25rem;
+    font-size: 0.78rem;
+    box-sizing: border-box;
+  }
+  .dtr-edit-remarks {
+    width: 100%;
+    max-width: 100%;
+    padding: 0.25rem 0.35rem;
+    font-size: 0.82rem;
+    box-sizing: border-box;
+  }
+  .dtr-edit-del {
+    display: block;
+    margin-top: 0.35rem;
+    font-size: 0.68rem;
+    font-weight: 500;
+    color: #64748b;
+    text-align: left;
+    line-height: 1.25;
+  }
+  .dtr-edit-del input { margin-right: 0.25rem; vertical-align: middle; }
 </style>
 {% endblock %}
 
@@ -110,6 +212,10 @@
           <a href="#" class="nav-link nav-link-active">Daily Time Records <span class="dropdown-arrow">▼</span></a>
           <div class="dropdown-menu">
             <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
+            {% include 'includes/nav_dtr_upload_link.html' %}
+            <a href="{{ url_for('routes.dtr_justifications') }}" class="dropdown-item">DTR Justifications</a>
+            {% include 'includes/nav_dtr_edit_link.html' %}
+            {% include 'includes/nav_dtr_regenerate_link.html' %}
           </div>
         </div>
         <div class="nav-dropdown">
@@ -149,9 +255,10 @@
 
     <div class="page-header" style="display:flex; justify-content: space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap;">
       <div>
-        <h1 class="page-title" style="margin:0;">Daily Time Records</h1>
+        <h1 class="page-title" style="margin:0;">{% if dtr_edit_mode %}Edit DTR{% else %}Daily Time Records{% endif %}</h1>
         <p style="margin:0.25rem 0 0; color: var(--medium-gray, #666); font-size: 0.9rem;">
           Period: {{ start_d.strftime('%b %d, %Y') }} to {{ end_d.strftime('%b %d, %Y') }}
+          {% if dtr_edit_mode %}<span style="display:block;margin-top:0.35rem;color:#4338ca;font-weight:600;">HR/Admin edit mode — clear times and remarks and save to remove that day’s saved row, or tick “Remove saved row” to delete even if remarks remain.</span>{% endif %}
         </p>
       </div>
     </div>
@@ -214,6 +321,7 @@
               </div>
             </div>
             <div class="dtr-filter-actions">
+              {% if dtr_edit_mode %}<input type="hidden" name="edit" value="1">{% endif %}
               <button type="submit" class="btn-primary">Load DTR</button>
               <div class="dtr-mini-stats">
                 <div class="dtr-mini-stat dtr-mini-stat--warning">
@@ -235,7 +343,21 @@
       </form>
     </div>
 
+    {% if dtr_edit_mode and selected_employee %}
+    <form method="POST" action="{{ url_for('routes.dtr_records_save') }}" id="dtrSaveForm">
+      <input type="hidden" name="employee_id" value="{{ selected_employee.id }}">
+      <input type="hidden" name="month" value="{{ month }}">
+      <input type="hidden" name="year" value="{{ year }}">
+      <input type="hidden" name="mode" value="{{ mode }}">
+      <input type="hidden" name="quincena" value="{{ quincena }}">
+    {% endif %}
     <div class="card" style="padding: 1rem 1.25rem;">
+      {% if dtr_edit_mode and selected_employee %}
+      <div class="dtr-edit-actions">
+        <button type="submit" class="btn-primary">Save DTR changes</button>
+        <a href="{{ url_for('routes.dtr_records', employee_id=selected_employee.id, month=month, year=year, mode=mode, quincena=quincena) }}" class="btn-secondary" style="text-decoration:none;display:inline-block;padding:0.45rem 1rem;border:1px solid #d1d5db;border-radius:6px;color:#374151;background:#fff;">Exit edit mode</a>
+      </div>
+      {% endif %}
       <div class="table-container">
         <table class="dtr-records-table">
           <thead>
@@ -245,7 +367,7 @@
               <th>AM Out</th>
               <th>PM In</th>
               <th>PM Out</th>
-              <th>Late/Undertime (H/M)</th>
+              <th>Late/Undertime<br><span class="dtr-th-sub">(H/M)</span></th>
               <th>Remarks</th>
               <th>Flags</th>
             </tr>
@@ -253,19 +375,71 @@
           <tbody>
             {% for r in rows %}
             <tr>
-              <td>{{ r.date.day }}</td>
-              <td>{{ r.am_in.strftime('%I:%M %p') if r.am_in else '' }}</td>
-              <td>{{ r.am_out.strftime('%I:%M %p') if r.am_out else '' }}</td>
-              <td>{{ r.pm_in.strftime('%I:%M %p') if r.pm_in else '' }}</td>
-              <td>{{ r.pm_out.strftime('%I:%M %p') if r.pm_out else '' }}</td>
+              <td class="dtr-stamp-cell">
+                <strong>{{ r.date.day }}</strong>
+                {% if dtr_edit_mode and selected_employee and r.has_saved_row %}
+                <label class="dtr-edit-del"><input type="checkbox" name="del_{{ r.date.isoformat() }}" value="1"> Remove saved row</label>
+                {% endif %}
+              </td>
+              {% if dtr_edit_mode and selected_employee %}
+              <td class="dtr-stamp-cell">
+                <input class="form-control dtr-edit-time" type="time" step="60" name="t_{{ r.date.isoformat() }}_am_in" value="{% if r.am_in %}{{ r.am_in.strftime('%H:%M') }}{% endif %}">
+                {% if r.show_flexi_slots and r.sched_am_in %}<span class="dtr-flexi-slot" title="Expected (flexi)">{{ r.sched_am_in }}</span>{% endif %}
+              </td>
+              <td class="dtr-stamp-cell">
+                <input class="form-control dtr-edit-time" type="time" step="60" name="t_{{ r.date.isoformat() }}_am_out" value="{% if r.am_out %}{{ r.am_out.strftime('%H:%M') }}{% endif %}">
+                {% if r.show_flexi_slots and r.sched_am_out %}<span class="dtr-flexi-slot" title="Expected (flexi)">{{ r.sched_am_out }}</span>{% endif %}
+              </td>
+              <td class="dtr-stamp-cell">
+                <input class="form-control dtr-edit-time" type="time" step="60" name="t_{{ r.date.isoformat() }}_pm_in" value="{% if r.pm_in %}{{ r.pm_in.strftime('%H:%M') }}{% endif %}">
+                {% if r.show_flexi_slots and r.sched_pm_in %}<span class="dtr-flexi-slot" title="Expected (flexi)">{{ r.sched_pm_in }}</span>{% endif %}
+              </td>
+              <td class="dtr-stamp-cell">
+                <input class="form-control dtr-edit-time" type="time" step="60" name="t_{{ r.date.isoformat() }}_pm_out" value="{% if r.pm_out %}{{ r.pm_out.strftime('%H:%M') }}{% endif %}">
+                {% if r.show_flexi_slots and r.sched_pm_out %}<span class="dtr-flexi-slot" title="Expected (flexi)">{{ r.sched_pm_out }}</span>{% endif %}
+              </td>
               <td>{{ r.undertime }}</td>
-              <td>{{ r.remarks }}</td>
+              <td style="text-align:left;">
+                <input type="text" class="form-control dtr-edit-remarks" name="rem_{{ r.date.isoformat() }}" value="{{ r.stored_remarks }}" maxlength="100" placeholder="DB remarks (e.g. HOLIDAY, REST DAY)" title="Stored remarks on the DTR row">
+              </td>
               <td>
+                {% if r.show_flexi_slots %}
+                <span class="status-badge dtr-flexi-flag" title="{% if r.flexi_assigned and r.flexi_shift_code %}Shift {{ r.flexi_shift_code }} — late/undertime use this day’s flexi schedule{% elif r.flexi_assigned %}Flexi shift assigned — late/undertime use this day’s flexi schedule{% else %}Flexible worktime — expected times from employee defaults or calendar shift{% endif %}">Flexi{% if r.flexi_shift_code %} · {{ r.flexi_shift_code }}{% endif %}</span>
+                {% endif %}
                 {% if r.late %}<span class="status-badge status-pending">Late</span>{% endif %}
                 {% if r.undertime_flag %}<span class="status-badge status-pending">Undertime</span>{% endif %}
                 {% if r.absent %}<span class="status-badge status-rejected">Absent</span>{% endif %}
                 {% if r.has_justification %}<span class="status-badge status-approved">With Justification</span>{% endif %}
               </td>
+              {% else %}
+              <td class="dtr-stamp-cell">
+                {% if r.am_in %}{{ r.am_in.strftime('%I:%M %p') }}{% endif %}
+                {% if r.show_flexi_slots and r.sched_am_in %}<span class="dtr-flexi-slot" title="Expected (flexi)">{{ r.sched_am_in }}</span>{% endif %}
+              </td>
+              <td class="dtr-stamp-cell">
+                {% if r.am_out %}{{ r.am_out.strftime('%I:%M %p') }}{% endif %}
+                {% if r.show_flexi_slots and r.sched_am_out %}<span class="dtr-flexi-slot" title="Expected (flexi)">{{ r.sched_am_out }}</span>{% endif %}
+              </td>
+              <td class="dtr-stamp-cell">
+                {% if r.pm_in %}{{ r.pm_in.strftime('%I:%M %p') }}{% endif %}
+                {% if r.show_flexi_slots and r.sched_pm_in %}<span class="dtr-flexi-slot" title="Expected (flexi)">{{ r.sched_pm_in }}</span>{% endif %}
+              </td>
+              <td class="dtr-stamp-cell">
+                {% if r.pm_out %}{{ r.pm_out.strftime('%I:%M %p') }}{% endif %}
+                {% if r.show_flexi_slots and r.sched_pm_out %}<span class="dtr-flexi-slot" title="Expected (flexi)">{{ r.sched_pm_out }}</span>{% endif %}
+              </td>
+              <td>{{ r.undertime }}</td>
+              <td>{{ r.remarks }}</td>
+              <td>
+                {% if r.show_flexi_slots %}
+                <span class="status-badge dtr-flexi-flag" title="{% if r.flexi_assigned and r.flexi_shift_code %}Shift {{ r.flexi_shift_code }} — late/undertime use this day’s flexi schedule{% elif r.flexi_assigned %}Flexi shift assigned — late/undertime use this day’s flexi schedule{% else %}Flexible worktime — expected times from employee defaults or calendar shift{% endif %}">Flexi{% if r.flexi_shift_code %} · {{ r.flexi_shift_code }}{% endif %}</span>
+                {% endif %}
+                {% if r.late %}<span class="status-badge status-pending">Late</span>{% endif %}
+                {% if r.undertime_flag %}<span class="status-badge status-pending">Undertime</span>{% endif %}
+                {% if r.absent %}<span class="status-badge status-rejected">Absent</span>{% endif %}
+                {% if r.has_justification %}<span class="status-badge status-approved">With Justification</span>{% endif %}
+              </td>
+              {% endif %}
             </tr>
             {% else %}
             <tr><td colspan="8" class="no-data">No DTR records for selected period.</td></tr>
@@ -274,6 +448,9 @@
         </table>
       </div>
     </div>
+    {% if dtr_edit_mode and selected_employee %}
+    </form>
+    {% endif %}
   </div>
 </div>
 {% endblock %}

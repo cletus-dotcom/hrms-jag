@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+
+{% block title %}Regenerate DTR — HRMS{% endblock %}
+
+{% block extra_css %}
+<style>
+  .dtr-regen-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10050;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    background: rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+  .dtr-regen-overlay.is-visible {
+    display: flex;
+  }
+  .dtr-regen-card {
+    max-width: 24rem;
+    width: 100%;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.05);
+    padding: 1.75rem 1.5rem 1.5rem;
+    text-align: center;
+  }
+  .dtr-regen-spinner {
+    width: 2.5rem;
+    height: 2.5rem;
+    margin: 0 auto 1.1rem;
+    border: 3px solid #e5e7eb;
+    border-top-color: #1e40af;
+    border-radius: 50%;
+    animation: dtr-regen-spin 0.75s linear infinite;
+  }
+  @keyframes dtr-regen-spin {
+    to { transform: rotate(360deg); }
+  }
+  .dtr-regen-title {
+    margin: 0 0 0.35rem;
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: #111827;
+  }
+  .dtr-regen-sub {
+    margin: 0;
+    font-size: 0.9rem;
+    color: #6b7280;
+    line-height: 1.45;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+  <div class="header-bar">
+    <div class="header-content">
+      {% include 'includes/navbar_brand.html' %}
+      <nav class="main-nav">
+        <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+        <div class="nav-dropdown">
+          <a href="#" class="nav-link nav-link-active">Daily Time Records <span class="dropdown-arrow">▼</span></a>
+          <div class="dropdown-menu">
+            <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
+            {% include 'includes/nav_dtr_upload_link.html' %}
+            <a href="{{ url_for('routes.dtr_justifications') }}" class="dropdown-item">DTR Justifications</a>
+            {% include 'includes/nav_dtr_edit_link.html' %}
+            {% include 'includes/nav_dtr_regenerate_link.html' %}
+          </div>
+        </div>
+        {% include 'includes/nav_payroll_top_menu.html' %}
+        {% if (current_user.role or '')|lower in ('payroll_maker', 'admin', 'hr') %}
+        <div class="nav-dropdown">
+          <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
+          <div class="dropdown-menu">
+            {% include 'includes/reports_dropdown_links.html' %}
+          </div>
+        </div>
+        {% endif %}
+        <div class="nav-dropdown">
+          <a href="#" class="nav-link">Leave <span class="dropdown-arrow">▼</span></a>
+          <div class="dropdown-menu">
+            <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply Leave</a>
+            <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
+          </div>
+        </div>
+        <div class="nav-dropdown">
+          <a href="#" class="nav-link">ABOUT <span class="dropdown-arrow">▼</span></a>
+          <div class="dropdown-menu">
+            <a href="{{ url_for('routes.users_manual') }}" class="dropdown-item">User's Manual</a>
+            <a href="{{ url_for('routes.hrmdo_manual') }}" class="dropdown-item">HRMDO Manual</a>
+          </div>
+        </div>
+        <span class="nav-link active" style="cursor:default; opacity:0.95;">Regenerate DTR</span>
+      </nav>
+      <div class="user-dropdown">
+        <a href="#" class="user-info">
+          {% if employee %}{{ employee.full_name }}{% else %}{{ current_user.username }}{% endif %} ({{ current_user.role|title }})
+          <span class="dropdown-arrow">▼</span>
+        </a>
+        <div class="dropdown-menu dropdown-menu-right">
+          <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
+          <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
+            <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dashboard-content">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} alert-dismissible">
+            <span>{{ message }}</span>
+            <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="dashboard-header">
+      <h1 class="dashboard-title">Regenerate DTR (quincena)</h1>
+      <p class="dashboard-subtitle" style="max-width: 42rem; color: #64748b;">
+        Recomputes late/undertime on stored DTR rows, refreshes quincena worktime summaries for payroll,
+        posts plantilla VL deductions to the leave ledger, and nets JO/COS worktime against lates, undertime, and absences.
+      </p>
+      <div class="alert alert-info" style="max-width:42rem; margin-top:0.75rem;">
+        When you click <strong>Run regeneration</strong>, a status overlay appears with
+        &ldquo;Re-generation of DTR is in progress. Please wait a moment.&rdquo; until processing completes.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-body">
+        <form id="dtrRegenForm" method="POST" action="{{ url_for('routes.dtr_regenerate') }}"
+              onsubmit="var el=document.getElementById('dtrRegenOverlay'); if(el) el.classList.add('is-visible'); return true;">
+          <div class="form-group">
+            <label for="quincena_period">Quincena</label>
+            <select id="quincena_period" name="quincena_period" class="form-control" required>
+              {% for opt in quincena_options %}
+                <option value="{{ opt.value }}" {% if opt.value == default_quincena %}selected{% endif %}>{{ opt.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn-primary">Run regeneration</button>
+            <a href="{{ url_for('routes.dashboard') }}" class="btn-secondary" style="margin-left:0.5rem;">Cancel</a>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="dtrRegenOverlay" class="dtr-regen-overlay" role="status" aria-live="polite" aria-hidden="true">
+  <div class="dtr-regen-card">
+    <div class="dtr-regen-spinner" aria-hidden="true"></div>
+    <p class="dtr-regen-title">Re-generation of DTR is in progress.</p>
+    <p class="dtr-regen-sub">Please wait a moment.</p>
+  </div>
+</div>
+{% endblock %}

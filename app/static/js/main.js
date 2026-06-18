@@ -146,6 +146,17 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
     // Nav dropdowns: click to toggle (works on mobile); hover still supported via CSS
+    const mobileNavMq = window.matchMedia('(max-width: 768px)');
+
+    function closeNavSubmenus(except) {
+        document.querySelectorAll('.nav-dropdown-sub.submenu-open').forEach(sub => {
+            if (except && sub === except) return;
+            sub.classList.remove('submenu-open');
+            const trigger = sub.querySelector(':scope > .dropdown-item-submenu');
+            if (trigger) trigger.setAttribute('aria-expanded', 'false');
+        });
+    }
+
     const navDropdowns = document.querySelectorAll('.nav-dropdown');
     navDropdowns.forEach(dropdown => {
         const link = dropdown.querySelector(':scope > .nav-link');
@@ -164,12 +175,20 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 // Close other open nav dropdowns first
                 document.querySelectorAll('.nav-dropdown .dropdown-menu.show').forEach(other => {
-                    if (other !== menu) other.classList.remove('show');
+                    if (other !== menu) {
+                        other.classList.remove('show');
+                        other.querySelectorAll('.nav-dropdown-sub.submenu-open').forEach(sub => {
+                            sub.classList.remove('submenu-open');
+                            const t = sub.querySelector(':scope > .dropdown-item-submenu');
+                            if (t) t.setAttribute('aria-expanded', 'false');
+                        });
+                    }
                 });
 
                 const isOpen = menu.classList.contains('show');
                 menu.classList.toggle('show', !isOpen);
                 link.setAttribute('aria-expanded', String(!isOpen));
+                if (isOpen) closeNavSubmenus();
             });
         }
     });
@@ -222,6 +241,39 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
     
+    // Nested nav submenus (e.g. Payroll → Deductions): tap to expand below on mobile
+    const navSubmenus = document.querySelectorAll('.nav-dropdown-sub');
+
+    navSubmenus.forEach(sub => {
+        const trigger = sub.querySelector(':scope > .dropdown-item-submenu');
+        const menu = sub.querySelector(':scope > .dropdown-submenu');
+        if (!trigger || !menu) return;
+
+        trigger.setAttribute('role', 'button');
+        trigger.setAttribute('aria-haspopup', 'true');
+        trigger.setAttribute('aria-expanded', sub.classList.contains('nav-dropdown-sub-active') ? 'true' : 'false');
+        if (sub.classList.contains('nav-dropdown-sub-active') && mobileNavMq.matches) {
+            sub.classList.add('submenu-open');
+        }
+
+        trigger.addEventListener('click', function (e) {
+            if (!mobileNavMq.matches) return;
+            e.preventDefault();
+            e.stopPropagation();
+
+            const willOpen = !sub.classList.contains('submenu-open');
+            closeNavSubmenus(sub);
+            sub.classList.toggle('submenu-open', willOpen);
+            trigger.setAttribute('aria-expanded', String(willOpen));
+        });
+    });
+
+    mobileNavMq.addEventListener('change', function () {
+        if (!mobileNavMq.matches) {
+            closeNavSubmenus();
+        }
+    });
+    
     // Close dropdowns when clicking outside
     document.addEventListener('click', function(e) {
         if (!e.target.closest('.nav-dropdown')) {
@@ -230,6 +282,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 const trigger = menu.closest('.nav-dropdown')?.querySelector(':scope > .nav-link');
                 if (trigger) trigger.setAttribute('aria-expanded', 'false');
             });
+            closeNavSubmenus();
+        } else if (!e.target.closest('.nav-dropdown-sub')) {
+            closeNavSubmenus();
         }
         if (!e.target.closest('.user-dropdown')) {
             const openMenus = document.querySelectorAll('.user-dropdown .dropdown-menu.show');

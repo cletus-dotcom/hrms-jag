@@ -2,6 +2,9 @@
 
 {% block title %}{% if emp %}Edit{% else %}Add{% endif %} Employee - HRMS{% endblock %}
 
+{% block extra_css %}
+{% endblock %}
+
 {% block content %}
 <div class="dashboard-container">
     <div class="header-bar">
@@ -11,13 +14,16 @@
                 <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
                 {% if (current_user.role or '')|lower in ('admin', 'hr') %}
                 <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Settings <span class="dropdown-arrow">▼</span></a>
+                    <a href="#" class="nav-link nav-link-active">Settings <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">
                         <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
+                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Manage Employees</a>
                         <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
                         <hr class="dropdown-separator">
                         <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
                         <a href="{{ url_for('routes.jo_cos_designations_list') }}" class="dropdown-item">JO/COS designations</a>
+                        <a href="{{ url_for('routes.jo_cos_rates_list') }}" class="dropdown-item">JO and COS Rates</a>
+                        <a href="{{ url_for('routes.flexi_time_schedule_list') }}" class="dropdown-item">Flexi-time schedule</a>
                         <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
                         <hr class="dropdown-separator">
                         <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
@@ -25,17 +31,12 @@
                 </div>
                 {% endif %}
                 <div class="nav-dropdown">
-                    <a href="#" class="nav-link nav-link-active">Employee Management <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Employees</a>
-                    </div>
-                </div>
-                <div class="nav-dropdown">
                     <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">
                         <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
-                        <a href="{{ url_for('routes.dtr_upload') }}" class="dropdown-item">Upload DTR Log</a>
+                        {% include 'includes/nav_dtr_upload_link.html' %}
                         <a href="{{ url_for('routes.dtr_justifications') }}" class="dropdown-item">DTR Justifications</a>
+                        {% include 'includes/nav_dtr_edit_link.html' %}
                     </div>
                 </div>
                 <div class="nav-dropdown">
@@ -54,6 +55,17 @@
                         {% endif %}
                     </div>
                 </div>
+                {% include 'includes/nav_payroll_top_menu.html' %}
+                {% if (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        {% include 'includes/reports_dropdown_links.html' %}
+                    </div>
+                </div>
+                {% else %}
+                <a href="#" class="nav-link">Reports</a>
+                {% endif %}
                 <div class="nav-dropdown">
                     <a href="#" class="nav-link">ABOUT <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">
@@ -61,17 +73,6 @@
                         <a href="{{ url_for('routes.hrmdo_manual') }}" class="dropdown-item">HRMDO Manual</a>
                     </div>
                 </div>
-                {% if (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.payroll_summary') }}" class="dropdown-item">Payroll Summary Report</a>
-                        <a href="{{ url_for('routes.payroll_submissions') }}" class="dropdown-item">Submitted Payroll History</a>
-                    </div>
-                </div>
-                {% else %}
-                <a href="#" class="nav-link">Reports</a>
-                {% endif %}
             </nav>
             <div class="user-dropdown">
                 <a href="#" class="user-info">
@@ -202,7 +203,7 @@
                             {% endfor %}
                         </select>
                         {% if not (jo_cos_designations or []) %}
-                        <small style="color: var(--medium-gray);">No designations loaded. HR/Admin: run <code>python migrate_jo_cos_designation.py</code> (see Settings → JO/COS designations).</small>
+                        <small style="color: var(--medium-gray);">No designations yet. HR/Admin: add them under Settings → JO/COS designations, or run <code>python migrate_jo_cos_designation.py</code>.</small>
                         {% endif %}
                     </div>
                 </div>
@@ -224,27 +225,6 @@
                             <option value="Promotion" {% if emp and emp.nature_of_appointment == 'Promotion' %}selected{% endif %}>Promotion</option>
                             <option value="Demotion" {% if emp and emp.nature_of_appointment == 'Demotion' %}selected{% endif %}>Demotion</option>
                         </select>
-                    </div>
-                </div>
-                <div class="form-grid">
-                    <div class="form-group" style="grid-column: 1 / -1;">
-                        <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: 600;">
-                            <input type="checkbox" name="flexible_worktime" value="1" {% if emp and emp.flexible_worktime %}checked{% endif %}>
-                            Flexible Worktime
-                        </label>
-                        <small style="color: var(--medium-gray);">If enabled, fixed 5-day/4-day schedule late-undertime auto-computation is skipped for this employee.</small>
-                    </div>
-                </div>
-                <div class="form-grid">
-                    <div class="form-group">
-                        <label for="flexible_start_time">Flexible Start Time</label>
-                        <input type="time" id="flexible_start_time" name="flexible_start_time" class="form-control"
-                               value="{{ emp.flexible_start_time.strftime('%H:%M') if emp and emp.flexible_start_time else '' }}">
-                    </div>
-                    <div class="form-group">
-                        <label for="flexible_end_time">Flexible End Time</label>
-                        <input type="time" id="flexible_end_time" name="flexible_end_time" class="form-control"
-                               value="{{ emp.flexible_end_time.strftime('%H:%M') if emp and emp.flexible_end_time else '' }}">
                     </div>
                 </div>
                 
@@ -296,7 +276,7 @@
                     </div>
                     <div class="form-group">
                         <label for="salary_amount_display">Amount</label>
-                        <input type="text" id="salary_amount_display" class="form-control" readonly placeholder="From salary grade">
+                        <input type="text" id="salary_amount_display" class="form-control" readonly placeholder="Salary grade amount or JO/COS rate per day">
                     </div>
                 </div>
                 
@@ -366,6 +346,8 @@
 </div>
 
 <script type="application/json" id="salary-grades-json">{{ salary_grades_json | tojson }}</script>
+<script type="application/json" id="jo-cos-rates-json">{{ (jo_cos_rates_for_js or []) | tojson }}</script>
+<script type="application/json" id="jo-cos-basic-rate-json">{{ jo_cos_basic_rate_per_day | tojson }}</script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     // Salary grade data and agency/salary UI
@@ -433,16 +415,60 @@ document.addEventListener('DOMContentLoaded', function() {
         amountDisplay.value = amt !== '' ? Number(amt).toLocaleString('en-PH', { minimumFractionDigits: 2 }) : '';
     }
 
+    function normJoCosLabel(t) {
+        if (t == null || t === '') return '';
+        return String(t).replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim().split(/\s+/).join(' ');
+    }
+
+    function applyJoCosRateDisplay() {
+        if (!amountDisplay) return false;
+        var statusEl = document.getElementById('status_of_appointment');
+        var st = statusEl ? statusEl.value : '';
+        if (st !== 'Job Order' && st !== 'Contract of Service') return false;
+        var joCosRatesData = [];
+        var basicRaw = null;
+        try {
+            var je = document.getElementById('jo-cos-rates-json');
+            if (je && je.textContent) joCosRatesData = JSON.parse(je.textContent);
+            var be = document.getElementById('jo-cos-basic-rate-json');
+            if (be && be.textContent) basicRaw = JSON.parse(be.textContent);
+        } catch (e0) {}
+        if (!Array.isArray(joCosRatesData)) joCosRatesData = [];
+        var jSel = document.getElementById('jo_cos_designation_id');
+        var opt = jSel && jSel.selectedIndex >= 0 ? jSel.options[jSel.selectedIndex] : null;
+        var des = normJoCosLabel(opt ? opt.textContent : '');
+        var hit = null;
+        for (var i = 0; i < joCosRatesData.length; i++) {
+            var r = joCosRatesData[i];
+            if (r.status_of_appointment !== st) continue;
+            if (des && normJoCosLabel(r.designation_label) === des) { hit = r; break; }
+        }
+        var raw = hit ? hit.rate_per_day : basicRaw;
+        if (raw === null || raw === undefined || raw === '') {
+            amountDisplay.value = '';
+            return true;
+        }
+        var n = Number(String(raw).replace(/,/g, ''));
+        if (isNaN(n)) { amountDisplay.value = ''; return true; }
+        amountDisplay.value = n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 6 }) + ' / day';
+        return true;
+    }
+
+    function refreshSalaryDisplay() {
+        if (applyJoCosRateDisplay()) return;
+        updateAmount();
+    }
+
     function onAgencyOrSalaryChange() {
         updateAgency();
         refreshSalaryGradeOptions();
-        updateAmount();
+        refreshSalaryDisplay();
     }
     if (departmentSelect) departmentSelect.addEventListener('change', onAgencyOrSalaryChange);
     if (lguSelect) lguSelect.addEventListener('change', onAgencyOrSalaryChange);
     if (trancheSelect) trancheSelect.addEventListener('change', onAgencyOrSalaryChange);
-    if (salaryGradeSelect) salaryGradeSelect.addEventListener('change', updateAmount);
-    if (salaryStepSelect) salaryStepSelect.addEventListener('change', updateAmount);
+    if (salaryGradeSelect) salaryGradeSelect.addEventListener('change', refreshSalaryDisplay);
+    if (salaryStepSelect) salaryStepSelect.addEventListener('change', refreshSalaryDisplay);
     onAgencyOrSalaryChange();
 
     // Bohol municipalities list (alphabetically sorted)
@@ -654,8 +680,10 @@ document.addEventListener('DOMContentLoaded', function() {
         if (jocosGroup) jocosGroup.style.display = isJo ? '' : 'none';
         if (regSel) regSel.disabled = isJo;
         if (jocosSel) jocosSel.disabled = !isJo;
+        refreshSalaryDisplay();
     }
     if (statusAppt) statusAppt.addEventListener('change', syncPositionAppointmentUI);
+    if (jocosSel) jocosSel.addEventListener('change', refreshSalaryDisplay);
     syncPositionAppointmentUI();
 });
 </script>

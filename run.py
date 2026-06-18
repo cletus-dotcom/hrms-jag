@@ -16,5 +16,9 @@ if __name__ == '__main__':
     print(f"Starting HRMS server on http://{host}:{port}")
     print("Press CTRL+C to stop the server")
     
-    # Use Waitress as production WSGI server
-    serve(app, host=host, port=port, threads=4)
+    # Use Waitress as production WSGI server (optional WAITRESS_MAX_REQUEST_BODY_BYTES)
+    serve_kw = {'host': host, 'port': port, 'threads': 4}
+    wb = os.environ.get('WAITRESS_MAX_REQUEST_BODY_BYTES', '').strip()
+    if wb:
+        serve_kw['max_request_body_size'] = int(wb)
+    serve(app, **serve_kw)

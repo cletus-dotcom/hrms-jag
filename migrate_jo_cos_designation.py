@@ -31,6 +31,14 @@ def _normalize_designation(raw) -> Optional[str]:
     return " ".join(s.split())
 
 
+def _designation_excel_column(df) -> str:
+    """Resolve the designation column (Excel may use DESIGNATION, Designation, etc.)."""
+    for c in df.columns:
+        if str(c).strip().upper() == "DESIGNATION":
+            return c
+    raise ValueError("Excel must contain a column named DESIGNATION (any casing).")
+
+
 def migrate(xlsx_path: Optional[str], replace: bool) -> None:
     app = create_app()
     with app.app_context():
@@ -94,15 +102,20 @@ def migrate(xlsx_path: Optional[str], replace: bool) -> None:
         import pandas as pd
 
         df = pd.read_excel(path)
-        if "DESIGNATION" not in df.columns:
-            print("[ERROR] Excel must contain a DESIGNATION column.", file=sys.stderr)
+        try:
+            des_col = _designation_excel_column(df)
+        except ValueError as e:
+            print(f"[ERROR] {e}", file=sys.stderr)
             sys.exit(1)
 
         rows = []
-        for i, raw in enumerate(df["DESIGNATION"].tolist()):
+        seen: set[str] = set()
+        for raw in df[des_col].tolist():
             des = _normalize_designation(raw)
-            if des:
-                rows.append({"designation": des, "sort_order": len(rows)})
+            if not des or des in seen:
+                continue
+            seen.add(des)
+            rows.append({"designation": des, "sort_order": len(rows)})
 
         for r in rows:
             db.session.add(JoCosDesignation(designation=r["designation"], sort_order=r["sort_order"]))

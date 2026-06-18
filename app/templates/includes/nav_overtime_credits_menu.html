@@ -1,0 +1,11 @@
+{% if employee %}
+{% set _soa = ((employee.status_of_appointment or '') + ' ' + (employee.nature_of_appointment or ''))|lower %}
+{% if 'job order' in _soa or 'contract of service' in _soa or 'cos' in _soa or _soa == 'jo' %}
+<div class="nav-dropdown">
+  <a href="#" class="nav-link{% if request.endpoint in ('routes.jo_cos_overtime_credits', 'routes.jo_cos_overtime_offset_approvals') %} nav-link-active{% endif %}">Overtime Credits <span class="dropdown-arrow">▼</span></a>
+  <div class="dropdown-menu">
+    <a href="{{ url_for('routes.jo_cos_overtime_credits') }}" class="dropdown-item{% if request.endpoint == 'routes.jo_cos_overtime_credits' %} active{% endif %}">View Credits</a>
+  </div>
+</div>
+{% endif %}
+{% endif %}

@@ -114,9 +114,13 @@
                     <a href="#" class="nav-link">Settings <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">
                         <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
+                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Manage Employees</a>
                         <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
                         <hr class="dropdown-separator">
                         <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
+                        <a href="{{ url_for('routes.jo_cos_designations_list') }}" class="dropdown-item">JO/COS designations</a>
+                        <a href="{{ url_for('routes.jo_cos_rates_list') }}" class="dropdown-item">JO and COS Rates</a>
+                        <a href="{{ url_for('routes.flexi_time_schedule_list') }}" class="dropdown-item">Flexi-time schedule</a>
                         <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
                         <hr class="dropdown-separator">
                         <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
@@ -124,17 +128,12 @@
                 </div>
                 {% endif %}
                 <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Employee Management <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Employees</a>
-                    </div>
-                </div>
-                <div class="nav-dropdown">
                     <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">
                         <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
-                        <a href="{{ url_for('routes.dtr_upload') }}" class="dropdown-item">Upload DTR Log</a>
+                        {% include 'includes/nav_dtr_upload_link.html' %}
                         <a href="{{ url_for('routes.dtr_justifications') }}" class="dropdown-item">DTR Justifications</a>
+                        {% include 'includes/nav_dtr_edit_link.html' %}
                     </div>
                 </div>
                 <div class="nav-dropdown">
@@ -153,6 +152,17 @@
                         {% endif %}
                     </div>
                 </div>
+                {% include 'includes/nav_payroll_top_menu.html' %}
+                {% if (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        {% include 'includes/reports_dropdown_links.html' %}
+                    </div>
+                </div>
+                {% else %}
+                <a href="#" class="nav-link">Reports</a>
+                {% endif %}
                 <div class="nav-dropdown">
                     <a href="#" class="nav-link nav-link-active">ABOUT <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">
@@ -160,17 +170,6 @@
                         <a href="{{ url_for('routes.hrmdo_manual') }}" class="dropdown-item">HRMDO Manual</a>
                     </div>
                 </div>
-                {% if (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.payroll_summary') }}" class="dropdown-item">Payroll Summary Report</a>
-                        <a href="{{ url_for('routes.payroll_submissions') }}" class="dropdown-item">Submitted Payroll History</a>
-                    </div>
-                </div>
-                {% else %}
-                <a href="#" class="nav-link">Reports</a>
-                {% endif %}
             </nav>
             <div class="user-dropdown">
                 <a href="#" class="user-info">
@@ -256,7 +255,7 @@
                 </div>
                 <div class="card">
                     <div class="card-title">Reports (Payroll Maker/Admin/HR)</div>
-                    <p class="muted" style="margin:0;">Generate payroll summary and view submitted payroll history.</p>
+                    <p class="muted" style="margin:0;">Payroll summary, submitted payroll history, and a filterable employees list (export CSV, Excel, or PDF).</p>
                 </div>
             </div>
 
@@ -304,7 +303,7 @@
                 <li>Approve or reject (when available).</li>
             </ol>
 
-            <h3 class="sub">F) Upload DTR log (DTR Uploader / authorized roles)</h3>
+            <h3 class="sub">F) Upload DTR log (DTR Uploader, HR, or Admin)</h3>
             <ol class="steps">
                 <li>Open <code>Daily Time Records → Upload DTR Log</code>.</li>
                 <li>Pick the correct <strong>quincena</strong>.</li>
@@ -319,12 +318,12 @@
                 <li>Submit and monitor the status.</li>
             </ol>
 
-            <h3 class="sub">H) Generate payroll summary (Payroll Maker/Admin/HR)</h3>
+            <h3 class="sub">H) View worktime summary (Admin/HR)</h3>
             <ol class="steps">
-                <li>Open <code>Reports → Payroll Summary Report</code>.</li>
-                <li>Select mode (quincena/month), month, year, and quincena if applicable.</li>
-                <li>Click <strong>Generate List</strong>.</li>
-                <li>Use <strong>Export CSV</strong> or <strong>Export PDF</strong> if needed.</li>
+                <li>Open <code>Payroll → Worktime Summary</code>.</li>
+                <li>Select year, month, quincena, employee type, and optional department or employee filters.</li>
+                <li>Click <strong>Apply</strong> to load the report.</li>
+                <li>Use <strong>CSV</strong> or <strong>PDF</strong> export if needed.</li>
             </ol>
 
             <h2 class="section" id="um-roles">What each role can do</h2>
@@ -334,7 +333,7 @@
                 <li><strong>Manager</strong>: Can review/approve leave within scope and view relevant employee data.</li>
                 <li><strong>Employee</strong>: Applies leave, views own leave, views personal dashboard/PDS (if enabled).</li>
                 <li><strong>DTR Uploader</strong>: Uploads DTR logs and may view DTR-related pages.</li>
-                <li><strong>Payroll Maker</strong>: Access to payroll reports and submission history.</li>
+                <li><strong>Payroll Maker</strong>: Access to DTR records, justifications, and employee reports within their department scope.</li>
             </ul>
 
             <h2 class="section" id="um-best-practices">Best practices</h2>
@@ -364,8 +363,9 @@
             <h3 class="sub">DTR upload issues</h3>
             <ul>
                 <li><strong>Wrong quincena</strong>: Select the correct quincena before uploading.</li>
-                <li><strong>Missing dates warning</strong>: Upload a complete file for the selected range before saving.</li>
+                <li><strong>Incomplete quincena in file</strong>: If some calendar days in the selected quincena are not in the upload, the page shows a notice; you can still save the rows that were parsed.</li>
                 <li><strong>Employee ID not found</strong>: Make sure the employee exists and the ID in the file matches the employee record.</li>
+                <li><strong>Same day saved again</strong>: If a DTR row already exists for that employee and date, new uploads <strong>merge</strong> times (missing slots are filled; if both uploads have a value for the same slot, arrivals use the earlier time and departures the later time). Upload another att log to complete partial days.</li>
             </ul>
 
             <h3 class="sub">Leave printing / export issues</h3>

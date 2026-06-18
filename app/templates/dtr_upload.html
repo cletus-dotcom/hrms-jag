@@ -2,6 +2,60 @@
 
 {% block title %}Upload DTR Log - HRMS{% endblock %}
 
+{% block extra_css %}
+<style>
+  .dtr-save-status-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10050;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    background: rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+  .dtr-save-status-overlay.is-visible {
+    display: flex;
+  }
+  .dtr-save-status-card {
+    max-width: 22rem;
+    width: 100%;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.05);
+    padding: 1.75rem 1.5rem 1.5rem;
+    text-align: center;
+  }
+  .dtr-save-status-spinner {
+    width: 2.5rem;
+    height: 2.5rem;
+    margin: 0 auto 1.1rem;
+    border: 3px solid #e5e7eb;
+    border-top-color: #1e40af;
+    border-radius: 50%;
+    animation: dtr-save-spin 0.75s linear infinite;
+  }
+  @keyframes dtr-save-spin {
+    to { transform: rotate(360deg); }
+  }
+  .dtr-save-status-title {
+    margin: 0 0 0.35rem;
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: #111827;
+    letter-spacing: -0.02em;
+  }
+  .dtr-save-status-sub {
+    margin: 0;
+    font-size: 0.9rem;
+    color: #6b7280;
+    line-height: 1.45;
+  }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="dashboard-container">
     <div class="header-bar">
@@ -13,16 +67,18 @@
                     <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">
                         <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
-                        <a href="{{ url_for('routes.dtr_upload') }}" class="dropdown-item">Upload DTR Log</a>
+                        {% include 'includes/nav_dtr_upload_link.html' %}
                         <a href="{{ url_for('routes.dtr_justifications') }}" class="dropdown-item">DTR Justifications</a>
+                        {% include 'includes/nav_dtr_edit_link.html' %}
+                        {% include 'includes/nav_dtr_regenerate_link.html' %}
                     </div>
                 </div>
+                {% include 'includes/nav_payroll_top_menu.html' %}
                 {% if (current_user.role or '')|lower in ('payroll_maker', 'admin', 'hr') %}
                 <div class="nav-dropdown">
                     <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.payroll_summary') }}" class="dropdown-item">Payroll Summary Report</a>
-                        <a href="{{ url_for('routes.payroll_submissions') }}" class="dropdown-item">Submitted Payroll History</a>
+                        {% include 'includes/reports_dropdown_links.html' %}
                     </div>
                 </div>
                 {% endif %}
@@ -106,11 +162,13 @@
         <div class="card" style="margin-top: 1.5rem;">
             <div class="card-body">
                 <h2 class="section-title" style="margin-bottom: 1rem;">DTR records – review</h2>
-                <form method="POST" action="{{ url_for('routes.dtr_upload_save') }}">
-                    <input type="hidden" name="upload_quincena" value="{{ selected_quincena }}">
-                    {% if not quincena_ok %}
-                    <div class="alert alert-error" style="margin-bottom: 0.75rem;">
-                        <span>Missing date(s) for selected quincena: {{ quincena_missing_dates_text|join(', ') }}. Please upload a complete file before saving.</span>
+                <script id="dtr-save-bootstrap" type="application/json">{{ {'save_url': url_for('routes.dtr_upload_save'), 'after_url': url_for('routes.dtr_upload'), 'quincena': selected_quincena, 'rows': dtr_rows_save_payload } | tojson }}</script>
+                <noscript>
+                    <p class="alert alert-error">Saving DTR batches requires JavaScript (JSON request).</p>
+                </noscript>
+                    {% if quincena_missing_dates_text %}
+                    <div class="alert alert-info" style="margin-bottom: 0.75rem;">
+                        <span>Calendar day(s) in the selected quincena not present in this upload: {{ quincena_missing_dates_text|join(', ') }}. You can still save.</span>
                     </div>
                     {% endif %}
                     <div class="table-container" style="overflow-x: auto;">
@@ -130,12 +188,6 @@
                                 <tr>
                                     <td style="border: 1px solid #ccc; padding: 0.5rem;">
                                         {{ row.employee_id }}
-                                        <input type="hidden" name="row_{{ loop.index0 }}_employee_id" value="{{ row.employee_id }}">
-                                        <input type="hidden" name="row_{{ loop.index0 }}_date" value="{{ row.date }}">
-                                        <input type="hidden" name="row_{{ loop.index0 }}_check_in" value="{{ row.check_in }}">
-                                        <input type="hidden" name="row_{{ loop.index0 }}_break_out" value="{{ row.break_out }}">
-                                        <input type="hidden" name="row_{{ loop.index0 }}_break_in" value="{{ row.break_in }}">
-                                        <input type="hidden" name="row_{{ loop.index0 }}_check_out" value="{{ row.check_out }}">
                                     </td>
                                     <td style="border: 1px solid #ccc; padding: 0.5rem;">{{ row.date[8:10] }}/{{ row.date[5:7] }}/{{ row.date[0:4] }}</td>
                                     <td style="border: 1px solid #ccc; padding: 0.5rem;">{{ row.check_in_12h|default(row.check_in) }}</td>
@@ -148,13 +200,77 @@
                         </table>
                     </div>
                     <div class="form-actions" style="margin-top: 1rem;">
-                        <button type="submit" class="btn-primary" {% if not quincena_ok %}disabled title="Missing dates for selected quincena"{% endif %}>Save to DTR</button>
+                        <button type="button" class="btn-primary" id="dtr-save-btn">Save to DTR</button>
                     </div>
-                </form>
+                    <div id="dtr-save-status" class="dtr-save-status-overlay" role="status" aria-live="polite" aria-hidden="true">
+                        <div class="dtr-save-status-card">
+                            <div class="dtr-save-status-spinner" aria-hidden="true"></div>
+                            <p class="dtr-save-status-title">Saving DTR Records</p>
+                            <p class="dtr-save-status-sub">Please wait a moment.</p>
+                        </div>
+                    </div>
             </div>
         </div>
         {% endif %}
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var el = document.getElementById('dtr-save-bootstrap');
+    if (!el) return;
+    var cfg;
+    try { cfg = JSON.parse(el.textContent); } catch (e) { return; }
+    var btn = document.getElementById('dtr-save-btn');
+    var statusOverlay = document.getElementById('dtr-save-status');
+    if (!btn) return;
+
+    function showSavingOverlay() {
+        if (!statusOverlay) return;
+        statusOverlay.classList.add('is-visible');
+        statusOverlay.setAttribute('aria-hidden', 'false');
+    }
+    function hideSavingOverlay() {
+        if (!statusOverlay) return;
+        statusOverlay.classList.remove('is-visible');
+        statusOverlay.setAttribute('aria-hidden', 'true');
+    }
+
+    btn.addEventListener('click', function () {
+        btn.disabled = true;
+        showSavingOverlay();
+        fetch(cfg.save_url, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            body: JSON.stringify({ upload_quincena: cfg.quincena, rows: cfg.rows })
+        })
+            .then(function (res) {
+                return res.json().then(function (data) {
+                    return { res: res, data: data };
+                });
+            })
+            .then(function (o) {
+                hideSavingOverlay();
+                if (!o.res.ok || !o.data.ok) {
+                    alert(o.data.error || ('Save failed (' + o.res.status + ')'));
+                    btn.disabled = false;
+                    return;
+                }
+                window.location.href = o.data.redirect || cfg.after_url;
+            })
+            .catch(function (e) {
+                hideSavingOverlay();
+                alert('Save failed: ' + e);
+                btn.disabled = false;
+            });
+    });
+})();
+</script>
 {% endblock %}
 

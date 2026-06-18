@@ -1,0 +1,6 @@
+{% if (current_user.role or '')|lower in ('admin', 'hr') %}
+<a href="{{ url_for('routes.dtr_records', edit=1) }}" class="dropdown-item">Edit DTR</a>
+<a href="{{ url_for('routes.dtr_flexible_worktime') }}" class="dropdown-item{% if request.endpoint == 'routes.dtr_flexible_worktime' %} active{% endif %}">Flexible Worktime</a>
+<a href="{{ url_for('routes.dtr_overtime_authorization') }}" class="dropdown-item{% if request.endpoint == 'routes.dtr_overtime_authorization' %} active{% endif %}">Overtime Authorization - Plantilla</a>
+<a href="{{ url_for('routes.dtr_jo_cos_extend_service') }}" class="dropdown-item{% if request.endpoint == 'routes.dtr_jo_cos_extend_service' %} active{% endif %}">X-Service Authorization - JO/COS</a>
+{% endif %}

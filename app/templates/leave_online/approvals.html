@@ -16,6 +16,7 @@
             <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
             <hr class="dropdown-separator">
             <a href="{{ url_for('routes.leave_approvals') }}" class="dropdown-item">Leave Approvals</a>
+            {% include 'includes/nav_overtime_offset_approvals_link.html' %}
           </div>
         </div>
         <div class="nav-dropdown">

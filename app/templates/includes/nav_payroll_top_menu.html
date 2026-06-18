@@ -1,0 +1,8 @@
+{% if (current_user.role or '')|lower in ('admin', 'hr') %}
+<div class="nav-dropdown">
+    <a href="#" class="nav-link{% if request.endpoint in ('routes.payroll_deductions_gsis', 'routes.payroll_deductions_plantilla', 'routes.payroll_deductions_hdmf', 'routes.payroll_deductions_hdmf_contributions_preview', 'routes.payroll_deductions_hdmf_contributions_upload_submit', 'routes.payroll_deductions_hdmf_contributions_deductions_submit', 'routes.payroll_deductions_hdmf_loans_preview', 'routes.payroll_deductions_hdmf_loans_upload_submit', 'routes.payroll_deductions_hdmf_loans_deductions_submit', 'routes.payroll_worktime_summary', 'routes.payroll_jo_cos', 'routes.payroll_plantilla') %} nav-link-active{% endif %}">Payroll <span class="dropdown-arrow">▼</span></a>
+    <div class="dropdown-menu">
+        {% include 'includes/nav_payroll_dropdown_links.html' %}
+    </div>
+</div>
+{% endif %}

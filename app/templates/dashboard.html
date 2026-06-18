@@ -70,9 +70,13 @@
                     <a href="#" class="nav-link">Settings <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">
                         <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
+                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Manage Employees</a>
                         <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
                         <hr class="dropdown-separator">
                         <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
+                        <a href="{{ url_for('routes.jo_cos_designations_list') }}" class="dropdown-item">JO/COS designations</a>
+                        <a href="{{ url_for('routes.jo_cos_rates_list') }}" class="dropdown-item">JO and COS Rates</a>
+                        <a href="{{ url_for('routes.flexi_time_schedule_list') }}" class="dropdown-item">Flexi-time schedule</a>
                         <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
                         <hr class="dropdown-separator">
                         <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
@@ -80,22 +84,17 @@
                 </div>
                 {% endif %}
                 <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Employee Management <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Employees</a>
-                    </div>
-                </div>
-                <div class="nav-dropdown">
                     <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">
                         <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
+                        {% include 'includes/nav_dtr_upload_link.html' %}
                         <a href="{{ url_for('routes.dtr_justifications') }}" class="dropdown-item">DTR Justifications</a>
                         {% if (current_user.role or '')|lower in ('admin', 'hr') %}
                         <hr class="dropdown-separator">
                         <button type="button" class="dropdown-item" style="width:100%; text-align:left; background:none; border:none; cursor:pointer; font:inherit;" onclick="document.getElementById('generateDtrModal').style.display='flex'">Generate DTR</button>
-                        <form method="POST" action="{{ url_for('routes.dtr_recompute') }}" style="margin:0;">
-                          <button type="submit" class="dropdown-item" style="width:100%; text-align:left; background:none; border:none; cursor:pointer; font:inherit;">Recompute DTR Late/Undertime</button>
-                        </form>
+                        <hr class="dropdown-separator">
+                        {% include 'includes/nav_dtr_edit_link.html' %}
+                        {% include 'includes/nav_dtr_regenerate_link.html' %}
                         {% endif %}
                     </div>
                 </div>
@@ -113,8 +112,20 @@
                         <hr class="dropdown-separator">
                         <a href="{{ url_for('routes.leave_approvals') }}" class="dropdown-item">Leave Approvals</a>
                         {% endif %}
+                        {% include 'includes/nav_overtime_offset_approvals_link.html' %}
                     </div>
                 </div>
+                {% include 'includes/nav_payroll_top_menu.html' %}
+                {% if (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') %}
+                <div class="nav-dropdown">
+                    <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
+                    <div class="dropdown-menu">
+                        {% include 'includes/reports_dropdown_links.html' %}
+                    </div>
+                </div>
+                {% else %}
+                <a href="#" class="nav-link">Reports</a>
+                {% endif %}
                 <div class="nav-dropdown">
                     <a href="#" class="nav-link">ABOUT <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">
@@ -122,17 +133,6 @@
                         <a href="{{ url_for('routes.hrmdo_manual') }}" class="dropdown-item">HRMDO Manual</a>
                     </div>
                 </div>
-                {% if (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.payroll_summary') }}" class="dropdown-item">Payroll Summary Report</a>
-                        <a href="{{ url_for('routes.payroll_submissions') }}" class="dropdown-item">Submitted Payroll History</a>
-                    </div>
-                </div>
-                {% else %}
-                <a href="#" class="nav-link">Reports</a>
-                {% endif %}
             </nav>
             <div class="user-dropdown">
                 <a href="#" class="user-info">
@@ -302,6 +302,7 @@
               </div>
             </div>
             <div class="generate-dtr-modal-period-footer" role="group" aria-label="Generate DTR actions">
+              <p class="generate-dtr-flexi-notice" role="note">Set flexible worktime on <strong>Daily Time Records → Flexible Worktime</strong> before regenerating DTR for the quincena.</p>
               <button type="button" class="btn-secondary" onclick="document.getElementById('generateDtrModal').style.display='none'">Cancel</button>
               <button type="submit" class="btn-primary">Generate</button>
             </div>
@@ -341,20 +342,59 @@
               </div>
             </div>
             <div class="form-group generate-dtr-modal-holidays-block">
-              <label class="generate-dtr-modal-section-title">Holidays (optional)</label>
-              <p class="generate-dtr-modal-note">
-                Use the calendar to add dates, or type them manually. One date per line, or separated by commas.
-                Format: <strong>YYYY-MM-DD</strong> (e.g. 2026-05-01) or <strong>DD/MM/YYYY</strong>. Dates outside the generated period are ignored.
+              <label class="generate-dtr-modal-section-title">Holidays / Work Suspension</label>
+              <p class="generate-dtr-modal-note generate-dtr-holiday-intro-note">
+                Select days on the calendar, choose <strong>Full day</strong>, <strong>AM</strong>, or <strong>PM</strong>, then add to the holiday or work suspension list. You can also type or paste entries (one per line). Format: <strong>YYYY-MM-DD</strong>, optional <strong>AM</strong> or <strong>PM</strong> for half-day. Dates outside the generated period are ignored.
               </p>
-              <div class="generate-dtr-holiday-calendar-row" aria-label="Add holiday by calendar">
-                <div class="generate-dtr-holiday-date-wrap form-group">
-                  <label for="dtrHolidayCalendar">Pick a date</label>
-                  <input type="date" id="dtrHolidayCalendar" class="form-control" autocomplete="off">
+              <div class="generate-dtr-holiday-split">
+                <div class="generate-dtr-holiday-split-calendar">
+                  <div class="generate-dtr-holiday-panel generate-dtr-holiday-panel--calendar">
+                    <div class="generate-dtr-holiday-panel-head">
+                      <span class="generate-dtr-holiday-panel-title">Calendar</span>
+                      <span class="generate-dtr-holiday-panel-caption">Click days to toggle selection</span>
+                    </div>
+                    <div class="generate-dtr-holiday-picker" aria-label="Holiday and work suspension date picker">
+                      <div id="dtrHolidayCalHost" class="generate-dtr-holiday-cal-host"></div>
+                      <fieldset class="generate-dtr-holiday-halfday" aria-label="Half-day period">
+                        <legend class="generate-dtr-holiday-halfday-legend">Period</legend>
+                        <label class="generate-dtr-holiday-halfday-opt">
+                          <input type="radio" name="dtrSpecialDayHalf" value="" checked>
+                          <span>Full day</span>
+                        </label>
+                        <label class="generate-dtr-holiday-halfday-opt">
+                          <input type="radio" name="dtrSpecialDayHalf" value="AM">
+                          <span>AM</span>
+                        </label>
+                        <label class="generate-dtr-holiday-halfday-opt">
+                          <input type="radio" name="dtrSpecialDayHalf" value="PM">
+                          <span>PM</span>
+                        </label>
+                      </fieldset>
+                      <div class="generate-dtr-holiday-cal-actions">
+                        <button type="button" id="dtrHolidayAddSelectedBtn" class="btn-secondary">Add Selection to Holiday List</button>
+                        <button type="button" id="dtrSuspensionAddSelectedBtn" class="btn-secondary">Add Selection to Work Suspension List</button>
+                        <button type="button" id="dtrHolidayClearPickBtn" class="btn-secondary" title="Clear calendar selection only">Clear selection</button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <button type="button" id="dtrHolidayAddBtn" class="btn-secondary">Add to list</button>
+                <div class="generate-dtr-holiday-split-lists">
+                  <div class="generate-dtr-holiday-panel generate-dtr-holiday-panel--list">
+                    <div class="generate-dtr-holiday-panel-head">
+                      <label for="dtrHolidayDatesText" class="generate-dtr-holiday-panel-title">Holiday list</label>
+                      <span class="generate-dtr-holiday-panel-caption">Submitted with the form — edit freely</span>
+                    </div>
+                    <textarea name="holiday_dates" id="dtrHolidayDatesText" class="form-control generate-dtr-holiday-textarea" rows="5" placeholder="2026-05-01&#10;2026-05-25 AM"></textarea>
+                  </div>
+                  <div class="generate-dtr-holiday-panel generate-dtr-holiday-panel--list">
+                    <div class="generate-dtr-holiday-panel-head">
+                      <label for="dtrSuspensionDatesText" class="generate-dtr-holiday-panel-title">Work suspension list</label>
+                      <span class="generate-dtr-holiday-panel-caption">Submitted with the form — edit freely</span>
+                    </div>
+                    <textarea name="work_suspension_dates" id="dtrSuspensionDatesText" class="form-control generate-dtr-holiday-textarea" rows="5" placeholder="2026-05-02 PM"></textarea>
+                  </div>
+                </div>
               </div>
-              <label for="dtrHolidayDatesText">Holiday dates</label>
-              <textarea name="holiday_dates" id="dtrHolidayDatesText" class="form-control" rows="4" placeholder="2026-05-01&#10;2026-05-25"></textarea>
             </div>
           </div>
         </div>
@@ -394,11 +434,15 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   }
 
-  var holidayCal = document.getElementById('dtrHolidayCalendar');
+  var holidayCalHost = document.getElementById('dtrHolidayCalHost');
   var holidayTa = document.getElementById('dtrHolidayDatesText');
-  var holidayAddBtn = document.getElementById('dtrHolidayAddBtn');
+  var suspensionTa = document.getElementById('dtrSuspensionDatesText');
+  var holidayAddSelectedBtn = document.getElementById('dtrHolidayAddSelectedBtn');
+  var suspensionAddSelectedBtn = document.getElementById('dtrSuspensionAddSelectedBtn');
+  var holidayClearPickBtn = document.getElementById('dtrHolidayClearPickBtn');
   var modeEl = document.getElementById('dtrMode');
   var quincenaEl = document.getElementById('dtrGenQuincena');
+  var holidayPicked = new Set();
 
   function dtrPad2(n) {
     return String(n).padStart(2, '0');
@@ -424,47 +468,139 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     return { min: dtrYmd(y, m, 1), max: dtrYmd(y, m, 15) };
   }
-  function syncHolidayCalendarBounds() {
-    if (!holidayCal) return;
-    var b = dtrHolidayPeriodBounds();
-    if (!b) return;
-    holidayCal.min = b.min;
-    holidayCal.max = b.max;
-    var v = holidayCal.value;
-    if (v && (v < b.min || v > b.max)) holidayCal.value = b.min;
-  }
-  function dtrHolidayTokensFromTextarea() {
-    if (!holidayTa || !holidayTa.value) return [];
-    return holidayTa.value
+  function dtrTokensFromTextarea(ta) {
+    if (!ta || !ta.value) return [];
+    return ta.value
       .split(/[\n,;]+/)
       .map(function (s) { return s.trim(); })
       .filter(Boolean);
   }
-  function addHolidayFromCalendar() {
-    if (!holidayCal || !holidayTa) return;
-    var d = holidayCal.value;
-    if (!d) return;
-    var existing = dtrHolidayTokensFromTextarea();
-    if (existing.indexOf(d) !== -1) return;
-    holidayTa.value = holidayTa.value.replace(/\s+$/, '');
-    if (holidayTa.value.length) holidayTa.value += '\n';
-    holidayTa.value += d;
+  function dtrAllSpecialDayTokens() {
+    return dtrTokensFromTextarea(holidayTa).concat(dtrTokensFromTextarea(suspensionTa));
+  }
+  function dtrTokenDatePart(token) {
+    var m = token.match(/^(\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4})/);
+    return m ? m[1] : token;
+  }
+  function dtrSelectedHalfDay() {
+    var el = document.querySelector('input[name="dtrSpecialDayHalf"]:checked');
+    return el ? (el.value || '') : '';
+  }
+  function dtrFormatSpecialDayToken(ymd, half) {
+    return half ? (ymd + ' ' + half) : ymd;
+  }
+  function dtrListedDatesInPeriod() {
+    var b = dtrHolidayPeriodBounds();
+    var listed = new Set();
+    if (!b) return listed;
+    dtrAllSpecialDayTokens().forEach(function (t) {
+      var d = dtrTokenDatePart(t);
+      if (d >= b.min && d <= b.max) listed.add(d);
+    });
+    return listed;
+  }
+  function dtrAppendTokenToTextarea(ta, token) {
+    if (!ta) return false;
+    var existing = dtrTokensFromTextarea(ta);
+    if (existing.indexOf(token) !== -1) return false;
+    ta.value = ta.value.replace(/\s+$/, '');
+    if (ta.value.length) ta.value += '\n';
+    ta.value += token;
+    return true;
+  }
+  function renderHolidayMiniCal() {
+    if (!holidayCalHost) return;
+    var y = parseInt(yearEl && yearEl.value, 10);
+    var m = parseInt(monthEl && monthEl.value, 10);
+    var b = dtrHolidayPeriodBounds();
+    if (!y || !m || m < 1 || m > 12 || !b) {
+      holidayCalHost.innerHTML = '';
+      return;
+    }
+    var last = dtrLastDayOfMonth(y, m);
+    var firstDow = new Date(y, m - 1, 1).getDay();
+    var listed = dtrListedDatesInPeriod();
+    holidayPicked.forEach(function (ymd) {
+      if (ymd < b.min || ymd > b.max) holidayPicked.delete(ymd);
+    });
+
+    var dow = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    var html = '<table class="generate-dtr-holiday-cal-table" role="grid" aria-label="Holiday and work suspension days for selected month">';
+    html += '<thead><tr>';
+    for (var h = 0; h < 7; h++) html += '<th scope="col">' + dow[h] + '</th>';
+    html += '</tr></thead><tbody>';
+    var day = 1;
+    var row = 0;
+    while (day <= last) {
+      html += '<tr>';
+      for (var c = 0; c < 7; c++) {
+        if (row === 0 && c < firstDow) {
+          html += '<td class="generate-dtr-holiday-cal-empty"></td>';
+        } else if (day > last) {
+          html += '<td class="generate-dtr-holiday-cal-empty"></td>';
+        } else {
+          var ymd = dtrYmd(y, m, day);
+          var inRange = ymd >= b.min && ymd <= b.max;
+          var isListed = listed.has(ymd);
+          var cls = 'generate-dtr-holiday-cal-day';
+          if (!inRange) cls += ' generate-dtr-holiday-cal-out';
+          if (isListed) cls += ' generate-dtr-holiday-cal-listed';
+          if (holidayPicked.has(ymd)) cls += ' generate-dtr-holiday-cal-picked';
+          var label = 'Day ' + day + ', ' + ymd;
+          if (inRange) {
+            html += '<td><button type="button" class="' + cls + '" data-ymd="' + ymd + '" aria-pressed="' +
+              (holidayPicked.has(ymd) ? 'true' : 'false') + '" aria-label="' + label + (isListed ? ', already in a list' : '') + '">' + day + '</button></td>';
+          } else {
+            html += '<td><span class="' + cls + '" aria-hidden="true">' + day + '</span></td>';
+          }
+          day++;
+        }
+      }
+      html += '</tr>';
+      row++;
+    }
+    html += '</tbody></table>';
+    holidayCalHost.innerHTML = html;
+    holidayCalHost.querySelectorAll('button.generate-dtr-holiday-cal-day').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var ymd = this.getAttribute('data-ymd');
+        if (!ymd) return;
+        if (holidayPicked.has(ymd)) holidayPicked.delete(ymd);
+        else holidayPicked.add(ymd);
+        this.classList.toggle('generate-dtr-holiday-cal-picked', holidayPicked.has(ymd));
+        this.setAttribute('aria-pressed', holidayPicked.has(ymd) ? 'true' : 'false');
+      });
+    });
+  }
+  function addPickedToTextarea(ta) {
+    if (!ta || !holidayPicked.size) return;
+    var half = dtrSelectedHalfDay();
+    var sorted = Array.from(holidayPicked).sort();
+    sorted.forEach(function (ymd) {
+      dtrAppendTokenToTextarea(ta, dtrFormatSpecialDayToken(ymd, half));
+    });
+    holidayPicked.clear();
+    renderHolidayMiniCal();
   }
 
-  if (holidayCal && holidayTa && holidayAddBtn) {
-    holidayAddBtn.addEventListener('click', addHolidayFromCalendar);
-    holidayCal.addEventListener('focus', syncHolidayCalendarBounds);
-    holidayCal.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        addHolidayFromCalendar();
-      }
-    });
+  if (holidayCalHost && holidayTa && holidayAddSelectedBtn) {
+    holidayAddSelectedBtn.addEventListener('click', function () { addPickedToTextarea(holidayTa); });
+    if (suspensionAddSelectedBtn && suspensionTa) {
+      suspensionAddSelectedBtn.addEventListener('click', function () { addPickedToTextarea(suspensionTa); });
+    }
+    if (holidayClearPickBtn) {
+      holidayClearPickBtn.addEventListener('click', function () {
+        holidayPicked.clear();
+        renderHolidayMiniCal();
+      });
+    }
     [monthEl, yearEl, modeEl, quincenaEl].forEach(function (el) {
-      if (el) el.addEventListener('change', syncHolidayCalendarBounds);
+      if (el) el.addEventListener('change', renderHolidayMiniCal);
     });
-    if (yearEl) yearEl.addEventListener('input', syncHolidayCalendarBounds);
-    syncHolidayCalendarBounds();
+    if (yearEl) yearEl.addEventListener('input', renderHolidayMiniCal);
+    holidayTa.addEventListener('input', renderHolidayMiniCal);
+    if (suspensionTa) suspensionTa.addEventListener('input', renderHolidayMiniCal);
+    renderHolidayMiniCal();
   }
 
   var genForm = document.getElementById('generateDtrForm');

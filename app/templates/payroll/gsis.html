@@ -1,0 +1,778 @@
+{% extends "base.html" %}
+
+{% block title %}GSIS - HRMS{% endblock %}
+
+{% block extra_css %}
+<style>
+  .gsis-tabs {
+    display: inline-flex;
+    gap: 0.25rem;
+    background: rgba(17, 24, 39, 0.06);
+    border-radius: 12px;
+    padding: 0.25rem;
+  }
+  .gsis-tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.55rem 0.9rem;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    text-decoration: none;
+    color: var(--primary-black);
+    background: transparent;
+    border: 1px solid transparent;
+  }
+  .gsis-tab.is-active {
+    background: #bfe3ff;
+    border-color: rgba(18, 64, 114, 0.18);
+  }
+  .gsis-filters {
+    display: grid;
+    gap: 0.75rem;
+    column-gap: 1.25rem;
+    align-items: end;
+    margin-top: 1rem;
+  }
+  @media (min-width: 900px) {
+    .gsis-filters {
+      grid-template-columns: 6rem 9rem auto minmax(16rem, 1fr);
+    }
+  }
+  .gsis-note {
+    color: var(--medium-gray, #6b7280);
+    font-size: 0.95rem;
+    margin-top: 0.75rem;
+  }
+  .gsis-deductible-fixed {
+    color: var(--medium-gray, #6b7280);
+    background: #f3f4f6;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 0.45rem 0.65rem;
+    font-size: 0.9rem;
+    min-width: 11rem;
+    display: inline-block;
+  }
+  .gsis-submit-bar {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    justify-content: flex-end;
+    margin-top: 1rem;
+    flex-wrap: wrap;
+  }
+  .gsis-table th, .gsis-table td { white-space: nowrap; }
+  .gsis-table-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+    margin-bottom: 0.75rem;
+  }
+  .gsis-table-toolbar .search-bar {
+    flex: 1 1 220px;
+    max-width: 360px;
+    margin: 0;
+  }
+  .gsis-loan-upload-zone {
+    border: 2px dashed #cbd5e1;
+    border-radius: 10px;
+    padding: 1.25rem;
+    text-align: center;
+    background: #fafafa;
+  }
+  .gsis-loading-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10500;
+    background: rgba(15, 23, 42, 0.45);
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+  }
+  .gsis-loading-overlay.is-visible { display: flex; }
+  .gsis-loading-card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 1.5rem 1.75rem;
+    text-align: center;
+    max-width: 22rem;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+  }
+  .gsis-loading-spinner {
+    width: 2.25rem;
+    height: 2.25rem;
+    margin: 0 auto 0.85rem;
+    border: 3px solid #e5e7eb;
+    border-top-color: #1e40af;
+    border-radius: 50%;
+    animation: gsis-spin 0.75s linear infinite;
+  }
+  @keyframes gsis-spin { to { transform: rotate(360deg); } }
+  .gsis-loan-sub-row td { vertical-align: middle; }
+  .gsis-loan-q-cell { min-width: 9.5rem; }
+  .gsis-loan-q-cell label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; margin-bottom: 0.35rem; }
+  #gsisLoanDeductionTable td.num .gsis-loan-month-amount {
+    width: 7rem;
+    min-width: 7rem;
+    text-align: right;
+  }
+  #gsisLoanDeductionTable .gsis-loan-amount {
+    text-align: right;
+  }
+  .gsis-loan-remove {
+    background: none;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #b91c1c;
+    padding: 0.3rem 0.55rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.8rem;
+  }
+  .gsis-loan-unmatched { color: #b45309; }
+  .gsis-loan-row-clickable { cursor: pointer; }
+  .gsis-loan-row-clickable:hover { background-color: rgba(18, 64, 114, 0.04); }
+  .gsis-loan-deduction-row.is-expanded { background-color: rgba(18, 64, 114, 0.06); }
+  .gsis-loan-types-label { font-weight: 600; color: var(--brand-blue-ink, #1e3a5f); }
+  .gsis-loan-details-row td.gsis-loan-details-cell {
+    background: #f8fafc;
+    padding: 0.65rem 1rem 0.85rem 2.25rem;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .gsis-loan-details-panel {
+    display: inline-block;
+    min-width: 14rem;
+  }
+  .gsis-loan-details-panel-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--medium-gray, #6b7280);
+    margin: 0 0 0.4rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .gsis-loan-details-table {
+    width: auto;
+    border-collapse: collapse;
+  }
+  .gsis-loan-details-table td {
+    padding: 0.25rem 0.75rem 0.25rem 0;
+    font-size: 0.9rem;
+    border: none;
+  }
+  .gsis-loan-details-table td.num {
+    text-align: right;
+    padding-right: 0;
+    font-variant-numeric: tabular-nums;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+  <div class="header-bar">
+    <div class="header-content">
+      {% include 'includes/navbar_brand.html' %}
+      <nav class="main-nav">
+        <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+        {% include 'includes/nav_payroll_top_menu.html' %}
+      </nav>
+      <div class="user-dropdown">
+        <a href="#" class="user-info">
+          {% if employee %}{{ employee.full_name }} ({{ current_user.role|title }}){% else %}{{ current_user.username }} ({{ current_user.role|title }}){% endif %}
+          <span class="dropdown-arrow">▼</span>
+        </a>
+        <div class="dropdown-menu dropdown-menu-right">
+          <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
+            <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dashboard-content">
+    <div class="page-header" style="align-items: center;">
+      <div>
+        <h1 class="page-title">GSIS</h1>
+        <div class="gsis-tabs" role="tablist" aria-label="GSIS pages">
+          <a class="gsis-tab{% if active_tab == 'contribution' %} is-active{% endif %}" href="#contribution" data-gsis-tab="contribution" role="tab" aria-selected="{{ 'true' if active_tab == 'contribution' else 'false' }}">Contribution</a>
+          <a class="gsis-tab{% if active_tab == 'loan' %} is-active{% endif %}" href="#loan" data-gsis-tab="loan" role="tab" aria-selected="{{ 'true' if active_tab == 'loan' else 'false' }}">Loan</a>
+        </div>
+      </div>
+      <a href="{{ url_for('routes.dashboard') }}" class="btn-secondary">Dashboard</a>
+    </div>
+
+    <section id="gsisContributionCard" class="card" style="padding: 1rem 1.25rem; border: 1px solid var(--brand-border, #e5e7eb); border-radius: 12px;{% if active_tab != 'contribution' %} display:none;{% endif %}">
+      <h2 style="margin: 0 0 0.35rem; font-size: 1.05rem;">Contribution</h2>
+      <div class="gsis-note">
+        Computes PS = 9% and GS = 12% of plantilla basic salary. GS is shown for reference only; the <strong>month amount</strong> deducted on the <strong>2nd quincena</strong> is <strong>PS</strong> (employee share) only.
+      </div>
+
+      <form method="GET" action="{{ url_for('routes.payroll_deductions_gsis') }}#contribution" class="gsis-filters">
+        <div>
+          <label class="form-label" for="gsisYear">Year</label>
+          <input id="gsisYear" name="year" class="form-control" value="{{ year }}" />
+        </div>
+        <div>
+          <label class="form-label" for="gsisMonth">Month</label>
+          <select id="gsisMonth" name="month" class="form-control">
+            {% for m in range(1, 13) %}
+              <option value="{{ m }}" {% if m == month %}selected{% endif %}>{{ ['January','February','March','April','May','June','July','August','September','October','November','December'][m-1] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <input type="hidden" name="generate" value="1" />
+          <button class="btn-primary" type="submit">Generate</button>
+        </div>
+        <div>
+          <label class="form-label" for="gsisDept">Department (optional)</label>
+          <select id="gsisDept" name="department_id" class="form-control">
+            <option value="">All departments</option>
+            {% for d in departments %}
+              <option value="{{ d.id }}" {% if selected_department and d.id == selected_department.id %}selected{% endif %}>{{ d.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </form>
+
+      {% if generated %}
+        <hr style="margin: 1rem 0;" />
+        {% if not rows %}
+          <p class="gsis-note">No plantilla employees found for the selected scope.</p>
+        {% else %}
+          <form method="POST" action="{{ url_for('routes.payroll_deductions_gsis_submit') }}" id="gsisSubmitForm">
+            <input type="hidden" name="year" value="{{ year }}" />
+            <input type="hidden" name="month" value="{{ month }}" />
+            <input type="hidden" name="department_id" value="{{ selected_department.id if selected_department else '' }}" />
+            <input type="hidden" name="rows_json" id="gsisRowsJson" value="[]" />
+
+            <div class="gsis-table-toolbar">
+              <div class="search-bar">
+                <input type="text" id="gsisEmployeeSearch" class="search-input" placeholder="Search employees…" autocomplete="off" aria-label="Search employees">
+                <span class="search-icon">🔍</span>
+              </div>
+              <span style="font-size: 0.85rem; color: var(--medium-gray);"><strong id="gsisRowCount">{{ rows|length }}</strong> employee(s)</span>
+            </div>
+
+            <div class="table-container" style="overflow-x:auto;">
+              <table class="data-table gsis-table" id="gsisTable">
+                <thead>
+                  <tr>
+                    <th>Emp ID</th>
+                    <th>Employee</th>
+                    <th>Department</th>
+                    <th class="num">PS (9%)</th>
+                    <th class="num">GS (12%)</th>
+                    <th class="num">Month Amount</th>
+                    <th>Deductible on</th>
+                  </tr>
+                </thead>
+                <tbody id="gsisTableBody">
+                  {% for r in rows %}
+                  <tr class="gsis-table-row"
+                      data-employee-pk="{{ r.employee_pk }}"
+                      data-search="{{ (r.employee_id ~ ' ' ~ r.employee_name ~ ' ' ~ r.department_name)|lower }}"
+                      data-ps="{{ r.ps_raw }}"
+                      data-gs="{{ r.gs_raw }}"
+                      data-month-amount="{{ r.month_amount_raw }}">
+                    <td>{{ r.employee_id }}</td>
+                    <td>{{ r.employee_name }}</td>
+                    <td>{{ r.department_name }}</td>
+                    <td class="num">{{ r.ps }}</td>
+                    <td class="num">{{ r.gs }}</td>
+                    <td class="num">{{ r.month_amount }}</td>
+                    <td><span class="gsis-deductible-fixed">2nd quincena</span></td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <p id="gsisSearchNoMatch" style="display: none; margin-top: 0.75rem; color: var(--medium-gray); font-size: 0.9rem;">No employees match your search.</p>
+
+            <div class="gsis-submit-bar">
+              <button type="submit" class="btn-primary">Submit</button>
+            </div>
+          </form>
+        {% endif %}
+      {% endif %}
+    </section>
+
+    <section id="gsisLoanCard" class="card" style="margin-top: 1rem; padding: 1rem 1.25rem; border: 1px solid var(--brand-border, #e5e7eb); border-radius: 12px;{% if active_tab != 'loan' %} display:none;{% endif %}">
+      <h2 style="margin: 0 0 0.35rem; font-size: 1.05rem;">Loan</h2>
+
+      {% if show_loan_upload %}
+      <p class="gsis-note" style="margin-top: 0;">
+        <a href="{{ url_for('routes.payroll_deductions_gsis', loan_view='load') }}#loan">← Back to load deductions</a>
+      </p>
+      <div id="gsisLoanUploadCard" class="gsis-loan-upload-zone" style="margin-top: 0.75rem;">
+        <p class="gsis-note" style="margin-top: 0;">Upload the monthly GSIS loan file (.xls). BPNO is matched to employee PDS <strong>UMID ID</strong>.</p>
+        <input type="file" id="gsisLoanFileInput" accept=".xls,.xlsx" style="display:none;">
+        <button type="button" class="btn-primary" id="gsisLoanUploadBtn">Upload</button>
+      </div>
+
+      <div id="gsisLoanPreviewWrap" style="display:none; margin-top: 1rem;">
+        <p class="gsis-note" id="gsisLoanPreviewMeta"></p>
+        <div class="table-container" style="overflow-x:auto; margin-top: 0.75rem;">
+          <table class="data-table gsis-table" id="gsisLoanPreviewTable">
+            <thead>
+              <tr>
+                <th>BPNO</th>
+                <th>Emp ID</th>
+                <th>Employee</th>
+                <th>Department</th>
+                <th class="num">PS</th>
+                <th class="num">GS</th>
+                <th class="num">EC</th>
+                <th class="num">CONSOLOAN</th>
+                <th class="num">EMRGYLN</th>
+                <th class="num">PLREG</th>
+                <th class="num">GFAL</th>
+                <th class="num">MPL</th>
+                <th class="num">CPL</th>
+                <th class="num">MPL_LITE</th>
+              </tr>
+            </thead>
+            <tbody id="gsisLoanPreviewBody"></tbody>
+          </table>
+        </div>
+        <form method="POST" action="{{ url_for('routes.payroll_deductions_gsis_loans_upload_submit') }}" id="gsisLoanUploadSubmitForm" style="margin-top: 1rem;">
+          <input type="hidden" name="year" id="gsisLoanUploadYear" value="">
+          <input type="hidden" name="month" id="gsisLoanUploadMonth" value="">
+          <input type="hidden" name="rows_json" id="gsisLoanUploadRowsJson" value="[]">
+          <button type="submit" class="btn-primary" id="gsisLoanUploadSubmitBtn" disabled>Submit</button>
+        </form>
+      </div>
+      {% endif %}
+
+      <div id="gsisLoanLoadCard" style="margin-top: 1rem;{% if show_loan_upload %} display:none;{% endif %}">
+        <p class="gsis-note" style="margin-top: 0;">
+          {% if has_loan_data %}
+          Loan data is on file. Load deductions by period below, or
+          <a href="{{ url_for('routes.payroll_deductions_gsis', loan_view='upload') }}#loan">upload a new file</a>.
+          {% else %}
+          Load deductions by period below, or
+          <a href="{{ url_for('routes.payroll_deductions_gsis', loan_view='upload') }}#loan">upload a GSIS loan file</a> first.
+          {% endif %}
+        </p>
+        <form method="GET" action="{{ url_for('routes.payroll_deductions_gsis') }}#loan" class="gsis-filters" id="gsisLoanLoadForm">
+          <input type="hidden" name="loan_view" value="load">
+          <div>
+            <label class="form-label" for="gsisLoanYear">Year</label>
+            <input id="gsisLoanYear" name="loan_year" class="form-control" value="{{ loan_year }}" />
+          </div>
+          <div>
+            <label class="form-label" for="gsisLoanMonth">Month</label>
+            <select id="gsisLoanMonth" name="loan_month" class="form-control">
+              {% for m in range(1, 13) %}
+                <option value="{{ m }}" {% if m == loan_month %}selected{% endif %}>{{ ['January','February','March','April','May','June','July','August','September','October','November','December'][m-1] }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <input type="hidden" name="loan_load" value="1" />
+            <button class="btn-primary" type="submit">Load</button>
+          </div>
+          <div>
+            <label class="form-label" for="gsisLoanDept">Department (optional)</label>
+            <select id="gsisLoanDept" name="loan_department_id" class="form-control">
+              <option value="">All departments</option>
+              {% for d in departments %}
+                <option value="{{ d.id }}" {% if loan_selected_department and d.id == loan_selected_department.id %}selected{% endif %}>{{ d.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </form>
+
+        {% if loan_loaded %}
+        {% if not loan_rows %}
+          <p class="gsis-note" style="margin-top: 0.75rem;">No plantilla employees with loan data found for the selected scope.</p>
+        {% else %}
+        <form method="POST" action="{{ url_for('routes.payroll_deductions_gsis_loans_deductions_submit') }}" id="gsisLoanDeductionForm" style="margin-top: 1rem;">
+          <input type="hidden" name="year" value="{{ loan_year }}">
+          <input type="hidden" name="month" value="{{ loan_month }}">
+          <input type="hidden" name="department_id" value="{{ loan_selected_department.id if loan_selected_department else '' }}">
+          <input type="hidden" name="rows_json" id="gsisLoanDeductionRowsJson" value="[]">
+
+          <div class="gsis-table-toolbar">
+            <div class="search-bar">
+              <input type="text" id="gsisLoanEmployeeSearch" class="search-input" placeholder="Search employees…" autocomplete="off">
+              <span class="search-icon">🔍</span>
+            </div>
+            <span style="font-size: 0.85rem; color: var(--medium-gray);"><strong id="gsisLoanRowCount">{{ loan_rows|length }}</strong> employee(s)</span>
+          </div>
+
+          <div class="table-container" style="overflow-x:auto;">
+            <table class="data-table gsis-table" id="gsisLoanDeductionTable">
+              <thead>
+                <tr>
+                  <th>Emp ID</th>
+                  <th>Employee</th>
+                  <th>Department</th>
+                  <th>Loan</th>
+                  <th class="num">Month Amount</th>
+                  <th>Deductible on</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="gsisLoanDeductionBody">
+                {% for r in loan_rows %}
+                <tr class="gsis-loan-deduction-row gsis-loan-row-clickable"
+                    data-employee-pk="{{ r.employee_pk }}"
+                    data-search="{{ r.search_text }}"
+                    title="Click row to expand loan details">
+                  <td>{{ r.employee_id }}</td>
+                  <td>{{ r.employee_name }}</td>
+                  <td>{{ r.department_name }}</td>
+                  <td>
+                    <span class="gsis-loan-types-label">{{ r.loan_types_label }}</span>
+                    <input type="hidden" class="gsis-loan-type" value="{{ r.loan_type }}">
+                  </td>
+                  <td class="num">
+                    <input type="text" inputmode="decimal" autocomplete="off" class="form-control gsis-loan-amount gsis-loan-month-amount" value="{{ r.month_amount }}">
+                  </td>
+                  <td class="gsis-loan-q-cell">
+                    <label><input type="checkbox" class="gsis-loan-q1-enabled" {% if r.q1_enabled %}checked{% endif %}> 1st quincena</label>
+                    <input type="text" inputmode="decimal" autocomplete="off" class="form-control gsis-loan-amount gsis-loan-q1-amount" value="{{ r.q1_amount }}">
+                    <label style="margin-top:0.45rem;"><input type="checkbox" class="gsis-loan-q2-enabled" {% if r.q2_enabled %}checked{% endif %}> 2nd quincena</label>
+                    <input type="text" inputmode="decimal" autocomplete="off" class="form-control gsis-loan-amount gsis-loan-q2-amount" value="{{ r.q2_amount }}">
+                  </td>
+                  <td><button type="button" class="gsis-loan-remove">Remove</button></td>
+                </tr>
+                <tr class="gsis-loan-details-row" style="display:none;" data-parent-pk="{{ r.employee_pk }}">
+                  <td colspan="7" class="gsis-loan-details-cell">
+                    <div class="gsis-loan-details-panel">
+                      <p class="gsis-loan-details-panel-title">Loan breakdown</p>
+                      <table class="gsis-loan-details-table">
+                        <tbody>
+                          {% for d in r.loan_details %}
+                          <tr>
+                            <td>{{ d.label }}</td>
+                            <td class="num">{{ d.amount_display }}</td>
+                          </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <p id="gsisLoanSearchNoMatch" style="display:none; margin-top:0.75rem; color:var(--medium-gray); font-size:0.9rem;">No rows match your search.</p>
+          <div class="gsis-submit-bar">
+            <button type="submit" class="btn-primary">Submit</button>
+          </div>
+        </form>
+        {% endif %}
+        {% elif has_loan_data %}
+        <p class="gsis-note" style="margin-top: 0.75rem;">Select year and month, then click <strong>Load</strong>.</p>
+        {% endif %}
+      </div>
+    </section>
+
+    <div id="gsisLoadingOverlay" class="gsis-loading-overlay" aria-live="polite" aria-busy="true">
+      <div class="gsis-loading-card">
+        <div class="gsis-loading-spinner" aria-hidden="true"></div>
+        <p style="margin:0; font-weight:600;">Reading file in progress. Please wait a moment.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var serverTab = {{ active_tab|tojson }};
+
+  function setActive(tabName) {
+    var contrib = document.getElementById('gsisContributionCard');
+    var loan = document.getElementById('gsisLoanCard');
+    if (!contrib || !loan) return;
+
+    var isContrib = tabName !== 'loan';
+    contrib.style.display = isContrib ? '' : 'none';
+    loan.style.display = isContrib ? 'none' : '';
+
+    document.querySelectorAll('[data-gsis-tab]').forEach(function (a) {
+      var active = (a.getAttribute('data-gsis-tab') === (isContrib ? 'contribution' : 'loan'));
+      a.classList.toggle('is-active', active);
+      a.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+  }
+
+  function syncHash(tabName) {
+    var hash = tabName === 'loan' ? '#loan' : '#contribution';
+    if (window.location.hash !== hash) {
+      history.replaceState(null, '', window.location.pathname + window.location.search + hash);
+    }
+  }
+
+  document.querySelectorAll('[data-gsis-tab]').forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      e.preventDefault();
+      var tab = a.getAttribute('data-gsis-tab');
+      setActive(tab);
+      syncHash(tab);
+    });
+  });
+
+  setActive(serverTab);
+  syncHash(serverTab);
+})();
+</script>
+
+{% if generated and rows %}
+<script>
+(function () {
+  var inp = document.getElementById('gsisEmployeeSearch');
+  var body = document.getElementById('gsisTableBody');
+  if (!inp || !body) return;
+
+  function filterRows() {
+    var q = (inp.value || '').trim().toLowerCase();
+    var rows = body.querySelectorAll('tr.gsis-table-row');
+    var shown = 0;
+    rows.forEach(function (tr) {
+      var hay = tr.getAttribute('data-search') || '';
+      var ok = !q || hay.indexOf(q) !== -1;
+      tr.style.display = ok ? '' : 'none';
+      if (ok) shown++;
+    });
+    var countEl = document.getElementById('gsisRowCount');
+    if (countEl) countEl.textContent = String(shown);
+    var noMatch = document.getElementById('gsisSearchNoMatch');
+    if (noMatch) noMatch.style.display = (q && shown === 0) ? 'block' : 'none';
+  }
+
+  inp.addEventListener('input', filterRows);
+})();
+</script>
+<script>
+(function () {
+  var form = document.getElementById('gsisSubmitForm');
+  var out = document.getElementById('gsisRowsJson');
+  if (!form || !out) return;
+
+  form.addEventListener('submit', function () {
+    var table = document.getElementById('gsisTable');
+    if (!table) return;
+    var rows = [];
+    table.querySelectorAll('tbody tr.gsis-table-row').forEach(function (tr) {
+      var employeePk = tr.getAttribute('data-employee-pk');
+      if (!employeePk) return;
+      rows.push({
+        employee_pk: employeePk,
+        ps_amount: tr.getAttribute('data-ps') || '0',
+        gs_amount: tr.getAttribute('data-gs') || '0',
+        month_amount: tr.getAttribute('data-month-amount') || '0'
+      });
+    });
+    out.value = JSON.stringify(rows);
+  });
+})();
+</script>
+{% endif %}
+
+<script>
+(function () {
+  function parseMoney(str) {
+    var n = parseFloat(String(str || '0').replace(/,/g, ''));
+    return isNaN(n) ? 0 : n;
+  }
+  function formatMoney(n) {
+    return parseMoney(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function moneyRaw(n) {
+    return parseMoney(n).toFixed(2);
+  }
+
+  function splitQuincena(monthAmount) {
+    var m = parseMoney(monthAmount);
+    if (m <= 0) return { q1: '0.00', q2: '0.00' };
+    var q2 = Math.floor((m / 2) * 100) / 100;
+    var q1 = Math.round((m - q2) * 100) / 100;
+    return { q1: formatMoney(q1), q2: formatMoney(q2) };
+  }
+
+  function applySplitToRow(tr) {
+    var monthInp = tr.querySelector('.gsis-loan-month-amount');
+    var q1Inp = tr.querySelector('.gsis-loan-q1-amount');
+    var q2Inp = tr.querySelector('.gsis-loan-q2-amount');
+    if (!monthInp || !q1Inp || !q2Inp) return;
+    var parts = splitQuincena(monthInp.value);
+    q1Inp.value = parts.q1;
+    q2Inp.value = parts.q2;
+  }
+
+  var overlay = document.getElementById('gsisLoadingOverlay');
+  var uploadBtn = document.getElementById('gsisLoanUploadBtn');
+  var fileInput = document.getElementById('gsisLoanFileInput');
+  var previewWrap = document.getElementById('gsisLoanPreviewWrap');
+  var previewBody = document.getElementById('gsisLoanPreviewBody');
+  var previewMeta = document.getElementById('gsisLoanPreviewMeta');
+  var uploadSubmitBtn = document.getElementById('gsisLoanUploadSubmitBtn');
+  var uploadRowsJson = document.getElementById('gsisLoanUploadRowsJson');
+  var uploadYear = document.getElementById('gsisLoanUploadYear');
+  var uploadMonth = document.getElementById('gsisLoanUploadMonth');
+  var previewData = [];
+
+  if (uploadBtn && fileInput) {
+    uploadBtn.addEventListener('click', function () { fileInput.click(); });
+    fileInput.addEventListener('change', function () {
+      if (!fileInput.files || !fileInput.files[0]) return;
+      var fd = new FormData();
+      fd.append('gsis_loan_file', fileInput.files[0]);
+      if (overlay) overlay.classList.add('is-visible');
+      fetch('{{ url_for("routes.payroll_deductions_gsis_loans_preview") }}', {
+        method: 'POST',
+        body: fd,
+        credentials: 'same-origin'
+      }).then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (overlay) overlay.classList.remove('is-visible');
+          if (!data.ok) {
+            alert(data.error || 'Failed to read file.');
+            return;
+          }
+          previewData = data.rows || [];
+          if (uploadYear) uploadYear.value = data.year;
+          if (uploadMonth) uploadMonth.value = data.month;
+          if (previewMeta) {
+            previewMeta.textContent = 'Due month: ' + data.month + '/' + data.year
+              + ' — matched ' + data.matched_count + ' of ' + data.total_count
+              + ' row(s). Unmatched BPNO rows are shown but not submitted.';
+          }
+          if (previewBody) {
+            previewBody.innerHTML = '';
+            previewData.forEach(function (r) {
+              var tr = document.createElement('tr');
+              if (!r.matched) tr.className = 'gsis-loan-unmatched';
+              var cols = ['bpno','employee_id','employee_name','department_name',
+                'ps_amount_display','gs_amount_display','ec_amount_display',
+                'consoloan_display','emrgyln_display','plreg_display',
+                'gfal_display','mpl_display','cpl_display','mpl_lite_display'];
+              cols.forEach(function (c) {
+                var td = document.createElement('td');
+                td.textContent = r[c] || (c === 'employee_name' && !r.matched ? '(unmatched)' : '');
+                if (c.indexOf('_display') > 0 || c === 'bpno') td.className = 'num';
+                tr.appendChild(td);
+              });
+              previewBody.appendChild(tr);
+            });
+          }
+          if (previewWrap) previewWrap.style.display = '';
+          if (uploadSubmitBtn) uploadSubmitBtn.disabled = !(data.matched_count > 0);
+        })
+        .catch(function () {
+          if (overlay) overlay.classList.remove('is-visible');
+          alert('Failed to read file.');
+        });
+    });
+  }
+
+  var uploadForm = document.getElementById('gsisLoanUploadSubmitForm');
+  if (uploadForm && uploadRowsJson) {
+    uploadForm.addEventListener('submit', function () {
+      var matched = previewData.filter(function (r) { return r.matched && r.employee_pk; });
+      uploadRowsJson.value = JSON.stringify(matched);
+    });
+  }
+
+  var loanBody = document.getElementById('gsisLoanDeductionBody');
+  if (loanBody) {
+    function loanDetailsRow(tr) {
+      var next = tr.nextElementSibling;
+      return (next && next.classList.contains('gsis-loan-details-row')) ? next : null;
+    }
+
+    function toggleLoanDetails(tr) {
+      var detailRow = loanDetailsRow(tr);
+      if (!detailRow) return;
+      var expanded = !tr.classList.contains('is-expanded');
+      tr.classList.toggle('is-expanded', expanded);
+      detailRow.style.display = expanded ? '' : 'none';
+    }
+
+    loanBody.addEventListener('click', function (e) {
+      if (e.target.classList.contains('gsis-loan-remove')) {
+        var tr = e.target.closest('tr.gsis-loan-deduction-row');
+        if (!tr) return;
+        var detailRow = loanDetailsRow(tr);
+        if (detailRow) detailRow.remove();
+        tr.remove();
+        filterLoanRows();
+        return;
+      }
+      if (e.target.closest('input, button, label, select, a')) return;
+      var tr = e.target.closest('tr.gsis-loan-deduction-row');
+      if (tr) toggleLoanDetails(tr);
+    });
+    loanBody.addEventListener('input', function (e) {
+      var tr = e.target.closest('tr.gsis-loan-deduction-row');
+      if (!tr) return;
+      if (e.target.classList.contains('gsis-loan-month-amount')) {
+        applySplitToRow(tr);
+      }
+    });
+    loanBody.addEventListener('blur', function (e) {
+      if (!e.target.classList.contains('gsis-loan-amount')) return;
+      e.target.value = formatMoney(e.target.value);
+    }, true);
+  }
+
+  function filterLoanRows() {
+    var inp = document.getElementById('gsisLoanEmployeeSearch');
+    var body = document.getElementById('gsisLoanDeductionBody');
+    if (!inp || !body) return;
+    var q = (inp.value || '').trim().toLowerCase();
+    var shown = 0;
+    body.querySelectorAll('tr.gsis-loan-deduction-row').forEach(function (tr) {
+      var hay = tr.getAttribute('data-search') || '';
+      var ok = !q || hay.indexOf(q) !== -1;
+      tr.style.display = ok ? '' : 'none';
+      var detailRow = tr.nextElementSibling;
+      if (detailRow && detailRow.classList.contains('gsis-loan-details-row')) {
+        detailRow.style.display = (ok && tr.classList.contains('is-expanded')) ? '' : 'none';
+      }
+      if (ok) shown++;
+    });
+    var countEl = document.getElementById('gsisLoanRowCount');
+    if (countEl) countEl.textContent = String(shown);
+    var noMatch = document.getElementById('gsisLoanSearchNoMatch');
+    if (noMatch) noMatch.style.display = (q && shown === 0) ? 'block' : 'none';
+  }
+  var loanSearch = document.getElementById('gsisLoanEmployeeSearch');
+  if (loanSearch) loanSearch.addEventListener('input', filterLoanRows);
+
+  var dedForm = document.getElementById('gsisLoanDeductionForm');
+  var dedOut = document.getElementById('gsisLoanDeductionRowsJson');
+  if (dedForm && dedOut) {
+    dedForm.addEventListener('submit', function () {
+      var rows = [];
+      document.querySelectorAll('#gsisLoanDeductionBody tr.gsis-loan-deduction-row').forEach(function (tr) {
+        var hiddenLoan = tr.querySelector('.gsis-loan-type');
+        var monthInp = tr.querySelector('.gsis-loan-month-amount');
+        if (!hiddenLoan || !monthInp) return;
+        rows.push({
+          employee_pk: tr.getAttribute('data-employee-pk'),
+          loan_type: hiddenLoan.value,
+          month_amount: moneyRaw(monthInp.value),
+          q1_amount: moneyRaw((tr.querySelector('.gsis-loan-q1-amount') || {}).value),
+          q2_amount: moneyRaw((tr.querySelector('.gsis-loan-q2-amount') || {}).value),
+          q1_enabled: (tr.querySelector('.gsis-loan-q1-enabled') || {}).checked ? '1' : '0',
+          q2_enabled: (tr.querySelector('.gsis-loan-q2-enabled') || {}).checked ? '1' : '0'
+        });
+      });
+      dedOut.value = JSON.stringify(rows);
+    });
+  }
+})();
+</script>
+{% endblock %}
+

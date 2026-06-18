@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Notifications - HRMS{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+  <div class="header-bar">
+    <div class="header-content">
+      {% include 'includes/navbar_brand.html' %}
+      <nav class="main-nav">
+        <a href="{{ url_for('routes.employee_dashboard') if (current_user.role or '')|lower == 'employee' else url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+        <a href="{{ url_for('routes.notifications_list') }}" class="nav-link nav-link-active">Notifications</a>
+      </nav>
+      <div class="user-dropdown">
+        <a href="#" class="user-info">
+          {% if employee %}{{ employee.full_name }}{% else %}{{ current_user.username }}{% endif %}
+          <span class="dropdown-arrow">▼</span>
+        </a>
+        <div class="dropdown-menu dropdown-menu-right">
+          <form method="POST" action="{{ url_for('routes.logout') }}" style="margin:0;">
+            <button type="submit" class="dropdown-item" style="width:100%;text-align:left;background:none;border:none;cursor:pointer;font:inherit;padding:0.5rem 1rem;">Logout</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dashboard-content">
+    <h1 class="page-title">Notifications</h1>
+    <div class="table-section">
+      {% for n in notifications %}
+      <div style="padding:0.85rem 1rem;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:0.5rem;{% if not n.is_read %}background:#f0f7ff;{% endif %}">
+        <div style="display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+          <div>
+            <strong>{{ n.title }}</strong>
+            <p style="margin:0.35rem 0 0;font-size:0.9rem;">{{ n.message }}</p>
+            <small style="color:var(--medium-gray);">{{ n.created_at.strftime('%Y-%m-%d %H:%M') if n.created_at else '' }}</small>
+          </div>
+          {% if n.link_url %}
+          <form method="POST" action="{{ url_for('routes.notification_mark_read', id=n.id) }}">
+            <button type="submit" class="btn-secondary btn-sm">Open</button>
+          </form>
+          {% endif %}
+        </div>
+      </div>
+      {% else %}
+      <p style="color:var(--medium-gray);">No notifications.</p>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

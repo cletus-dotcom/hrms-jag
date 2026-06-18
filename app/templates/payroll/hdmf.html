@@ -1,0 +1,1010 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} - HRMS{% endblock %}
+
+{% block extra_css %}
+<style>
+  .hdmf-tabs {
+    display: inline-flex;
+    gap: 0.25rem;
+    background: rgba(17, 24, 39, 0.06);
+    border-radius: 12px;
+    padding: 0.25rem;
+  }
+  .hdmf-tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.55rem 0.9rem;
+    border-radius: 10px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    text-decoration: none;
+    color: var(--primary-black);
+    background: transparent;
+    border: 1px solid transparent;
+  }
+  .hdmf-tab.is-active {
+    background: #bfe3ff;
+    border-color: rgba(18, 64, 114, 0.18);
+  }
+  .hdmf-filters {
+    display: grid;
+    gap: 0.75rem;
+    column-gap: 1.25rem;
+    align-items: end;
+    margin-top: 1rem;
+  }
+  @media (min-width: 900px) {
+    .hdmf-filters {
+      grid-template-columns: 6rem 9rem auto minmax(16rem, 1fr);
+    }
+  }
+  .hdmf-note {
+    color: var(--medium-gray, #6b7280);
+    font-size: 0.95rem;
+    margin-top: 0.75rem;
+  }
+  .hdmf-deductible-fixed {
+    color: var(--medium-gray, #6b7280);
+    background: #f3f4f6;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 0.3rem 0.45rem;
+    font-size: 0.8rem;
+    display: inline-block;
+    white-space: nowrap;
+  }
+  .hdmf-table th.hdmf-deductible-col,
+  .hdmf-table td.hdmf-deductible-col {
+    width: 1%;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+  .hdmf-loan-q-cell { min-width: 9.5rem; }
+  .hdmf-loan-q-cell label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; margin-bottom: 0.35rem; }
+  .hdmf-loan-q-cell input[type="number"] { width: 100%; }
+  .hdmf-submit-bar {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    justify-content: flex-end;
+    margin-top: 1rem;
+    flex-wrap: wrap;
+  }
+  .hdmf-table th, .hdmf-table td { white-space: nowrap; }
+  #hdmfContribDeductionTable th.num,
+  #hdmfContribDeductionTable td.num {
+    text-align: right;
+    width: 1%;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+  #hdmfContribDeductionTable th.hdmf-mp2-col {
+    text-align: left;
+    width: auto;
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+  #hdmfContribDeductionTable .hdmf-contrib-amount {
+    width: 5rem;
+    min-width: 0;
+    max-width: 5rem;
+    padding: 0.35rem 0.4rem;
+    text-align: right;
+    box-sizing: border-box;
+  }
+  #hdmfLoanDeductionTable td.num .hdmf-loan-month-amount {
+    width: 7rem;
+    min-width: 7rem;
+    text-align: right;
+  }
+  #hdmfLoanDeductionTable .hdmf-loan-amount {
+    text-align: right;
+  }
+  .hdmf-loan-types-label { font-weight: 600; color: var(--brand-blue-ink, #1e3a5f); }
+  .hdmf-program-label { font-weight: 600; color: var(--brand-blue-ink, #1e3a5f); }
+  .hdmf-contrib-row-clickable,
+  .hdmf-loan-row-clickable { cursor: pointer; }
+  .hdmf-contrib-row-clickable:hover,
+  .hdmf-loan-row-clickable:hover { background-color: rgba(18, 64, 114, 0.04); }
+  .hdmf-contrib-deduction-row.is-expanded,
+  .hdmf-loan-deduction-row.is-expanded { background-color: rgba(18, 64, 114, 0.06); }
+  .hdmf-contrib-details-row td.hdmf-contrib-details-cell,
+  .hdmf-loan-details-row td.hdmf-loan-details-cell,
+  .hdmf-details-row td.hdmf-details-cell {
+    background: #f8fafc;
+    padding: 0.65rem 1rem 0.85rem 2.25rem;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .hdmf-contrib-details-panel,
+  .hdmf-loan-details-panel {
+    display: inline-block;
+    min-width: 14rem;
+  }
+  .hdmf-contrib-details-panel-title,
+  .hdmf-loan-details-panel-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--medium-gray, #6b7280);
+    margin: 0 0 0.4rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .hdmf-contrib-details-table,
+  .hdmf-loan-details-table {
+    width: auto;
+    border-collapse: collapse;
+  }
+  .hdmf-contrib-details-table td,
+  .hdmf-loan-details-table td {
+    padding: 0.25rem 0.75rem 0.25rem 0;
+    font-size: 0.9rem;
+    border: none;
+  }
+  .hdmf-contrib-details-table td.num,
+  .hdmf-loan-details-table td.num {
+    text-align: right;
+    padding-right: 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .hdmf-table-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+    margin-bottom: 0.75rem;
+  }
+  .hdmf-table-toolbar .search-bar {
+    flex: 1 1 220px;
+    max-width: 360px;
+    margin: 0;
+  }
+  .hdmf-upload-zone {
+    border: 2px dashed #cbd5e1;
+    border-radius: 10px;
+    padding: 1.25rem;
+    text-align: center;
+    background: #fafafa;
+  }
+  .hdmf-loading-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10500;
+    background: rgba(15, 23, 42, 0.45);
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+  }
+  .hdmf-loading-overlay.is-visible { display: flex; }
+  .hdmf-loading-card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 1.5rem 1.75rem;
+    text-align: center;
+    max-width: 22rem;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+  }
+  .hdmf-loading-spinner {
+    width: 2.25rem;
+    height: 2.25rem;
+    margin: 0 auto 0.85rem;
+    border: 3px solid #e5e7eb;
+    border-top-color: #1e40af;
+    border-radius: 50%;
+    animation: hdmf-spin 0.75s linear infinite;
+  }
+  @keyframes hdmf-spin { to { transform: rotate(360deg); } }
+  .hdmf-unmatched { color: #b45309; }
+  .hdmf-remove {
+    background: none;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #b91c1c;
+    padding: 0.3rem 0.55rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.8rem;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+  <div class="header-bar">
+    <div class="header-content">
+      {% include 'includes/navbar_brand.html' %}
+      <nav class="main-nav">
+        <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+        {% include 'includes/nav_payroll_top_menu.html' %}
+      </nav>
+      <div class="user-dropdown">
+        <a href="#" class="user-info">
+          {% if employee %}{{ employee.full_name }} ({{ current_user.role|title }}){% else %}{{ current_user.username }} ({{ current_user.role|title }}){% endif %}
+          <span class="dropdown-arrow">▼</span>
+        </a>
+        <div class="dropdown-menu dropdown-menu-right">
+          <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
+            <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dashboard-content">
+    <div class="page-header" style="align-items: center;">
+      <div>
+        <h1 class="page-title">{{ page_title }}</h1>
+        <div class="hdmf-tabs" role="tablist" aria-label="HDMF pages">
+          <a class="hdmf-tab{% if active_tab == 'contribution' %} is-active{% endif %}" href="#contribution" data-hdmf-tab="contribution" role="tab" aria-selected="{{ 'true' if active_tab == 'contribution' else 'false' }}">Contribution</a>
+          <a class="hdmf-tab{% if active_tab == 'loan' %} is-active{% endif %}" href="#loan" data-hdmf-tab="loan" role="tab" aria-selected="{{ 'true' if active_tab == 'loan' else 'false' }}">Loan</a>
+        </div>
+      </div>
+      <a href="{{ url_for('routes.dashboard') }}" class="btn-secondary">Dashboard</a>
+    </div>
+
+    <section id="hdmfContributionCard" class="card" style="padding: 1rem 1.25rem; border: 1px solid var(--brand-border, #e5e7eb); border-radius: 12px;{% if active_tab != 'contribution' %} display:none;{% endif %}">
+      <h2 style="margin: 0 0 0.35rem; font-size: 1.05rem;">Contribution</h2>
+      <div class="hdmf-note">
+        Upload the monthly HDMF file. Contributions are deducted on the <strong>2nd quincena</strong> only.
+      </div>
+
+      {% if show_contrib_upload %}
+      <p class="hdmf-note" style="margin-top: 0.75rem;">
+        <a href="{{ url_for('routes.payroll_deductions_hdmf', scope=hdmf_url_scope, contrib_view='load') }}#contribution">← Back to load deductions</a>
+      </p>
+      <div class="hdmf-upload-zone" style="margin-top: 0.75rem;">
+        <p class="hdmf-note" style="margin-top: 0;">Upload the HDMF file (.xlsx). MID NO. is matched to employee PDS <strong>PAG-IBIG ID NO.</strong></p>
+        <input type="file" id="hdmfContribFileInput" accept=".xls,.xlsx" style="display:none;">
+        <button type="button" class="btn-primary" id="hdmfContribUploadBtn">Upload</button>
+      </div>
+
+      <div id="hdmfContribPreviewWrap" style="display:none; margin-top: 1rem;">
+        <p class="hdmf-note" id="hdmfContribPreviewMeta"></p>
+        <div class="table-container" style="overflow-x:auto; margin-top: 0.75rem;">
+          <table class="data-table hdmf-table" id="hdmfContribPreviewTable">
+            <thead>
+              <tr>
+                <th>MID NO.</th>
+                <th>Emp ID</th>
+                <th>Employee</th>
+                <th>Department</th>
+                <th>Program</th>
+                <th class="num">EE Share</th>
+              </tr>
+            </thead>
+            <tbody id="hdmfContribPreviewBody"></tbody>
+          </table>
+        </div>
+        <form method="POST" action="{{ url_for('routes.payroll_deductions_hdmf_contributions_upload_submit', scope=hdmf_url_scope) }}" id="hdmfContribUploadSubmitForm" style="margin-top: 1rem;">
+          <input type="hidden" name="year" id="hdmfContribUploadYear" value="">
+          <input type="hidden" name="month" id="hdmfContribUploadMonth" value="">
+          <input type="hidden" name="rows_json" id="hdmfContribUploadRowsJson" value="[]">
+          <button type="submit" class="btn-primary" id="hdmfContribUploadSubmitBtn" disabled>Submit</button>
+        </form>
+      </div>
+      {% endif %}
+
+      <div id="hdmfContribLoadCard" style="margin-top: 1rem;{% if show_contrib_upload %} display:none;{% endif %}">
+        <p class="hdmf-note" style="margin-top: 0;">
+          {% if has_contrib_data %}
+          Contribution data is on file. Load deductions by period below, or
+          <a href="{{ url_for('routes.payroll_deductions_hdmf', scope=hdmf_url_scope, contrib_view='upload') }}#contribution">upload a new file</a>.
+          {% else %}
+          Load deductions by period below, or
+          <a href="{{ url_for('routes.payroll_deductions_hdmf', scope=hdmf_url_scope, contrib_view='upload') }}#contribution">upload a contribution file</a> first.
+          {% endif %}
+        </p>
+        <form method="GET" action="{{ url_for('routes.payroll_deductions_hdmf', scope=hdmf_url_scope) }}#contribution" class="hdmf-filters">
+          <input type="hidden" name="contrib_view" value="load">
+          <div>
+            <label class="form-label" for="hdmfContribYear">Year</label>
+            <input id="hdmfContribYear" name="contrib_year" class="form-control" value="{{ contrib_year }}" />
+          </div>
+          <div>
+            <label class="form-label" for="hdmfContribMonth">Month</label>
+            <select id="hdmfContribMonth" name="contrib_month" class="form-control">
+              {% for m in range(1, 13) %}
+                <option value="{{ m }}" {% if m == contrib_month %}selected{% endif %}>{{ ['January','February','March','April','May','June','July','August','September','October','November','December'][m-1] }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <input type="hidden" name="contrib_load" value="1" />
+            <button class="btn-primary" type="submit">Load</button>
+          </div>
+          <div>
+            <label class="form-label" for="hdmfContribDept">Department (optional)</label>
+            <select id="hdmfContribDept" name="contrib_department_id" class="form-control">
+              <option value="">All departments</option>
+              {% for d in departments %}
+                <option value="{{ d.id }}" {% if contrib_selected_department and d.id == contrib_selected_department.id %}selected{% endif %}>{{ d.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </form>
+
+        {% if contrib_loaded %}
+        {% if not contrib_rows %}
+          <p class="hdmf-note" style="margin-top: 0.75rem;">No employees with contribution data found for the selected scope.</p>
+        {% else %}
+        <form method="POST" action="{{ url_for('routes.payroll_deductions_hdmf_contributions_deductions_submit', scope=hdmf_url_scope) }}" id="hdmfContribDeductionForm" style="margin-top: 1rem;">
+          <input type="hidden" name="year" value="{{ contrib_year }}">
+          <input type="hidden" name="month" value="{{ contrib_month }}">
+          <input type="hidden" name="department_id" value="{{ contrib_selected_department.id if contrib_selected_department else '' }}">
+          <input type="hidden" name="rows_json" id="hdmfContribDeductionRowsJson" value="[]">
+
+          <div class="hdmf-table-toolbar">
+            <div class="search-bar">
+              <input type="text" id="hdmfContribEmployeeSearch" class="search-input" placeholder="Search employees…" autocomplete="off">
+              <span class="search-icon">🔍</span>
+            </div>
+            <span style="font-size: 0.85rem; color: var(--medium-gray);"><strong id="hdmfContribRowCount">{{ contrib_rows|length }}</strong> employee(s)</span>
+          </div>
+
+          <div class="table-container" style="overflow-x:auto;">
+            <table class="data-table hdmf-table" id="hdmfContribDeductionTable">
+              <thead>
+                <tr>
+                  <th>Emp ID</th>
+                  <th>Employee</th>
+                  <th>Department</th>
+                  <th>Program</th>
+                  <th class="num">PS (EE Share)</th>
+                  {% if hdmf_employment_scope != 'jo_cos' %}
+                  <th class="hdmf-mp2-col">MP2</th>
+                  {% endif %}
+                  <th class="num">Month Amount</th>
+                  <th class="hdmf-deductible-col">Deductible on</th>
+                </tr>
+              </thead>
+              <tbody id="hdmfContribDeductionBody">
+                {% for r in contrib_rows %}
+                <tr class="hdmf-contrib-deduction-row{% if r.program_details %} hdmf-contrib-row-clickable{% endif %}"
+                    data-employee-pk="{{ r.employee_pk }}"
+                    data-search="{{ r.search_text }}"
+                    {% if r.program_details %}title="Click row to expand program details"{% endif %}>
+                  <td>{{ r.employee_id }}</td>
+                  <td>{{ r.employee_name }}</td>
+                  <td>{{ r.department_name }}</td>
+                  <td>
+                    <span class="hdmf-program-label">{{ r.program_label }}</span>
+                    <input type="hidden" class="hdmf-membership-program" value="{{ r.membership_program }}">
+                  </td>
+                  <td class="num"><input type="number" step="0.01" min="0" class="form-control hdmf-contrib-amount hdmf-ps-amount" value="{{ r.ps_amount_raw }}"></td>
+                  <input type="hidden" class="hdmf-gs-amount" value="{{ r.gs_amount_raw }}">
+                  {% if hdmf_employment_scope != 'jo_cos' %}
+                  <td class="num"><input type="text" inputmode="decimal" autocomplete="off" class="form-control hdmf-contrib-amount hdmf-mp2-amount" value="{{ r.mp2_amount }}"></td>
+                  {% endif %}
+                  <td class="num"><input type="text" inputmode="decimal" autocomplete="off" class="form-control hdmf-contrib-amount hdmf-month-amount" value="{{ r.month_amount }}" readonly></td>
+                  <td class="hdmf-deductible-col"><span class="hdmf-deductible-fixed">{% if hdmf_employment_scope == 'jo_cos' %}1st quincena{% else %}2nd quincena{% endif %}</span></td>
+                </tr>
+                {% if r.program_details %}
+                <tr class="hdmf-contrib-details-row" style="display:none;" data-parent-pk="{{ r.employee_pk }}">
+                  <td colspan="{% if hdmf_employment_scope == 'jo_cos' %}7{% else %}8{% endif %}" class="hdmf-contrib-details-cell">
+                    <div class="hdmf-contrib-details-panel">
+                      <p class="hdmf-contrib-details-panel-title">Program breakdown</p>
+                      <table class="hdmf-contrib-details-table">
+                        <tbody>
+                          {% for d in r.program_details %}
+                          <tr>
+                            <td>{{ d.label }}</td>
+                            <td class="num">{{ d.amount_display }}</td>
+                          </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  </td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <p id="hdmfContribSearchNoMatch" style="display:none; margin-top:0.75rem; color:var(--medium-gray); font-size:0.9rem;">No rows match your search.</p>
+          <div class="hdmf-submit-bar">
+            <button type="submit" class="btn-primary">Submit</button>
+          </div>
+        </form>
+        {% endif %}
+        {% endif %}
+      </div>
+    </section>
+
+    <section id="hdmfLoanCard" class="card" style="margin-top: 1rem; padding: 1rem 1.25rem; border: 1px solid var(--brand-border, #e5e7eb); border-radius: 12px;{% if active_tab != 'loan' %} display:none;{% endif %}">
+      <h2 style="margin: 0 0 0.35rem; font-size: 1.05rem;">Loan</h2>
+      <div class="hdmf-note">Upload the monthly HDMF file (Loan sheet). Loans are deducted on the <strong>2nd quincena</strong> only.</div>
+
+      {% if show_loan_upload %}
+      <p class="hdmf-note" style="margin-top: 0.75rem;">
+        <a href="{{ url_for('routes.payroll_deductions_hdmf', scope=hdmf_url_scope, loan_view='load') }}#loan">← Back to load deductions</a>
+      </p>
+      <div class="hdmf-upload-zone" style="margin-top: 0.75rem;">
+        <p class="hdmf-note" style="margin-top: 0;">Upload the HDMF file (.xlsx). Pag-IBIG MID NO. is matched to employee PDS <strong>PAG-IBIG ID NO.</strong></p>
+        <input type="file" id="hdmfLoanFileInput" accept=".xls,.xlsx" style="display:none;">
+        <button type="button" class="btn-primary" id="hdmfLoanUploadBtn">Upload</button>
+      </div>
+
+      <div id="hdmfLoanPreviewWrap" style="display:none; margin-top: 1rem;">
+        <p class="hdmf-note" id="hdmfLoanPreviewMeta"></p>
+        <div class="table-container" style="overflow-x:auto; margin-top: 0.75rem;">
+          <table class="data-table hdmf-table" id="hdmfLoanPreviewTable">
+            <thead>
+              <tr>
+                <th>MID NO.</th>
+                <th>Emp ID</th>
+                <th>Employee</th>
+                <th>Department</th>
+                <th class="num">MPL</th>
+                <th class="num">SALARY</th>
+                <th class="num">HOUSING</th>
+                <th class="num">SAFE</th>
+              </tr>
+            </thead>
+            <tbody id="hdmfLoanPreviewBody"></tbody>
+          </table>
+        </div>
+        <form method="POST" action="{{ url_for('routes.payroll_deductions_hdmf_loans_upload_submit', scope=hdmf_url_scope) }}" id="hdmfLoanUploadSubmitForm" style="margin-top: 1rem;">
+          <input type="hidden" name="year" id="hdmfLoanUploadYear" value="">
+          <input type="hidden" name="month" id="hdmfLoanUploadMonth" value="">
+          <input type="hidden" name="rows_json" id="hdmfLoanUploadRowsJson" value="[]">
+          <button type="submit" class="btn-primary" id="hdmfLoanUploadSubmitBtn" disabled>Submit</button>
+        </form>
+      </div>
+      {% endif %}
+
+      <div id="hdmfLoanLoadCard" style="margin-top: 1rem;{% if show_loan_upload %} display:none;{% endif %}">
+        <p class="hdmf-note" style="margin-top: 0;">
+          {% if has_loan_data %}
+          Loan data is on file. Load deductions by period below, or
+          <a href="{{ url_for('routes.payroll_deductions_hdmf', scope=hdmf_url_scope, loan_view='upload') }}#loan">upload a new file</a>.
+          {% else %}
+          Load deductions by period below, or
+          <a href="{{ url_for('routes.payroll_deductions_hdmf', scope=hdmf_url_scope, loan_view='upload') }}#loan">upload a loan file</a> first.
+          {% endif %}
+        </p>
+        <form method="GET" action="{{ url_for('routes.payroll_deductions_hdmf', scope=hdmf_url_scope) }}#loan" class="hdmf-filters">
+          <input type="hidden" name="loan_view" value="load">
+          <div>
+            <label class="form-label" for="hdmfLoanYear">Year</label>
+            <input id="hdmfLoanYear" name="loan_year" class="form-control" value="{{ loan_year }}" />
+          </div>
+          <div>
+            <label class="form-label" for="hdmfLoanMonth">Month</label>
+            <select id="hdmfLoanMonth" name="loan_month" class="form-control">
+              {% for m in range(1, 13) %}
+                <option value="{{ m }}" {% if m == loan_month %}selected{% endif %}>{{ ['January','February','March','April','May','June','July','August','September','October','November','December'][m-1] }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <input type="hidden" name="loan_load" value="1" />
+            <button class="btn-primary" type="submit">Load</button>
+          </div>
+          <div>
+            <label class="form-label" for="hdmfLoanDept">Department (optional)</label>
+            <select id="hdmfLoanDept" name="loan_department_id" class="form-control">
+              <option value="">All departments</option>
+              {% for d in departments %}
+                <option value="{{ d.id }}" {% if loan_selected_department and d.id == loan_selected_department.id %}selected{% endif %}>{{ d.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </form>
+
+        {% if loan_loaded %}
+        {% if not loan_rows %}
+          <p class="hdmf-note" style="margin-top: 0.75rem;">No employees with loan data found for the selected scope.</p>
+        {% else %}
+        <form method="POST" action="{{ url_for('routes.payroll_deductions_hdmf_loans_deductions_submit', scope=hdmf_url_scope) }}" id="hdmfLoanDeductionForm" style="margin-top: 1rem;">
+          <input type="hidden" name="year" value="{{ loan_year }}">
+          <input type="hidden" name="month" value="{{ loan_month }}">
+          <input type="hidden" name="department_id" value="{{ loan_selected_department.id if loan_selected_department else '' }}">
+          <input type="hidden" name="rows_json" id="hdmfLoanDeductionRowsJson" value="[]">
+
+          <div class="hdmf-table-toolbar">
+            <div class="search-bar">
+              <input type="text" id="hdmfLoanEmployeeSearch" class="search-input" placeholder="Search employees…" autocomplete="off">
+              <span class="search-icon">🔍</span>
+            </div>
+            <span style="font-size: 0.85rem; color: var(--medium-gray);"><strong id="hdmfLoanRowCount">{{ loan_rows|length }}</strong> employee(s)</span>
+          </div>
+
+          <div class="table-container" style="overflow-x:auto;">
+            <table class="data-table hdmf-table" id="hdmfLoanDeductionTable">
+              <thead>
+                <tr>
+                  <th>Emp ID</th>
+                  <th>Employee</th>
+                  <th>Department</th>
+                  <th>Loan</th>
+                  <th class="num">Month Amount</th>
+                  <th class="hdmf-deductible-col">Deductible on</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="hdmfLoanDeductionBody">
+                {% for r in loan_rows %}
+                <tr class="hdmf-loan-deduction-row hdmf-loan-row-clickable"
+                    data-employee-pk="{{ r.employee_pk }}"
+                    data-search="{{ r.search_text }}"
+                    title="Click row to expand loan details">
+                  <td>{{ r.employee_id }}</td>
+                  <td>{{ r.employee_name }}</td>
+                  <td>{{ r.department_name }}</td>
+                  <td>
+                    <span class="hdmf-loan-types-label">{{ r.loan_types_label }}</span>
+                    <input type="hidden" class="hdmf-loan-type" value="{{ r.loan_type }}">
+                  </td>
+                  <td class="num"><input type="text" inputmode="decimal" autocomplete="off" class="form-control hdmf-loan-amount hdmf-loan-month-amount" value="{{ r.month_amount }}"></td>
+                  {% if hdmf_employment_scope == 'jo_cos' %}
+                  <td class="hdmf-deductible-col"><span class="hdmf-deductible-fixed">1st quincena</span></td>
+                  {% else %}
+                  <td class="hdmf-loan-q-cell">
+                    <label><input type="checkbox" class="hdmf-loan-q1-enabled" {% if r.q1_enabled %}checked{% endif %}> 1st quincena</label>
+                    <input type="text" inputmode="decimal" autocomplete="off" class="form-control hdmf-loan-amount hdmf-loan-q1-amount" value="{{ r.q1_amount }}">
+                    <label style="margin-top:0.45rem;"><input type="checkbox" class="hdmf-loan-q2-enabled" {% if r.q2_enabled %}checked{% endif %}> 2nd quincena</label>
+                    <input type="text" inputmode="decimal" autocomplete="off" class="form-control hdmf-loan-amount hdmf-loan-q2-amount" value="{{ r.q2_amount }}">
+                  </td>
+                  {% endif %}
+                  <td><button type="button" class="hdmf-remove">Remove</button></td>
+                </tr>
+                {% if r.loan_details %}
+                <tr class="hdmf-details-row hdmf-loan-details-row" style="display:none;" data-parent-pk="{{ r.employee_pk }}">
+                  <td colspan="7" class="hdmf-details-cell">
+                    <div class="hdmf-details-panel">
+                      <p class="hdmf-details-panel-title">Loan breakdown</p>
+                      <table class="hdmf-details-table">
+                        <tbody>
+                          {% for d in r.loan_details %}
+                          <tr>
+                            <td>{{ d.label }}</td>
+                            <td class="num">{{ d.amount_display }}</td>
+                          </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  </td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <p id="hdmfLoanSearchNoMatch" style="display:none; margin-top:0.75rem; color:var(--medium-gray); font-size:0.9rem;">No rows match your search.</p>
+          <div class="hdmf-submit-bar">
+            <button type="submit" class="btn-primary">Submit</button>
+          </div>
+        </form>
+        {% endif %}
+        {% endif %}
+      </div>
+    </section>
+
+    <div id="hdmfLoadingOverlay" class="hdmf-loading-overlay" aria-live="polite" aria-busy="true">
+      <div class="hdmf-loading-card">
+        <div class="hdmf-loading-spinner" aria-hidden="true"></div>
+        <p style="margin:0; font-weight:600;">Reading file in progress. Please wait a moment.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var serverTab = {{ active_tab|tojson }};
+
+  function setActive(tabName) {
+    var contrib = document.getElementById('hdmfContributionCard');
+    var loan = document.getElementById('hdmfLoanCard');
+    if (!contrib || !loan) return;
+
+    var isContrib = tabName !== 'loan';
+    contrib.style.display = isContrib ? '' : 'none';
+    loan.style.display = isContrib ? 'none' : '';
+
+    document.querySelectorAll('[data-hdmf-tab]').forEach(function (a) {
+      var active = (a.getAttribute('data-hdmf-tab') === (isContrib ? 'contribution' : 'loan'));
+      a.classList.toggle('is-active', active);
+      a.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+  }
+
+  function syncHash(tabName) {
+    var hash = tabName === 'loan' ? '#loan' : '#contribution';
+    if (window.location.hash !== hash) {
+      history.replaceState(null, '', window.location.pathname + window.location.search + hash);
+    }
+  }
+
+  document.querySelectorAll('[data-hdmf-tab]').forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      e.preventDefault();
+      var tab = a.getAttribute('data-hdmf-tab');
+      setActive(tab);
+      syncHash(tab);
+    });
+  });
+
+  setActive(serverTab);
+  syncHash(serverTab);
+})();
+</script>
+
+<script>
+(function () {
+  var isJoCos = {{ (hdmf_employment_scope == 'jo_cos')|tojson }};
+
+  function parseMoney(str) {
+    var n = parseFloat(String(str || '0').replace(/,/g, ''));
+    return isNaN(n) ? 0 : n;
+  }
+  function formatMoney(n) {
+    return parseMoney(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function moneyRaw(n) {
+    return parseMoney(n).toFixed(2);
+  }
+
+  function updateMonthAmount(tr) {
+    var ps = parseFloat((tr.querySelector('.hdmf-ps-amount') || {}).value || '0') || 0;
+    var month = ps;
+    if (!isJoCos) {
+      var mp2 = parseMoney((tr.querySelector('.hdmf-mp2-amount') || {}).value || '0');
+      month = (ps + mp2);
+    }
+    var out = tr.querySelector('.hdmf-month-amount');
+    if (out) out.value = formatMoney(month);
+  }
+
+  function filterRows(inpId, bodyId, countId, noMatchId, rowSel) {
+    var inp = document.getElementById(inpId);
+    var body = document.getElementById(bodyId);
+    if (!inp || !body) return;
+    var q = (inp.value || '').trim().toLowerCase();
+    var shown = 0;
+    body.querySelectorAll(rowSel).forEach(function (tr) {
+      var hay = tr.getAttribute('data-search') || '';
+      var ok = !q || hay.indexOf(q) !== -1;
+      tr.style.display = ok ? '' : 'none';
+      if (ok) shown++;
+    });
+    var countEl = document.getElementById(countId);
+    if (countEl) countEl.textContent = String(shown);
+    var noMatch = document.getElementById(noMatchId);
+    if (noMatch) noMatch.style.display = (q && shown === 0) ? 'block' : 'none';
+  }
+
+  var overlay = document.getElementById('hdmfLoadingOverlay');
+
+  // Contribution upload preview
+  var contribUploadBtn = document.getElementById('hdmfContribUploadBtn');
+  var contribFileInput = document.getElementById('hdmfContribFileInput');
+  var contribPreviewWrap = document.getElementById('hdmfContribPreviewWrap');
+  var contribPreviewBody = document.getElementById('hdmfContribPreviewBody');
+  var contribPreviewMeta = document.getElementById('hdmfContribPreviewMeta');
+  var contribSubmitBtn = document.getElementById('hdmfContribUploadSubmitBtn');
+  var contribRowsJson = document.getElementById('hdmfContribUploadRowsJson');
+  var contribYear = document.getElementById('hdmfContribUploadYear');
+  var contribMonth = document.getElementById('hdmfContribUploadMonth');
+  var contribPreviewData = [];
+
+  if (contribUploadBtn && contribFileInput) {
+    contribUploadBtn.addEventListener('click', function () { contribFileInput.click(); });
+    contribFileInput.addEventListener('change', function () {
+      if (!contribFileInput.files || !contribFileInput.files[0]) return;
+      var fd = new FormData();
+      fd.append('file', contribFileInput.files[0]);
+      if (overlay) overlay.classList.add('is-visible');
+      fetch('{{ url_for("routes.payroll_deductions_hdmf_contributions_preview", scope=hdmf_url_scope) }}', {
+        method: 'POST',
+        body: fd,
+        credentials: 'same-origin'
+      }).then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (overlay) overlay.classList.remove('is-visible');
+          if (data.error) {
+            alert(data.error || 'Failed to read file.');
+            return;
+          }
+          contribPreviewData = data.rows || [];
+          if (contribYear) contribYear.value = data.year;
+          if (contribMonth) contribMonth.value = data.month;
+          if (contribPreviewMeta) {
+            contribPreviewMeta.textContent = 'Period: ' + data.month + '/' + data.year
+              + ' — matched ' + data.matched_count + ' of ' + data.total_count
+              + ' row(s). Unmatched MID rows are shown but not submitted.';
+          }
+          if (contribPreviewBody) {
+            contribPreviewBody.innerHTML = '';
+            contribPreviewData.forEach(function (r) {
+              var tr = document.createElement('tr');
+              if (!r.matched) tr.className = 'hdmf-unmatched';
+              var cols = ['mid_no','employee_id','employee_name','department_name','membership_program','ee_share_display'];
+              cols.forEach(function (c) {
+                var td = document.createElement('td');
+                td.textContent = r[c] || (c === 'employee_name' && !r.matched ? '(unmatched)' : '');
+                if (c.indexOf('_display') > 0) td.className = 'num';
+                tr.appendChild(td);
+              });
+              contribPreviewBody.appendChild(tr);
+            });
+          }
+          if (contribPreviewWrap) contribPreviewWrap.style.display = '';
+          if (contribSubmitBtn) contribSubmitBtn.disabled = !(data.matched_count > 0);
+        })
+        .catch(function () {
+          if (overlay) overlay.classList.remove('is-visible');
+          alert('Failed to read file.');
+        });
+    });
+  }
+
+  var contribUploadForm = document.getElementById('hdmfContribUploadSubmitForm');
+  if (contribUploadForm && contribRowsJson) {
+    contribUploadForm.addEventListener('submit', function () {
+      var matched = contribPreviewData.filter(function (r) { return r.matched && r.employee_pk; });
+      contribRowsJson.value = JSON.stringify(matched);
+    });
+  }
+
+  // Contribution load table interactions
+  var contribBody = document.getElementById('hdmfContribDeductionBody');
+  if (contribBody) {
+    function contribDetailsRow(tr) {
+      var next = tr.nextElementSibling;
+      return (next && next.classList.contains('hdmf-contrib-details-row')) ? next : null;
+    }
+
+    function toggleContribDetails(tr) {
+      var detailRow = contribDetailsRow(tr);
+      if (!detailRow) return;
+      var expanded = !tr.classList.contains('is-expanded');
+      tr.classList.toggle('is-expanded', expanded);
+      detailRow.style.display = expanded ? '' : 'none';
+    }
+
+    function filterHdmfContribRows() {
+      filterRows('hdmfContribEmployeeSearch', 'hdmfContribDeductionBody', 'hdmfContribRowCount', 'hdmfContribSearchNoMatch', 'tr.hdmf-contrib-deduction-row');
+      contribBody.querySelectorAll('tr.hdmf-contrib-deduction-row').forEach(function (tr) {
+        var detailRow = contribDetailsRow(tr);
+        if (!detailRow) return;
+        if (tr.style.display === 'none') {
+          detailRow.style.display = 'none';
+        } else {
+          detailRow.style.display = tr.classList.contains('is-expanded') ? '' : 'none';
+        }
+      });
+    }
+
+    contribBody.addEventListener('click', function (e) {
+      if (e.target.closest('input, button, label, select, a')) return;
+      var tr = e.target.closest('tr.hdmf-contrib-deduction-row');
+      if (tr && tr.classList.contains('hdmf-contrib-row-clickable')) toggleContribDetails(tr);
+    });
+    contribBody.addEventListener('blur', function (e) {
+      if (!e.target.classList.contains('hdmf-mp2-amount')) return;
+      e.target.value = formatMoney(e.target.value);
+    }, true);
+    contribBody.addEventListener('input', function (e) {
+      var tr = e.target.closest('tr.hdmf-contrib-deduction-row');
+      if (!tr) return;
+      if (e.target.classList.contains('hdmf-ps-amount')
+        || (!isJoCos && e.target.classList.contains('hdmf-mp2-amount'))) {
+        updateMonthAmount(tr);
+      }
+    });
+
+    var contribSearch = document.getElementById('hdmfContribEmployeeSearch');
+    if (contribSearch) contribSearch.addEventListener('input', filterHdmfContribRows);
+  }
+
+  var contribDedForm = document.getElementById('hdmfContribDeductionForm');
+  var contribDedOut = document.getElementById('hdmfContribDeductionRowsJson');
+  if (contribDedForm && contribDedOut) {
+    contribDedForm.addEventListener('submit', function () {
+      var rows = [];
+      document.querySelectorAll('#hdmfContribDeductionBody tr.hdmf-contrib-deduction-row').forEach(function (tr) {
+        var hiddenProg = tr.querySelector('.hdmf-membership-program');
+        var program = hiddenProg ? hiddenProg.value : '';
+        if (!program) return;
+        rows.push({
+          employee_pk: tr.getAttribute('data-employee-pk'),
+          membership_program: program,
+          ps_amount: (tr.querySelector('.hdmf-ps-amount') || {}).value || '0',
+          gs_amount: (tr.querySelector('.hdmf-gs-amount') || {}).value || '0',
+          mp2_amount: (!isJoCos && (tr.querySelector('.hdmf-mp2-amount') || {}).value) ? moneyRaw((tr.querySelector('.hdmf-mp2-amount') || {}).value) : '0'
+        });
+      });
+      contribDedOut.value = JSON.stringify(rows);
+    });
+  }
+
+  // Loan upload preview
+  var loanUploadBtn = document.getElementById('hdmfLoanUploadBtn');
+  var loanFileInput = document.getElementById('hdmfLoanFileInput');
+  var loanPreviewWrap = document.getElementById('hdmfLoanPreviewWrap');
+  var loanPreviewBody = document.getElementById('hdmfLoanPreviewBody');
+  var loanPreviewMeta = document.getElementById('hdmfLoanPreviewMeta');
+  var loanSubmitBtn = document.getElementById('hdmfLoanUploadSubmitBtn');
+  var loanRowsJson = document.getElementById('hdmfLoanUploadRowsJson');
+  var loanYear = document.getElementById('hdmfLoanUploadYear');
+  var loanMonth = document.getElementById('hdmfLoanUploadMonth');
+  var loanPreviewData = [];
+
+  if (loanUploadBtn && loanFileInput) {
+    loanUploadBtn.addEventListener('click', function () { loanFileInput.click(); });
+    loanFileInput.addEventListener('change', function () {
+      if (!loanFileInput.files || !loanFileInput.files[0]) return;
+      var fd = new FormData();
+      fd.append('file', loanFileInput.files[0]);
+      if (overlay) overlay.classList.add('is-visible');
+      fetch('{{ url_for("routes.payroll_deductions_hdmf_loans_preview", scope=hdmf_url_scope) }}', {
+        method: 'POST',
+        body: fd,
+        credentials: 'same-origin'
+      }).then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (overlay) overlay.classList.remove('is-visible');
+          if (data.error) {
+            alert(data.error || 'Failed to read file.');
+            return;
+          }
+          loanPreviewData = data.rows || [];
+          if (loanYear) loanYear.value = data.year;
+          if (loanMonth) loanMonth.value = data.month;
+          if (loanPreviewMeta) {
+            loanPreviewMeta.textContent = 'Period: ' + data.month + '/' + data.year
+              + ' — matched ' + data.matched_count + ' of ' + data.total_count
+              + ' row(s). Unmatched MID rows are shown but not submitted.';
+          }
+          if (loanPreviewBody) {
+            loanPreviewBody.innerHTML = '';
+            loanPreviewData.forEach(function (r) {
+              var tr = document.createElement('tr');
+              if (!r.matched) tr.className = 'hdmf-unmatched';
+              var cols = ['mid_no','employee_id','employee_name','department_name','mpl_display','salary_display','housing_display','safe_display'];
+              cols.forEach(function (c) {
+                var td = document.createElement('td');
+                td.textContent = r[c] || (c === 'employee_name' && !r.matched ? '(unmatched)' : '');
+                if (c.indexOf('_display') > 0) td.className = 'num';
+                tr.appendChild(td);
+              });
+              loanPreviewBody.appendChild(tr);
+            });
+          }
+          if (loanPreviewWrap) loanPreviewWrap.style.display = '';
+          if (loanSubmitBtn) loanSubmitBtn.disabled = !(data.matched_count > 0);
+        })
+        .catch(function () {
+          if (overlay) overlay.classList.remove('is-visible');
+          alert('Failed to read file.');
+        });
+    });
+  }
+
+  var loanUploadForm = document.getElementById('hdmfLoanUploadSubmitForm');
+  if (loanUploadForm && loanRowsJson) {
+    loanUploadForm.addEventListener('submit', function () {
+      var matched = loanPreviewData.filter(function (r) { return r.matched && r.employee_pk; });
+      loanRowsJson.value = JSON.stringify(matched);
+    });
+  }
+
+  // Loan load interactions
+  var loanBody = document.getElementById('hdmfLoanDeductionBody');
+  if (loanBody) {
+    function loanDetailsRow(tr) {
+      var next = tr.nextElementSibling;
+      return (next && next.classList.contains('hdmf-loan-details-row')) ? next : null;
+    }
+
+    function toggleLoanDetails(tr) {
+      var detailRow = loanDetailsRow(tr);
+      if (!detailRow) return;
+      var expanded = !tr.classList.contains('is-expanded');
+      tr.classList.toggle('is-expanded', expanded);
+      detailRow.style.display = expanded ? '' : 'none';
+    }
+
+    function filterHdmfLoanRows() {
+      filterRows('hdmfLoanEmployeeSearch', 'hdmfLoanDeductionBody', 'hdmfLoanRowCount', 'hdmfLoanSearchNoMatch', 'tr.hdmf-loan-deduction-row');
+      var body = document.getElementById('hdmfLoanDeductionBody');
+      if (!body) return;
+      body.querySelectorAll('tr.hdmf-loan-deduction-row').forEach(function (tr) {
+        var detailRow = loanDetailsRow(tr);
+        if (!detailRow) return;
+        if (tr.style.display === 'none') {
+          detailRow.style.display = 'none';
+        } else {
+          detailRow.style.display = tr.classList.contains('is-expanded') ? '' : 'none';
+        }
+      });
+    }
+
+    function splitQuincena(monthAmount) {
+      var m = parseMoney(monthAmount);
+      if (m <= 0) return { q1: '0.00', q2: '0.00' };
+      var q2 = Math.floor((m / 2) * 100) / 100;
+      var q1 = Math.round((m - q2) * 100) / 100;
+      return { q1: formatMoney(q1), q2: formatMoney(q2) };
+    }
+
+    function applySplitToRow(tr) {
+      if (isJoCos) return;
+      var monthInp = tr.querySelector('.hdmf-loan-month-amount');
+      var q1Inp = tr.querySelector('.hdmf-loan-q1-amount');
+      var q2Inp = tr.querySelector('.hdmf-loan-q2-amount');
+      if (!monthInp || !q1Inp || !q2Inp) return;
+      var parts = splitQuincena(monthInp.value);
+      q1Inp.value = parts.q1;
+      q2Inp.value = parts.q2;
+    }
+
+    loanBody.addEventListener('input', function (e) {
+      var tr = e.target.closest('tr.hdmf-loan-deduction-row');
+      if (!tr) return;
+      if (e.target.classList.contains('hdmf-loan-month-amount')) {
+        applySplitToRow(tr);
+      }
+    });
+    loanBody.addEventListener('blur', function (e) {
+      if (!e.target.classList.contains('hdmf-loan-amount')) return;
+      e.target.value = formatMoney(e.target.value);
+    }, true);
+    loanBody.addEventListener('click', function (e) {
+      if (e.target.classList.contains('hdmf-remove')) {
+        var tr = e.target.closest('tr.hdmf-loan-deduction-row');
+        if (!tr) return;
+        var detailRow = loanDetailsRow(tr);
+        if (detailRow) detailRow.remove();
+        tr.remove();
+        filterHdmfLoanRows();
+        return;
+      }
+      if (e.target.closest('input, button, label, select, a')) return;
+      var tr = e.target.closest('tr.hdmf-loan-deduction-row');
+      if (tr) toggleLoanDetails(tr);
+    });
+
+    var loanSearch = document.getElementById('hdmfLoanEmployeeSearch');
+    if (loanSearch) loanSearch.addEventListener('input', filterHdmfLoanRows);
+  }
+
+  var loanDedForm = document.getElementById('hdmfLoanDeductionForm');
+  var loanDedOut = document.getElementById('hdmfLoanDeductionRowsJson');
+  if (loanDedForm && loanDedOut) {
+    loanDedForm.addEventListener('submit', function () {
+      var rows = [];
+      document.querySelectorAll('#hdmfLoanDeductionBody tr.hdmf-loan-deduction-row').forEach(function (tr) {
+        var hiddenLoan = tr.querySelector('.hdmf-loan-type');
+        var monthInp = tr.querySelector('.hdmf-loan-month-amount');
+        if (!hiddenLoan || !monthInp) return;
+        var row = {
+          employee_pk: tr.getAttribute('data-employee-pk'),
+          loan_type: hiddenLoan.value,
+          month_amount: moneyRaw(monthInp.value),
+          q1_amount: moneyRaw((tr.querySelector('.hdmf-loan-q1-amount') || {}).value),
+          q2_amount: moneyRaw((tr.querySelector('.hdmf-loan-q2-amount') || {}).value),
+          q1_enabled: (tr.querySelector('.hdmf-loan-q1-enabled') || {}).checked ? '1' : '0',
+          q2_enabled: (tr.querySelector('.hdmf-loan-q2-enabled') || {}).checked ? '1' : '0'
+        };
+        if (isJoCos) {
+          row.q1_amount = row.month_amount;
+          row.q2_amount = '0';
+          row.q1_enabled = '1';
+          row.q2_enabled = '0';
+        }
+        rows.push(row);
+      });
+      loanDedOut.value = JSON.stringify(rows);
+    });
+  }
+})();
+</script>
+{% endblock %}
+

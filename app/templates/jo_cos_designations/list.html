@@ -14,22 +14,19 @@
                     <a href="#" class="nav-link nav-link-active">Settings <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">
                         <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
+                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Manage Employees</a>
                         <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
                         <hr class="dropdown-separator">
                         <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
                         <a href="{{ url_for('routes.jo_cos_designations_list') }}" class="dropdown-item">JO/COS designations</a>
+                        <a href="{{ url_for('routes.jo_cos_rates_list') }}" class="dropdown-item">JO and COS Rates</a>
+                        <a href="{{ url_for('routes.flexi_time_schedule_list') }}" class="dropdown-item">Flexi-time schedule</a>
                         <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
                         <hr class="dropdown-separator">
                         <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
                     </div>
                 </div>
                 {% endif %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Employee Management <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Employees</a>
-                    </div>
-                </div>
                 <div class="nav-dropdown">
                     <a href="#" class="nav-link">ABOUT <span class="dropdown-arrow">▼</span></a>
                     <div class="dropdown-menu">
@@ -71,12 +68,15 @@
 
         <div class="page-header">
             <h1 class="page-title">JO/COS designations</h1>
-            <a href="{{ url_for('routes.employees_list') }}" class="btn-secondary">Employees</a>
+            <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
+                <a href="{{ url_for('routes.jo_cos_designation_add') }}" class="btn-primary">+ Add designation</a>
+                <a href="{{ url_for('routes.employees_list') }}" class="btn-secondary">Employees</a>
+            </div>
         </div>
 
         <p class="generate-dtr-modal-note" style="margin-bottom: 1rem;">
             Reference list for <strong>Job Order</strong> and <strong>Contract of Service</strong> current position on the Add/Edit Employee form.
-            To load or refresh rows from Excel: <code>python migrate_jo_cos_designation.py</code> (optional path argument; use <code>--replace</code> to reload).
+            HR/Admin can add, edit, or delete rows here. Bulk load from Excel: <code>python migrate_jo_cos_designation.py</code> (optional path; <code>--replace</code> reloads).
         </p>
 
         <div class="table-section">
@@ -90,6 +90,7 @@
                         <tr>
                             <th style="width: 5rem;">#</th>
                             <th>Designation</th>
+                            <th style="width: 12rem;">Actions</th>
                         </tr>
                     </thead>
                     <tbody id="joCosTableBody">
@@ -98,11 +99,17 @@
                             <tr class="table-row" data-search="{{ d.designation|lower }}">
                                 <td>{{ d.id }}</td>
                                 <td>{{ d.designation }}</td>
+                                <td>
+                                    <a href="{{ url_for('routes.jo_cos_designation_edit', id=d.id) }}" class="btn-action">Edit</a>
+                                    <form method="POST" action="{{ url_for('routes.jo_cos_designation_delete', id=d.id) }}" style="display: inline;" onsubmit="return confirm('Delete this designation? Employees linked to it will have their JO/COS position selection cleared.');">
+                                        <button type="submit" class="btn-action btn-danger">Delete</button>
+                                    </form>
+                                </td>
                             </tr>
                             {% endfor %}
                         {% else %}
                             <tr>
-                                <td colspan="2" class="no-data">No rows. Run <code>migrate_jo_cos_designation.py</code> after pointing it at your Excel file.</td>
+                                <td colspan="3" class="no-data">No rows. Use <strong>Add designation</strong> or run <code>migrate_jo_cos_designation.py</code> with your Excel file.</td>
                             </tr>
                         {% endif %}
                     </tbody>

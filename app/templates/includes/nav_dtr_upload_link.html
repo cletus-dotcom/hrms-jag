@@ -1,0 +1,3 @@
+{% if (current_user.role or '')|lower in ('admin', 'hr', 'dtr_uploader') %}
+<a href="{{ url_for('routes.dtr_upload') }}" class="dropdown-item">Upload DTR Log</a>
+{% endif %}
