@@ -1595,6 +1595,46 @@ class GsisContribution(db.Model):
         return f'<GsisContribution id={self.id} emp={self.employee_id} {self.year}-{self.month:02d} Q{self.deductible_quincena}>'
 
 
+class PhicContribution(db.Model):
+    """
+    PhilHealth (PHIC) per-month contribution rows (Plantilla employees).
+
+    Deductible period: year, month, deductible_quincena (always 2nd quincena).
+    Amounts: ps_amount, gs_amount (same tier formula; GS for reporting),
+    month_amount / deducted_amount (PS employee share only).
+    """
+    __tablename__ = 'phic_contributions'
+    __table_args__ = (
+        db.UniqueConstraint('employee_id', 'year', 'month', 'deductible_quincena', name='uq_phic_contrib_emp_ymq'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    department_id = db.Column(db.Integer, db.ForeignKey('departments.id'), nullable=True)
+
+    year = db.Column(db.Integer, nullable=False)
+    month = db.Column(db.Integer, nullable=False)
+    deductible_quincena = db.Column(db.String(1), nullable=False)  # '1' | '2'
+
+    basic_salary = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    ps_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    gs_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    month_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    quincena_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    total_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    deducted_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('phic_contributions', lazy='dynamic'))
+    department = db.relationship('Department', backref=db.backref('phic_contributions', lazy='dynamic'))
+    creator = db.relationship('User', backref=db.backref('phic_contributions', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<PhicContribution id={self.id} emp={self.employee_id} {self.year}-{self.month:02d} Q{self.deductible_quincena}>'
+
+
 class GsisLoanRecord(db.Model):
     """Per-employee GSIS loan amounts imported from the monthly GSIS file."""
     __tablename__ = 'gsis_loan_records'

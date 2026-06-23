@@ -17,7 +17,7 @@ from app.leave_ledger_service import (
     undo_monthly_accrual_for_month,
 )
 from app.leave_utils import minutes_to_day_equivalent
-from app.models import User, Employee, Department, Position, SalaryGrade, Attendance, LeaveRequest, LeaveType, LeaveBalance, EmployeePDS, EmployeeAppointmentHistory, DailyTimeRecord, LeaveLedger, DtrWorkArrangementSetting, DtrJustification, JoCosDesignation, JoCosRate, FlexiTimeSchedule, EmployeeFlexiDay, DtrQuincenaWorktimeSummary, WorkHours, FlexibleWorktime, OvertimeAuthorization, JoCosExtendService, JoCosOvertime, JoCosOvertimeLedger, JoCosOvertimeOffsetRequest, HrmsNotification, GsisContribution, GsisLoanRecord, GsisLoanDeduction, HdmfContributionRecord, HdmfContributionDeduction, HdmfLoanRecord, HdmfLoanDeduction
+from app.models import User, Employee, Department, Position, SalaryGrade, Attendance, LeaveRequest, LeaveType, LeaveBalance, EmployeePDS, EmployeeAppointmentHistory, DailyTimeRecord, LeaveLedger, DtrWorkArrangementSetting, DtrJustification, JoCosDesignation, JoCosRate, FlexiTimeSchedule, EmployeeFlexiDay, DtrQuincenaWorktimeSummary, WorkHours, FlexibleWorktime, OvertimeAuthorization, JoCosExtendService, JoCosOvertime, JoCosOvertimeLedger, JoCosOvertimeOffsetRequest, HrmsNotification, GsisContribution, GsisLoanRecord, GsisLoanDeduction, PhicContribution, HdmfContributionRecord, HdmfContributionDeduction, HdmfLoanRecord, HdmfLoanDeduction
 from app.dtr_parse import parse_dtr_dat_file as _parse_dtr_dat_file
 from decimal import Decimal, ROUND_HALF_UP, ROUND_FLOOR
 from werkzeug.utils import secure_filename
@@ -3752,6 +3752,55 @@ def _gsis_contribution_amounts(basic_salary) -> dict:
 
 GSIS_CONTRIBUTION_DEDUCTIBLE_QUINCENA = '2'
 
+PHIC_CONTRIBUTION_DEDUCTIBLE_QUINCENA = '2'
+
+
+def _phic_share_from_salary(basic_salary) -> Decimal:
+    """PhilHealth share from monthly basic salary (same formula for PS and GS)."""
+    basic_d = _money_decimal(basic_salary)
+    if basic_d < Decimal('10000'):
+        return Decimal('250.00')
+    if basic_d <= Decimal('100000'):
+        return (basic_d * Decimal('0.025')).quantize(Decimal('0.01'))
+    return Decimal('2500.00')
+
+
+def _phic_contribution_amounts(basic_salary) -> dict:
+    """Compute PHIC contribution amounts from monthly basic salary."""
+    basic_d = _money_decimal(basic_salary)
+    share = _phic_share_from_salary(basic_d)
+    ps = share
+    gs = share
+    month_amount = ps
+    return {
+        'basic_salary': basic_d,
+        'ps_amount': ps,
+        'gs_amount': gs,
+        'month_amount': month_amount,
+        'total_amount': month_amount,
+        'deducted_amount': month_amount,
+    }
+
+
+def _phic_contribution_row_dict(emp: Employee) -> dict:
+    """Build display + raw payload for one plantilla employee PHIC row."""
+    basic = _current_salary_amount(emp) or 0.0
+    amounts = _phic_contribution_amounts(basic)
+    return {
+        'employee_pk': emp.id,
+        'employee_id': emp.employee_id,
+        'employee_name': f"{emp.last_name}, {emp.first_name}",
+        'department_name': (emp.department.name if emp.department else ''),
+        'basic_salary': _money_str(amounts['basic_salary']),
+        'ps': _money_str(amounts['ps_amount']),
+        'gs': _money_str(amounts['gs_amount']),
+        'month_amount': _money_str(amounts['month_amount']),
+        'ps_raw': str(amounts['ps_amount']),
+        'gs_raw': str(amounts['gs_amount']),
+        'month_amount_raw': str(amounts['month_amount']),
+    }
+
+
 GSIS_LOAN_TYPE_FIELDS = (
     ('consoloan', 'CONSOLOAN'),
     ('emrgyln', 'EMRGYLN'),
@@ -6131,6 +6180,176 @@ def payroll_deductions_gsis_submit():
         flash(f'Error saving GSIS contributions: {str(e)}', 'error')
 
     return redirect(url_for('routes.payroll_deductions_gsis', year=year, month=month, department_id=department_id, generate=1))
+
+
+@bp.route('/payroll/deductions/phic')
+@login_required
+def payroll_deductions_phic():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    employee = current_user.employee if current_user.employee else None
+    today = date.today()
+    year_raw = (request.args.get('year') or str(today.year)).strip()
+    month_raw = (request.args.get('month') or str(today.month)).strip()
+    dept_raw = (request.args.get('department_id') or '').strip()
+    do_generate = (request.args.get('generate') or '').strip() == '1'
+
+    try:
+        year = int(year_raw)
+    except ValueError:
+        year = today.year
+    try:
+        month = int(month_raw)
+        if month < 1 or month > 12:
+            raise ValueError()
+    except ValueError:
+        month = today.month
+
+    department_id = None
+    if dept_raw:
+        try:
+            department_id = int(dept_raw)
+        except ValueError:
+            department_id = None
+
+    departments = Department.query.order_by(Department.name.asc()).all()
+    dept_by_id = {d.id: d for d in departments}
+    selected_department = dept_by_id.get(department_id) if department_id else None
+
+    rows = []
+    if do_generate:
+        q = Employee.query.options(db.joinedload(Employee.department)).filter_by(status='active')
+        if selected_department:
+            q = q.filter(Employee.department_id == selected_department.id)
+        employees = q.order_by(Employee.last_name.asc(), Employee.first_name.asc()).all()
+        for emp in employees:
+            if _is_jo_cos_employee(emp):
+                continue
+            rows.append(_phic_contribution_row_dict(emp))
+
+    return render_template(
+        'payroll/phic.html',
+        employee=employee,
+        departments=departments,
+        selected_department=selected_department,
+        year=year,
+        month=month,
+        rows=rows,
+        generated=do_generate,
+    )
+
+
+@bp.route('/payroll/deductions/phic/submit', methods=['POST'])
+@login_required
+def payroll_deductions_phic_submit():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    today = date.today()
+    year_raw = (request.form.get('year') or str(today.year)).strip()
+    month_raw = (request.form.get('month') or str(today.month)).strip()
+    dept_raw = (request.form.get('department_id') or '').strip()
+    rows_json = (request.form.get('rows_json') or '').strip()
+
+    try:
+        year = int(year_raw)
+    except ValueError:
+        flash('Invalid year.', 'error')
+        return redirect(url_for('routes.payroll_deductions_phic'))
+    try:
+        month = int(month_raw)
+        if month < 1 or month > 12:
+            raise ValueError()
+    except ValueError:
+        flash('Invalid month.', 'error')
+        return redirect(url_for('routes.payroll_deductions_phic', year=year))
+
+    department_id = None
+    if dept_raw:
+        try:
+            department_id = int(dept_raw)
+        except ValueError:
+            department_id = None
+
+    try:
+        payload = json.loads(rows_json or '[]')
+        if not isinstance(payload, list):
+            payload = []
+    except json.JSONDecodeError:
+        payload = []
+
+    if not payload:
+        flash('No rows to submit.', 'warning')
+        return redirect(url_for('routes.payroll_deductions_phic', year=year, month=month, department_id=department_id, generate=1))
+
+    emp_ids = []
+    row_map = {}
+    for r in payload:
+        try:
+            emp_id = int(r.get('employee_pk'))
+        except Exception:
+            continue
+        emp_ids.append(emp_id)
+        row_map[emp_id] = {
+            'ps_amount': _money_decimal(r.get('ps_amount')),
+            'gs_amount': _money_decimal(r.get('gs_amount')),
+            'month_amount': _money_decimal(r.get('month_amount')),
+        }
+
+    if not emp_ids:
+        flash('No valid employees to submit.', 'error')
+        return redirect(url_for('routes.payroll_deductions_phic', year=year, month=month, department_id=department_id, generate=1))
+
+    employees = (Employee.query.options(db.joinedload(Employee.department))
+                 .filter(Employee.id.in_(emp_ids))
+                 .filter_by(status='active')
+                 .all())
+    emp_by_id = {e.id: e for e in employees}
+    quincena = PHIC_CONTRIBUTION_DEDUCTIBLE_QUINCENA
+
+    try:
+        for emp_id in emp_ids:
+            (PhicContribution.query
+             .filter_by(employee_id=emp_id, year=year, month=month, deductible_quincena=quincena)
+             .delete(synchronize_session=False))
+
+        inserted = 0
+        for emp_id in emp_ids:
+            emp = emp_by_id.get(emp_id)
+            if not emp or _is_jo_cos_employee(emp):
+                continue
+            row_data = row_map.get(emp_id, {})
+            basic = _current_salary_amount(emp) or 0.0
+            amounts = _phic_contribution_amounts(basic)
+            ps = _money_decimal(row_data.get('ps_amount', amounts['ps_amount']))
+            gs = _money_decimal(row_data.get('gs_amount', amounts['gs_amount']))
+            month_amount = ps
+
+            db.session.add(PhicContribution(
+                employee_id=emp.id,
+                department_id=emp.department_id,
+                year=year,
+                month=month,
+                deductible_quincena=quincena,
+                basic_salary=amounts['basic_salary'],
+                ps_amount=ps,
+                gs_amount=gs,
+                month_amount=month_amount,
+                quincena_amount=Decimal('0.00'),
+                total_amount=month_amount,
+                deducted_amount=month_amount,
+                created_by_user_id=getattr(current_user, 'id', None),
+            ))
+            inserted += 1
+
+        db.session.commit()
+        flash(f'PHIC contributions saved ({inserted} rows).', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error saving PHIC contributions: {str(e)}', 'error')
+
+    return redirect(url_for('routes.payroll_deductions_phic', year=year, month=month, department_id=department_id, generate=1))
 
 
 @bp.route('/payroll/deductions/gsis/loans/preview', methods=['POST'])

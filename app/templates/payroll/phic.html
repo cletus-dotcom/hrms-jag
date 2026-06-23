@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+
+{% block title %}PHIC - HRMS{% endblock %}
+
+{% block extra_css %}
+<style>
+  .phic-filters {
+    display: grid;
+    gap: 0.75rem;
+    column-gap: 1.25rem;
+    align-items: end;
+    margin-top: 1rem;
+  }
+  @media (min-width: 900px) {
+    .phic-filters {
+      grid-template-columns: 6rem 9rem auto minmax(16rem, 1fr);
+    }
+  }
+  .phic-note {
+    color: var(--medium-gray, #6b7280);
+    font-size: 0.95rem;
+    margin-top: 0.75rem;
+  }
+  .phic-deductible-fixed {
+    color: var(--medium-gray, #6b7280);
+    background: #f3f4f6;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 0.45rem 0.65rem;
+    font-size: 0.9rem;
+    min-width: 11rem;
+    display: inline-block;
+  }
+  .phic-submit-bar {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    justify-content: flex-end;
+    margin-top: 1rem;
+    flex-wrap: wrap;
+  }
+  .phic-table th, .phic-table td { white-space: nowrap; }
+  .phic-table th.num, .phic-table td.num { text-align: right; }
+  .phic-table-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+    margin-bottom: 0.75rem;
+  }
+  .phic-table-toolbar .search-bar {
+    flex: 1 1 220px;
+    max-width: 360px;
+    margin: 0;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+  <div class="header-bar">
+    <div class="header-content">
+      {% include 'includes/navbar_brand.html' %}
+      <nav class="main-nav">
+        <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
+        {% include 'includes/nav_payroll_top_menu.html' %}
+      </nav>
+      <div class="user-dropdown">
+        <a href="#" class="user-info">
+          {% if employee %}{{ employee.full_name }} ({{ current_user.role|title }}){% else %}{{ current_user.username }} ({{ current_user.role|title }}){% endif %}
+          <span class="dropdown-arrow">▼</span>
+        </a>
+        <div class="dropdown-menu dropdown-menu-right">
+          <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
+            <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="dashboard-content">
+    <div class="page-header" style="align-items: center;">
+      <div>
+        <h1 class="page-title">PHIC</h1>
+      </div>
+      <a href="{{ url_for('routes.dashboard') }}" class="btn-secondary">Dashboard</a>
+    </div>
+
+    <section class="card" style="padding: 1rem 1.25rem; border: 1px solid var(--brand-border, #e5e7eb); border-radius: 12px;">
+      <h2 style="margin: 0 0 0.35rem; font-size: 1.05rem;">Contribution</h2>
+      <div class="phic-note">
+        Computes PS and GS from plantilla basic salary: salary below ₱10,000 = <strong>₱250.00</strong>;
+        salary from ₱10,000 to ₱100,000 = <strong>2.5%</strong>; salary above ₱100,000 = <strong>₱2,500.00</strong> fixed.
+        GS is shown for reference only; the <strong>month amount</strong> deducted on the <strong>2nd quincena</strong> is <strong>PS</strong> (employee share) only.
+      </div>
+
+      <form method="GET" action="{{ url_for('routes.payroll_deductions_phic') }}" class="phic-filters">
+        <div>
+          <label class="form-label" for="phicYear">Year</label>
+          <input id="phicYear" name="year" class="form-control" value="{{ year }}" />
+        </div>
+        <div>
+          <label class="form-label" for="phicMonth">Month</label>
+          <select id="phicMonth" name="month" class="form-control">
+            {% for m in range(1, 13) %}
+              <option value="{{ m }}" {% if m == month %}selected{% endif %}>{{ ['January','February','March','April','May','June','July','August','September','October','November','December'][m-1] }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <input type="hidden" name="generate" value="1" />
+          <button class="btn-primary" type="submit">Generate</button>
+        </div>
+        <div>
+          <label class="form-label" for="phicDept">Department (optional)</label>
+          <select id="phicDept" name="department_id" class="form-control">
+            <option value="">All departments</option>
+            {% for d in departments %}
+              <option value="{{ d.id }}" {% if selected_department and d.id == selected_department.id %}selected{% endif %}>{{ d.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </form>
+
+      {% if generated %}
+        <hr style="margin: 1rem 0;" />
+        {% if not rows %}
+          <p class="phic-note">No plantilla employees found for the selected scope.</p>
+        {% else %}
+          <form method="POST" action="{{ url_for('routes.payroll_deductions_phic_submit') }}" id="phicSubmitForm">
+            <input type="hidden" name="year" value="{{ year }}" />
+            <input type="hidden" name="month" value="{{ month }}" />
+            <input type="hidden" name="department_id" value="{{ selected_department.id if selected_department else '' }}" />
+            <input type="hidden" name="rows_json" id="phicRowsJson" value="[]" />
+
+            <div class="phic-table-toolbar">
+              <div class="search-bar">
+                <input type="text" id="phicEmployeeSearch" class="search-input" placeholder="Search employees…" autocomplete="off" aria-label="Search employees">
+                <span class="search-icon">🔍</span>
+              </div>
+              <span style="font-size: 0.85rem; color: var(--medium-gray);"><strong id="phicRowCount">{{ rows|length }}</strong> employee(s)</span>
+            </div>
+
+            <div class="table-container" style="overflow-x:auto;">
+              <table class="data-table phic-table" id="phicTable">
+                <thead>
+                  <tr>
+                    <th>Emp ID</th>
+                    <th>Employee</th>
+                    <th>Department</th>
+                    <th class="num">PS</th>
+                    <th class="num">GS</th>
+                    <th class="num">Month Amount</th>
+                    <th>Deductible on</th>
+                  </tr>
+                </thead>
+                <tbody id="phicTableBody">
+                  {% for r in rows %}
+                  <tr class="phic-table-row"
+                      data-employee-pk="{{ r.employee_pk }}"
+                      data-search="{{ (r.employee_id ~ ' ' ~ r.employee_name ~ ' ' ~ r.department_name)|lower }}"
+                      data-ps="{{ r.ps_raw }}"
+                      data-gs="{{ r.gs_raw }}"
+                      data-month-amount="{{ r.month_amount_raw }}">
+                    <td>{{ r.employee_id }}</td>
+                    <td>{{ r.employee_name }}</td>
+                    <td>{{ r.department_name }}</td>
+                    <td class="num">{{ r.ps }}</td>
+                    <td class="num">{{ r.gs }}</td>
+                    <td class="num">{{ r.month_amount }}</td>
+                    <td><span class="phic-deductible-fixed">2nd quincena</span></td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            <p id="phicSearchNoMatch" style="display: none; margin-top: 0.75rem; color: var(--medium-gray); font-size: 0.9rem;">No employees match your search.</p>
+
+            <div class="phic-submit-bar">
+              <button type="submit" class="btn-primary">Submit</button>
+            </div>
+          </form>
+        {% endif %}
+      {% endif %}
+    </section>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{% if generated and rows %}
+<script>
+(function () {
+  var inp = document.getElementById('phicEmployeeSearch');
+  var body = document.getElementById('phicTableBody');
+  if (!inp || !body) return;
+
+  function filterRows() {
+    var q = (inp.value || '').trim().toLowerCase();
+    var rows = body.querySelectorAll('tr.phic-table-row');
+    var shown = 0;
+    rows.forEach(function (tr) {
+      var hay = tr.getAttribute('data-search') || '';
+      var ok = !q || hay.indexOf(q) !== -1;
+      tr.style.display = ok ? '' : 'none';
+      if (ok) shown++;
+    });
+    var countEl = document.getElementById('phicRowCount');
+    if (countEl) countEl.textContent = String(shown);
+    var noMatch = document.getElementById('phicSearchNoMatch');
+    if (noMatch) noMatch.style.display = (q && shown === 0) ? 'block' : 'none';
+  }
+
+  inp.addEventListener('input', filterRows);
+})();
+</script>
+<script>
+(function () {
+  var form = document.getElementById('phicSubmitForm');
+  var out = document.getElementById('phicRowsJson');
+  if (!form || !out) return;
+
+  form.addEventListener('submit', function () {
+    var table = document.getElementById('phicTable');
+    if (!table) return;
+    var rows = [];
+    table.querySelectorAll('tbody tr.phic-table-row').forEach(function (tr) {
+      var employeePk = tr.getAttribute('data-employee-pk');
+      if (!employeePk) return;
+      rows.push({
+        employee_pk: employeePk,
+        ps_amount: tr.getAttribute('data-ps') || '0',
+        gs_amount: tr.getAttribute('data-gs') || '0',
+        month_amount: tr.getAttribute('data-month-amount') || '0'
+      });
+    });
+    out.value = JSON.stringify(rows);
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}
