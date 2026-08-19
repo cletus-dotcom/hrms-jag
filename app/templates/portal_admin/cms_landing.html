@@ -1,0 +1,169 @@
+{% extends 'portal_admin/_layout.html' %}
+{% block portal_title %}Landing CMS{% endblock %}
+{% block portal_content %}
+<div class="portal-admin-page-header">
+    <h1>Landing Page CMS</h1>
+    <p>Edit public marketing copy. Statistics (personnel, birthdays, leave) remain live from the database.</p>
+</div>
+<nav class="portal-admin-tabs" aria-label="Landing sections">
+    <a href="{{ url_for('portal_admin.cms_landing', section='hero') }}" class="{% if section == 'hero' %}active{% endif %}">Hero</a>
+    <a href="{{ url_for('portal_admin.cms_landing', section='carousel') }}" class="{% if section == 'carousel' %}active{% endif %}">Carousel</a>
+    <a href="{{ url_for('portal_admin.cms_landing', section='splash') }}" class="{% if section == 'splash' %}active{% endif %}">Growth Pulse</a>
+    <a href="{{ url_for('portal_admin.cms_landing', section='services') }}" class="{% if section == 'services' %}active{% endif %}">Services</a>
+    <a href="{{ url_for('portal_admin.cms_landing', section='mission') }}" class="{% if section == 'mission' %}active{% endif %}">Mission</a>
+    <a href="{{ url_for('portal_admin.cms_landing', section='stats') }}" class="{% if section == 'stats' %}active{% endif %}">Stats headings</a>
+    <a href="{{ url_for('portal_admin.cms_landing', section='footer') }}" class="{% if section == 'footer' %}active{% endif %}">Footer</a>
+</nav>
+
+{% if section == 'hero' %}
+<form method="POST" class="portal-admin-form-card">
+    <input type="hidden" name="section" value="hero">
+    <div class="form-grid">
+        <div class="form-group"><label>Title line 1</label><input name="title_primary" class="form-control" value="{{ cms.hero.title_primary }}"></div>
+        <div class="form-group"><label>Title line 2</label><input name="title_secondary" class="form-control" value="{{ cms.hero.title_secondary }}"></div>
+        <div class="form-group form-group--full"><label>Subtitle</label><textarea name="subtitle" class="form-control" rows="2">{{ cms.hero.subtitle }}</textarea></div>
+        <div class="form-group"><label>CTA button label</label><input name="cta_label" class="form-control" value="{{ cms.hero.cta_label }}"></div>
+    </div>
+    <h3>Related system links</h3>
+    {% for link in cms.hero.related_links %}
+    <div class="portal-admin-repeater-row">
+        <input name="related_label" class="form-control" placeholder="Label" value="{{ link.label }}">
+        <input name="related_url" class="form-control" placeholder="URL" value="{{ link.url }}">
+        <label class="checkbox-label"><input type="checkbox" name="related_external" value="1" {% if link.external %}checked{% endif %}> External</label>
+    </div>
+    {% endfor %}
+    <div class="portal-admin-repeater-row">
+        <input name="related_label" class="form-control" placeholder="New label">
+        <input name="related_url" class="form-control" placeholder="New URL">
+        <label class="checkbox-label"><input type="checkbox" name="related_external" value="1"> External</label>
+    </div>
+    <div class="portal-admin-form-actions"><button type="submit" class="btn-primary">Save Hero</button></div>
+</form>
+{% elif section == 'carousel' %}
+<form method="POST" class="portal-admin-form-card">
+    <input type="hidden" name="section" value="carousel">
+    <div class="form-grid">
+        <div class="form-group">
+            <label class="checkbox-label"><input type="checkbox" name="enabled" value="1" {% if cms.carousel.enabled %}checked{% endif %}> Show notice carousel on landing page</label>
+        </div>
+        <div class="form-group"><label>Section label (accessibility)</label><input name="section_label" class="form-control" value="{{ cms.carousel.section_label }}"></div>
+        <div class="form-group"><label>Slide interval (ms)</label><input name="interval_ms" type="number" min="2000" max="60000" step="500" class="form-control" value="{{ cms.carousel.interval_ms }}"></div>
+    </div>
+    <h3>Slides</h3>
+    {% for slide in cms.carousel.slides %}
+    <div class="portal-admin-repeater-block">
+        <input name="slide_title" class="form-control" placeholder="Slide title" value="{{ slide.title }}">
+        <textarea name="slide_text" class="form-control" rows="2" placeholder="Slide text">{{ slide.text }}</textarea>
+        <div class="portal-admin-repeater-row">
+            <input name="slide_link_url" class="form-control" placeholder="Optional link URL" value="{{ slide.link_url }}">
+            <input name="slide_link_label" class="form-control" placeholder="Link label" value="{{ slide.link_label }}">
+        </div>
+    </div>
+    {% endfor %}
+    <div class="portal-admin-repeater-block">
+        <input name="slide_title" class="form-control" placeholder="New slide title">
+        <textarea name="slide_text" class="form-control" rows="2" placeholder="New slide text"></textarea>
+        <div class="portal-admin-repeater-row">
+            <input name="slide_link_url" class="form-control" placeholder="Optional link URL">
+            <input name="slide_link_label" class="form-control" placeholder="Link label">
+        </div>
+    </div>
+    <div class="portal-admin-form-actions"><button type="submit" class="btn-primary">Save Carousel</button></div>
+</form>
+{% elif section == 'splash' %}
+<form method="POST" class="portal-admin-form-card">
+    <input type="hidden" name="section" value="splash">
+    <div class="form-grid">
+        <div class="form-group form-group--full">
+            <label class="checkbox-label"><input type="checkbox" name="enabled" value="1" {% if cms.splash.enabled %}checked{% endif %}> Show Growth Pulse splash on landing page load</label>
+        </div>
+        <div class="form-group"><label>Display duration (ms)</label><input name="duration_ms" type="number" min="500" max="10000" step="100" class="form-control" value="{{ cms.splash.duration_ms }}"></div>
+        <div class="form-group"><label>Progress bar aria-label</label><input name="bar_aria_label" class="form-control" value="{{ cms.splash.bar_aria_label }}"></div>
+        <div class="form-group form-group--full">
+            <label class="checkbox-label"><input type="checkbox" name="show_tagline" value="1" {% if cms.splash.show_tagline %}checked{% endif %}> Show tagline under logo</label>
+        </div>
+        <div class="form-group form-group--full"><label>Tagline text</label><input name="tagline" class="form-control" value="{{ cms.splash.tagline }}"></div>
+    </div>
+    <p class="muted">The splash uses the uploaded organization logo from Branding.</p>
+    <div class="portal-admin-form-actions"><button type="submit" class="btn-primary">Save Growth Pulse</button></div>
+</form>
+{% elif section == 'services' %}
+<form method="POST" class="portal-admin-form-card">
+    <input type="hidden" name="section" value="services">
+    <div class="form-grid">
+        <div class="form-group"><label>Section title</label><input name="section_title" class="form-control" value="{{ cms.services.section_title }}"></div>
+        <div class="form-group form-group--full"><label>Section lead</label><input name="section_lead" class="form-control" value="{{ cms.services.section_lead }}"></div>
+    </div>
+    <h3>Service cards</h3>
+    {% for card in cms.services.cards %}
+    <div class="portal-admin-repeater-block">
+        <div class="portal-admin-repeater-row">
+            <select name="card_icon" class="form-control">
+                <option value="">(default icon)</option>
+                {% for key, label in (service_icon_options or []) %}
+                <option value="{{ key }}" {% if card.icon == key %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <input name="card_title" class="form-control" placeholder="Card title" value="{{ card.title }}">
+        <textarea name="card_text" class="form-control" rows="2" placeholder="Card text">{{ card.text }}</textarea>
+    </div>
+    {% endfor %}
+    <div class="portal-admin-repeater-block">
+        <div class="portal-admin-repeater-row">
+            <select name="card_icon" class="form-control">
+                <option value="">(default icon)</option>
+                {% for key, label in (service_icon_options or []) %}
+                <option value="{{ key }}">{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <input name="card_title" class="form-control" placeholder="New card title">
+        <textarea name="card_text" class="form-control" rows="2" placeholder="New card text"></textarea>
+    </div>
+    <div class="portal-admin-form-actions"><button type="submit" class="btn-primary">Save Services</button></div>
+</form>
+{% elif section == 'mission' %}
+<form method="POST" class="portal-admin-form-card">
+    <input type="hidden" name="section" value="mission">
+    <div class="form-group"><label>Title</label><input name="title" class="form-control" value="{{ cms.mission.title }}"></div>
+    <div class="form-group"><label>Body</label><textarea name="text" class="form-control" rows="5">{{ cms.mission.text }}</textarea></div>
+    <div class="portal-admin-form-actions"><button type="submit" class="btn-primary">Save Mission</button></div>
+</form>
+{% elif section == 'stats' %}
+<form method="POST" class="portal-admin-form-card">
+    <input type="hidden" name="section" value="stats">
+    <p class="muted">Personnel counts, birthdays, and leave lists are always loaded live from HR data.</p>
+    <div class="form-group"><label>Section title</label><input name="section_title" class="form-control" value="{{ cms.stats.section_title }}"></div>
+    <div class="form-group"><label>Section lead</label><input name="section_lead" class="form-control" value="{{ cms.stats.section_lead }}"></div>
+    <div class="portal-admin-form-actions"><button type="submit" class="btn-primary">Save Stats Headings</button></div>
+</form>
+{% elif section == 'footer' %}
+<form method="POST" class="portal-admin-form-card">
+    <input type="hidden" name="section" value="footer">
+    <div class="form-grid">
+        <div class="form-group"><label>Column 1 title</label><input name="column1_title" class="form-control" value="{{ cms.footer.column1_title }}"></div>
+        <div class="form-group"><label>Column 2 title</label><input name="column2_title" class="form-control" value="{{ cms.footer.column2_title }}"></div>
+        <div class="form-group form-group--full"><label>Column 1 lines (one per line)</label><textarea name="column1_lines" class="form-control" rows="3">{% for line in cms.footer.column1_lines %}{{ line }}{% if not loop.last %}
+{% endif %}{% endfor %}</textarea></div>
+        <div class="form-group form-group--full"><label>Column 2 paragraphs (one per line)</label><textarea name="column2_paragraphs" class="form-control" rows="4">{% for line in cms.footer.column2_paragraphs %}{{ line }}{% if not loop.last %}
+{% endif %}{% endfor %}</textarea></div>
+        <div class="form-group"><label>Seal caption</label><input name="seal_caption" class="form-control" value="{{ cms.footer.seal_caption }}"></div>
+        <div class="form-group"><label>Copyright</label><input name="copyright" class="form-control" value="{{ cms.footer.copyright }}"></div>
+        <div class="form-group form-group--full"><label>Disclaimer</label><textarea name="disclaimer" class="form-control" rows="3">{{ cms.footer.disclaimer }}</textarea></div>
+    </div>
+    <h3>Government links</h3>
+    {% for link in cms.footer.gov_links %}
+    <div class="portal-admin-repeater-row">
+        <input name="gov_label" class="form-control" value="{{ link.label }}">
+        <input name="gov_url" class="form-control" value="{{ link.url }}">
+    </div>
+    {% endfor %}
+    <div class="portal-admin-repeater-row">
+        <input name="gov_label" class="form-control" placeholder="New label">
+        <input name="gov_url" class="form-control" placeholder="https://">
+    </div>
+    <div class="portal-admin-form-actions"><button type="submit" class="btn-primary">Save Footer</button></div>
+</form>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,119 @@
+{% extends "layouts/app.html" %}
+
+{% block title %}{{ page_title or 'My Service Record' }} - HRMS{% endblock %}
+
+{% set navbar_title = page_title or 'My Service Record' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'My Records'},
+    {'label': 'My Service Record'}
+] %}
+
+{% block app_content %}
+{% include 'includes/flash_messages.html' %}
+
+<div class="page-header" style="flex-wrap: wrap; gap: 0.75rem;">
+    <div>
+        <h1 class="page-title">{{ page_title or 'My Service Record' }}</h1>
+        <p style="margin: 0.35rem 0 0; color: var(--medium-gray); font-size: 0.9rem;">
+            Your employment / appointment history with the LGU (read-only).
+        </p>
+    </div>
+    <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+        {% if can_export_pdf and pdf_url %}
+        <a href="{{ pdf_url }}" class="btn-primary">Export PDF</a>
+        {% endif %}
+        <a href="{{ dashboard_url or url_for('routes.employee_dashboard') }}" class="btn-secondary">Back</a>
+    </div>
+</div>
+
+<section class="card" style="padding: 1rem 1.25rem; border: 1px solid var(--brand-border, #e5e7eb); border-radius: 12px; margin-bottom: 1.25rem;">
+    <h2 style="margin: 0 0 0.75rem; font-size: 1.05rem;">Current appointment</h2>
+    <div class="table-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Employee ID</th>
+                    <th>Name</th>
+                    <th>Original appointment</th>
+                    <th>Status</th>
+                    <th>Nature</th>
+                    <th>Department</th>
+                    <th>Position</th>
+                    <th>SG</th>
+                    <th>Step</th>
+                    <th>Amount</th>
+                    <th>Next SI due</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>{{ employee.employee_id or '—' }}</td>
+                    <td>{{ employee.directory_name }}</td>
+                    <td>{{ employee.appointment_date.strftime('%Y-%m-%d') if employee.appointment_date else '—' }}</td>
+                    <td>{{ employee.status_of_appointment or '—' }}</td>
+                    <td>{{ employee.nature_of_appointment or '—' }}</td>
+                    <td>{{ employee.department.name if employee.department else '—' }}</td>
+                    <td>{{ employee.position or '—' }}</td>
+                    <td>{{ employee.salary_grade if employee.salary_grade is not none else '—' }}</td>
+                    <td>{{ employee.salary_step if employee.salary_step is not none else '—' }}</td>
+                    <td>{% if current_amount is not none %}{{ '{:,.2f}'.format(current_amount) }}{% else %}—{% endif %}</td>
+                    <td>{{ si_due.strftime('%Y-%m-%d') if si_due else '—' }}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="card" style="padding: 1rem 1.25rem; border: 1px solid var(--brand-border, #e5e7eb); border-radius: 12px;">
+    <h2 style="margin: 0 0 0.75rem; font-size: 1.05rem;">Employment / appointment history</h2>
+    {% if history_list %}
+    <div class="table-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Change type</th>
+                    <th>Effectivity</th>
+                    <th>Original appt.</th>
+                    <th>Status</th>
+                    <th>Nature</th>
+                    <th>Department</th>
+                    <th>Position</th>
+                    <th>SG</th>
+                    <th>Step</th>
+                    <th>From→To</th>
+                    <th>Amount</th>
+                    <th>Remarks</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% for h in history_list %}
+                <tr>
+                    <td>{{ h.change_type or h.appoint_nature or '—' }}</td>
+                    <td>{{ h.effectivity_date.strftime('%Y-%m-%d') if h.effectivity_date else '—' }}</td>
+                    <td>{{ h.appoint_date.strftime('%Y-%m-%d') if h.appoint_date else '—' }}</td>
+                    <td>{{ h.appoint_status or '—' }}</td>
+                    <td>{{ h.appoint_nature or '—' }}</td>
+                    <td>{{ h.emp_dept or '—' }}</td>
+                    <td>{{ h.emp_position or '—' }}</td>
+                    <td>{{ h.sal_grade if h.sal_grade is not none else '—' }}</td>
+                    <td>{{ h.sal_step if h.sal_step is not none else '—' }}</td>
+                    <td>
+                        {% if h.from_sal_step is not none or h.to_sal_step is not none %}
+                            {{ h.from_sal_step if h.from_sal_step is not none else '—' }} → {{ h.to_sal_step if h.to_sal_step is not none else '—' }}
+                        {% else %}
+                            —
+                        {% endif %}
+                    </td>
+                    <td>{% if h.sal_amount is not none %}{{ '{:,.2f}'.format(h.sal_amount) }}{% else %}—{% endif %}</td>
+                    <td>{{ h.remarks or '—' }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p style="color: var(--medium-gray); margin: 0;">No appointment history has been recorded yet. HR can add entries under Status of Appointment.</p>
+    {% endif %}
+</section>
+{% endblock %}

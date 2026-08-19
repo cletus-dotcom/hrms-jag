@@ -1,0 +1,174 @@
+{% extends "layouts/app.html" %}
+
+{% block title %}Employee ID Cards - HRMS{% endblock %}
+
+{% set navbar_title = 'Employee ID Cards' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Reports'},
+    {'label': 'Employee ID Cards'}
+] %}
+
+{% block app_content %}
+{% include 'includes/flash_messages.html' %}
+
+<div class="page-header" style="flex-wrap: wrap; gap: 0.75rem;">
+    <div>
+        <h1 class="page-title">Employee ID Cards</h1>
+        <p style="margin: 0.35rem 0 0; color: var(--medium-gray); font-size: 0.9rem;">
+            Print official LGU Jagna ID cards. <strong>JO/COS</strong> and <strong>Plantilla</strong> use different templates
+            (photo from eRMT). JO/COS prints on <strong>A4</strong> (four 4&quot;&times;6&quot; slots): individual = two copies on the top half;
+            batch = two employees per sheet (two copies each).
+        </p>
+    </div>
+    <a href="{{ url_for('routes.report_employees_list') }}" class="btn-secondary">Employees List</a>
+</div>
+
+<div class="table-section" style="margin-bottom: 1rem;">
+    <form method="GET" action="{{ url_for('routes.report_employee_id_cards') }}" class="form-section" style="padding: 1rem 1.25rem; border: 1px solid var(--brand-border, #e5e7eb); border-radius: 8px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; align-items: end;">
+            <div class="form-group" style="margin: 0;">
+                <label for="department_id">Department</label>
+                <select name="department_id" id="department_id" class="form-control">
+                    <option value="" {% if not filter_department_id %}selected{% endif %}>All departments</option>
+                    {% for d in departments %}
+                    <option value="{{ d.id }}" {% if filter_department_id|string == d.id|string %}selected{% endif %}>{{ d.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group" style="margin: 0;">
+                <label for="status">Employment status</label>
+                <select name="status" id="status" class="form-control">
+                    <option value="active" {% if filter_status == 'active' %}selected{% endif %}>Active</option>
+                    <option value="all" {% if filter_status == 'all' %}selected{% endif %}>All</option>
+                    <option value="inactive" {% if filter_status == 'inactive' %}selected{% endif %}>Inactive</option>
+                    <option value="separated" {% if filter_status == 'separated' %}selected{% endif %}>Separated</option>
+                </select>
+            </div>
+            <div class="form-group" style="margin: 0;">
+                <label for="id_format">ID format</label>
+                <select name="id_format" id="id_format" class="form-control">
+                    <option value="all" {% if filter_id_format == 'all' %}selected{% endif %}>All formats</option>
+                    <option value="jo_cos" {% if filter_id_format == 'jo_cos' %}selected{% endif %}>JO/COS only</option>
+                    <option value="plantilla" {% if filter_id_format == 'plantilla' %}selected{% endif %}>Plantilla only</option>
+                </select>
+            </div>
+            <div class="form-group" style="margin: 0;">
+                <button type="submit" class="btn-primary">Apply filters</button>
+            </div>
+        </div>
+    </form>
+</div>
+
+<form method="POST" action="{{ url_for('routes.report_employee_id_cards_batch_pdf') }}" id="idCardBatchForm">
+    <div class="table-section">
+        <div class="search-bar" style="flex-wrap: wrap; gap: 0.65rem; align-items: center;">
+            <input type="text" id="idCardSearch" class="search-input" placeholder="Search by ID, name, position, or department..." style="min-width: 240px;">
+            <span class="search-icon">🔍</span>
+            <label style="display:inline-flex; align-items:center; gap:0.35rem; font-size:0.9rem; margin:0;">
+                <input type="checkbox" id="idCardSelectAll"> Select all visible
+            </label>
+            <button type="submit" class="btn-primary" id="idCardBatchBtn">Print selected (batch PDF)</button>
+            <span style="margin-left: auto; font-size: 0.85rem; color: var(--medium-gray);"><strong>{{ employees|length }}</strong> employee(s)</span>
+        </div>
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th style="width:2.5rem;"></th>
+                        <th>Employee ID</th>
+                        <th>Name</th>
+                        <th>Department</th>
+                        <th>Position</th>
+                        <th>ID format</th>
+                        <th>ID Photo</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="idCardTableBody">
+                    {% for emp in employees %}
+                    {% set pos = emp.jo_cos_designation.designation if emp.jo_cos_designation and emp.jo_cos_designation.designation else (emp.position or '—') %}
+                    {% set fmt = format_labels.get(emp.id, 'Plantilla') %}
+                    <tr class="table-row" data-search="{{ emp.employee_id|lower }} {{ emp.full_name|lower }} {{ pos|lower }} {{ emp.department.name|lower if emp.department else '' }} {{ fmt|lower }}">
+                        <td>
+                            <input type="checkbox" name="employee_ids" value="{{ emp.id }}" class="id-card-check">
+                        </td>
+                        <td>{{ emp.employee_id or '—' }}</td>
+                        <td>{{ emp.full_name }}</td>
+                        <td>{{ emp.department.name if emp.department else '—' }}</td>
+                        <td>{{ pos }}</td>
+                        <td><span class="status-badge {% if fmt == 'JO/COS' %}status-approved{% else %}status-pending{% endif %}">{{ fmt }}</span></td>
+                        <td>
+                            {% if photo_flags.get(emp.id) %}
+                            <span class="status-badge status-approved">Linked</span>
+                            {% else %}
+                            <span class="status-badge status-pending">No photo</span>
+                            {% endif %}
+                        </td>
+                        <td class="actions-cell">
+                            <a href="{{ url_for('routes.employee_id_card_pdf', id=emp.id) }}" class="btn-action">Print ID</a>
+                            {% if photo_flags.get(emp.id) %}
+                            <a href="{{ url_for('routes.employee_id_photo', id=emp.id) }}" class="btn-action" target="_blank" rel="noopener">Photo</a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="no-data">No employees match the selected filters.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</form>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var inp = document.getElementById('idCardSearch');
+    var body = document.getElementById('idCardTableBody');
+    var selectAll = document.getElementById('idCardSelectAll');
+    var form = document.getElementById('idCardBatchForm');
+
+    function visibleRows() {
+        return Array.prototype.slice.call(body.querySelectorAll('tr[data-search]')).filter(function (row) {
+            return row.style.display !== 'none';
+        });
+    }
+
+    if (inp && body) {
+        inp.addEventListener('input', function () {
+            var q = this.value.toLowerCase().trim();
+            body.querySelectorAll('tr[data-search]').forEach(function (row) {
+                var t = row.getAttribute('data-search') || '';
+                row.style.display = !q || t.indexOf(q) !== -1 ? '' : 'none';
+            });
+            if (selectAll) selectAll.checked = false;
+        });
+    }
+
+    if (selectAll && body) {
+        selectAll.addEventListener('change', function () {
+            var on = selectAll.checked;
+            visibleRows().forEach(function (row) {
+                var cb = row.querySelector('.id-card-check');
+                if (cb) cb.checked = on;
+            });
+        });
+    }
+
+    if (form) {
+        form.addEventListener('submit', function (e) {
+            var any = false;
+            form.querySelectorAll('.id-card-check').forEach(function (cb) {
+                if (cb.checked) any = true;
+            });
+            if (!any) {
+                e.preventDefault();
+                alert('Select at least one employee.');
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

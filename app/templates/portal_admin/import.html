@@ -1,0 +1,48 @@
+{% extends 'portal_admin/_layout.html' %}
+{% block portal_title %}Data Import{% endblock %}
+{% block portal_content %}
+<div class="portal-admin-page-header">
+    <h1>Database Import Tools</h1>
+    <p>Download templates, preview imports, export data, or purge tables. Use purge only on fresh installations or with a database backup.</p>
+    <p class="muted">Import resolver: <code>{{ import_resolver_version }}</code> — restart <code>python run.py</code> after code updates.</p>
+</div>
+<div class="portal-admin-import-list">
+    {% for t in tables %}
+    <article class="portal-admin-import-item" id="table-{{ t.key }}">
+        <div class="portal-admin-import-head">
+            <div>
+                <h2><code>{{ t.key }}</code></h2>
+                <p class="muted">{{ t.label }} · {{ t.row_count }} rows · {{ t.column_count }} columns{% if t.sensitive %} · <strong>sensitive</strong>{% endif %}{% if t.key == 'leave_ledger' %} · <code>employee_id</code> accepts badge numbers (e.g. 38300){% endif %}</p>
+            </div>
+            <div class="portal-admin-import-actions">
+                <a class="btn-secondary btn-sm" href="{{ url_for('portal_admin.import_template_csv', table_key=t.key) }}">CSV template</a>
+                <a class="btn-secondary btn-sm" href="{{ url_for('portal_admin.import_template_xlsx', table_key=t.key) }}">Excel template</a>
+                <a class="btn-secondary btn-sm" href="{{ url_for('portal_admin.import_export_csv', table_key=t.key) }}">Export CSV</a>
+            </div>
+        </div>
+        <div class="portal-admin-import-panel" data-table="{{ t.key }}">
+            <div class="portal-admin-import-upload">
+                <input type="file" class="portal-import-file" accept=".csv,.xlsx,.xlsm" data-table="{{ t.key }}">
+                <button type="button" class="btn-primary btn-sm portal-import-preview-btn" data-table="{{ t.key }}">Preview import</button>
+            </div>
+            <div class="portal-import-preview" id="preview-{{ t.key }}" hidden></div>
+            <div class="portal-admin-purge">
+                <button type="button" class="btn-danger btn-sm portal-import-purge-btn" data-table="{{ t.key }}">Purge table…</button>
+            </div>
+        </div>
+    </article>
+    {% endfor %}
+</div>
+<div id="portal-purge-modal" class="portal-admin-modal" hidden>
+    <div class="portal-admin-modal-dialog">
+        <h3>Purge table</h3>
+        <p>Type the confirmation phrase exactly to delete all rows.</p>
+        <p><code id="portal-purge-phrase"></code></p>
+        <input type="text" id="portal-purge-input" class="form-control" autocomplete="off">
+        <div class="portal-admin-form-actions">
+            <button type="button" class="btn-secondary" id="portal-purge-cancel">Cancel</button>
+            <button type="button" class="btn-danger" id="portal-purge-confirm">Purge</button>
+        </div>
+    </div>
+</div>
+{% endblock %}

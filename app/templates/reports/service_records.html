@@ -1,0 +1,109 @@
+{% extends "layouts/app.html" %}
+
+{% block title %}Service Records (Report) - HRMS{% endblock %}
+
+{% set navbar_title = 'Service Records' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Reports'},
+    {'label': 'Service Records'}
+] %}
+
+{% block app_content %}
+{% include 'includes/flash_messages.html' %}
+
+<div class="page-header" style="flex-wrap: wrap; gap: 0.75rem;">
+    <div>
+        <h1 class="page-title">Employee Service Records</h1>
+        <p style="margin: 0.35rem 0 0; color: var(--medium-gray); font-size: 0.9rem;">
+            View or export appointment history PDFs for any employee.
+        </p>
+    </div>
+    <a href="{{ url_for('routes.report_employees_list') }}" class="btn-secondary">Employees List</a>
+</div>
+
+<div class="table-section" style="margin-bottom: 1rem;">
+    <form method="GET" action="{{ url_for('routes.report_service_records') }}" class="form-section" style="padding: 1rem 1.25rem; border: 1px solid var(--brand-border, #e5e7eb); border-radius: 8px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; align-items: end;">
+            <div class="form-group" style="margin: 0;">
+                <label for="department_id">Department</label>
+                <select name="department_id" id="department_id" class="form-control">
+                    <option value="" {% if not filter_department_id %}selected{% endif %}>All departments</option>
+                    {% for d in departments %}
+                    <option value="{{ d.id }}" {% if filter_department_id|string == d.id|string %}selected{% endif %}>{{ d.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group" style="margin: 0;">
+                <label for="status">Employment status</label>
+                <select name="status" id="status" class="form-control">
+                    <option value="active" {% if filter_status == 'active' %}selected{% endif %}>Active</option>
+                    <option value="all" {% if filter_status == 'all' %}selected{% endif %}>All</option>
+                    <option value="inactive" {% if filter_status == 'inactive' %}selected{% endif %}>Inactive</option>
+                    <option value="separated" {% if filter_status == 'separated' %}selected{% endif %}>Separated</option>
+                </select>
+            </div>
+            <div class="form-group" style="margin: 0;">
+                <button type="submit" class="btn-primary">Apply filters</button>
+            </div>
+        </div>
+    </form>
+</div>
+
+<div class="table-section">
+    <div class="search-bar" style="flex-wrap: wrap;">
+        <input type="text" id="serviceRecordSearch" class="search-input" placeholder="Search by ID, name, position, or department..." style="min-width: 240px;">
+        <span class="search-icon">🔍</span>
+        <span style="margin-left: auto; font-size: 0.85rem; color: var(--medium-gray);"><strong>{{ employees|length }}</strong> employee(s)</span>
+    </div>
+    <div class="table-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Employee ID</th>
+                    <th>Name</th>
+                    <th>Department</th>
+                    <th>Position</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="serviceRecordTableBody">
+                {% for emp in employees %}
+                {% set pos = emp.jo_cos_designation.designation if emp.jo_cos_designation and emp.jo_cos_designation.designation else (emp.position or '—') %}
+                <tr class="table-row" data-search="{{ emp.employee_id|lower }} {{ emp.full_name|lower }} {{ pos|lower }} {{ emp.department.name|lower if emp.department else '' }} {{ (emp.status or '')|lower }}">
+                    <td>{{ emp.employee_id or '—' }}</td>
+                    <td>{{ emp.full_name }}</td>
+                    <td>{{ emp.department.name if emp.department else '—' }}</td>
+                    <td>{{ pos }}</td>
+                    <td><span class="status-badge status-{{ emp.status or 'active' }}">{{ (emp.status or 'active')|title }}</span></td>
+                    <td class="actions-cell">
+                        <a href="{{ url_for('routes.employee_service_record', id=emp.id) }}" class="btn-action">View</a>
+                        <a href="{{ url_for('routes.employee_service_record_pdf', id=emp.id) }}" class="btn-action">Export PDF</a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6" class="no-data">No employees match the selected filters.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    var inp = document.getElementById('serviceRecordSearch');
+    var body = document.getElementById('serviceRecordTableBody');
+    if (!inp || !body) return;
+    inp.addEventListener('input', function () {
+        var q = this.value.toLowerCase().trim();
+        body.querySelectorAll('tr[data-search]').forEach(function (row) {
+            var t = row.getAttribute('data-search') || '';
+            row.style.display = !q || t.indexOf(q) !== -1 ? '' : 'none';
+        });
+    });
+});
+</script>
+{% endblock %}

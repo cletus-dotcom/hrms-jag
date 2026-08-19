@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block body_class %}has-app-navbar has-breadcrumbs dashboard-layout{% endblock %}
+{% block global_flashes %}{% endblock %}
+
+{% block content %}
+{% set navbar_menu_toggle = true %}
+{% include 'includes/app_navbar.html' %}
+{% include 'includes/app_sidebar.html' %}
+<main class="app-main-content">
+    <div class="app-page">
+    {% block app_content %}{% endblock %}
+    </div>
+</main>
+{% if (current_user.is_authenticated and (current_user.role or '')|lower in ('admin', 'hr')) %}
+{% include 'includes/generate_dtr_modal.html' %}
+<script src="{{ url_for('static', filename='js/generate-dtr-modal.js') }}"></script>
+{% endif %}
+{% endblock %}

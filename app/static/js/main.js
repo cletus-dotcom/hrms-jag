@@ -2,7 +2,6 @@
 
 document.addEventListener('DOMContentLoaded', function() {
     const headerBar = document.querySelector('.header-bar');
-    const landingTopnav = document.querySelector('.landing-topnav');
 
     function attachAutoHideOnScroll(el, hiddenClass, opts) {
         if (!el) return;
@@ -50,6 +49,10 @@ document.addEventListener('DOMContentLoaded', function() {
         return Boolean(document.querySelector('.landing-page, .public-login'));
     }
 
+    function isAppLayoutPage() {
+        return Boolean(document.querySelector('.dashboard-layout, .app-main-content'));
+    }
+
     function titleize(seg) {
         if (!seg) return '';
         const cleaned = seg.replace(/[-_]+/g, ' ').trim();
@@ -58,7 +61,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function buildBreadcrumbs() {
-        if (!headerBar || isPublicPage()) return;
+        if (!headerBar || isPublicPage() || isAppLayoutPage()) return;
         const userDropdown = headerBar.querySelector('.user-dropdown');
         if (!userDropdown) return;
         const userInfo = userDropdown.querySelector('.user-info');
@@ -123,17 +126,127 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!headerBar) return;
         document.documentElement.style.setProperty('--header-bar-height', headerBar.offsetHeight + 'px');
     }
+    // Legacy horizontal navbar auto-hide (old header-bar pages only)
     if (headerBar) {
         syncHeaderBarHeight();
         window.addEventListener('resize', syncHeaderBarHeight, { passive: true });
         window.addEventListener('load', syncHeaderBarHeight, { passive: true });
-
         attachAutoHideOnScroll(headerBar, 'header-bar--hidden', { hideDelayMs: 380, minScrollDiff: 8, keepVisibleUntilY: 20 });
     }
-
-    // Landing page public navbar
-    attachAutoHideOnScroll(landingTopnav, 'landing-topnav--hidden', { hideDelayMs: 220, minScrollDiff: 6, keepVisibleUntilY: 8 });
     buildBreadcrumbs();
+
+    // Growth Pulse startup splash (landing page only)
+    const growthPulseSplash = document.getElementById('growth-pulse-splash');
+    if (growthPulseSplash) {
+        const splashDuration = parseInt(growthPulseSplash.getAttribute('data-duration') || '3000', 10);
+        const dismissSplash = function () {
+            growthPulseSplash.classList.add('growth-pulse-splash--done');
+            window.setTimeout(function () {
+                growthPulseSplash.remove();
+            }, 550);
+        };
+        if (document.readyState === 'complete') {
+            window.setTimeout(dismissSplash, splashDuration);
+        } else {
+            window.addEventListener('load', function () {
+                window.setTimeout(dismissSplash, splashDuration);
+            }, { once: true });
+        }
+    }
+
+    // Landing notice carousel
+    const noticeCarousel = document.querySelector('.landing-notice-carousel');
+    if (noticeCarousel) {
+        const slides = Array.from(noticeCarousel.querySelectorAll('.landing-carousel-slide'));
+        const dots = Array.from(noticeCarousel.querySelectorAll('.landing-carousel-dot'));
+        if (slides.length > 1) {
+            let activeIndex = 0;
+            const intervalMs = parseInt(noticeCarousel.getAttribute('data-interval') || '6000', 10);
+            let timer = null;
+
+            const showSlide = function (index) {
+                activeIndex = (index + slides.length) % slides.length;
+                slides.forEach(function (slide, i) {
+                    const on = i === activeIndex;
+                    slide.classList.toggle('is-active', on);
+                    slide.hidden = !on;
+                });
+                dots.forEach(function (dot, i) {
+                    const on = i === activeIndex;
+                    dot.classList.toggle('is-active', on);
+                    dot.setAttribute('aria-selected', on ? 'true' : 'false');
+                });
+            };
+
+            const schedule = function () {
+                if (timer) window.clearInterval(timer);
+                timer = window.setInterval(function () {
+                    showSlide(activeIndex + 1);
+                }, intervalMs);
+            };
+
+            dots.forEach(function (dot) {
+                dot.addEventListener('click', function () {
+                    const idx = parseInt(dot.getAttribute('data-index') || '0', 10);
+                    showSlide(idx);
+                    schedule();
+                });
+            });
+
+            showSlide(0);
+            schedule();
+        }
+    }
+
+    // Inactivity screensaver (2-minute timeout)
+    const screensaver = document.getElementById('screensaver');
+    const screensaverTagline = screensaver ? screensaver.querySelector('.screensaver-tagline') : null;
+    let inactivityTimer = null;
+    let screensaverPositionTimer = null;
+    const INACTIVITY_MS = 120000;
+    const SCREENSAVER_MOVE_MS = 15000;
+
+    function moveScreensaverTagline() {
+        if (!screensaverTagline || screensaver.classList.contains('hidden')) return;
+        const pad = 12;
+        const maxX = Math.max(pad, window.innerWidth - screensaverTagline.offsetWidth - pad);
+        const maxY = Math.max(pad, window.innerHeight - screensaverTagline.offsetHeight - pad);
+        const x = pad + Math.random() * (maxX - pad);
+        const y = pad + Math.random() * (maxY - pad);
+        screensaverTagline.style.left = x + 'px';
+        screensaverTagline.style.top = y + 'px';
+        screensaverTagline.style.transform = 'none';
+    }
+
+    function showScreensaver() {
+        if (!screensaver) return;
+        screensaver.classList.remove('hidden');
+        screensaver.setAttribute('aria-hidden', 'false');
+        moveScreensaverTagline();
+        if (screensaverPositionTimer) clearInterval(screensaverPositionTimer);
+        screensaverPositionTimer = window.setInterval(moveScreensaverTagline, SCREENSAVER_MOVE_MS);
+    }
+
+    function resetInactivityTimer() {
+        if (!screensaver) return;
+        if (!screensaver.classList.contains('hidden')) {
+            screensaver.classList.add('hidden');
+            screensaver.setAttribute('aria-hidden', 'true');
+            if (screensaverPositionTimer) {
+                clearInterval(screensaverPositionTimer);
+                screensaverPositionTimer = null;
+            }
+        }
+        clearTimeout(inactivityTimer);
+        inactivityTimer = window.setTimeout(showScreensaver, INACTIVITY_MS);
+    }
+
+    if (screensaver) {
+        ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'wheel'].forEach(function (evt) {
+            window.addEventListener(evt, resetInactivityTimer, { passive: true });
+        });
+        resetInactivityTimer();
+    }
 
     // Auto-dismiss alerts after 5 seconds
     const alerts = document.querySelectorAll('.alert:not(.alert-dismissible)');

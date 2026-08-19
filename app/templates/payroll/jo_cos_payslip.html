@@ -1,0 +1,178 @@
+{% extends "layouts/app.html" %}
+
+{% block title %}Payslip - HRMS{% endblock %}
+
+{% set navbar_title = 'Payslip' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'My Records'},
+    {'label': 'Payslip'}
+] %}
+
+{% block extra_css %}
+<style>
+  .payslip-page { max-width: 720px; margin: 0 auto; }
+  .payslip-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    align-items: center;
+  }
+  .jo-cos-payslip-sheet {
+    width: 210mm;
+    max-width: 100%;
+    min-height: 148.5mm;
+    margin: 0 auto;
+    padding: 10mm 12mm;
+    border: 1px solid var(--brand-border, #d1d5db);
+    border-radius: 4px;
+    background: #fff;
+    box-sizing: border-box;
+    font-size: 0.85rem;
+    line-height: 1.4;
+  }
+  .jo-cos-payslip-sheet h2 {
+    margin: 0 0 0.15rem;
+    font-size: 1rem;
+    text-align: center;
+    letter-spacing: 0.03em;
+  }
+  .jo-cos-payslip-sheet h3 {
+    margin: 0 0 0.75rem;
+    font-size: 0.9rem;
+    text-align: center;
+    font-weight: 600;
+  }
+  .payslip-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.25rem 1rem;
+    margin-bottom: 0.75rem;
+    font-size: 0.82rem;
+  }
+  .payslip-meta .full { grid-column: 1 / -1; }
+  .payslip-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.5rem 0;
+    font-size: 0.82rem;
+  }
+  .payslip-table th,
+  .payslip-table td {
+    padding: 0.35rem 0.25rem;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .payslip-table th { text-align: left; font-weight: 600; }
+  .payslip-table td.num { text-align: right; white-space: nowrap; }
+  .payslip-net {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 2px solid #111;
+    font-weight: 700;
+    font-size: 0.95rem;
+  }
+  .payslip-sig {
+    margin-top: 1.25rem;
+    font-size: 0.75rem;
+    color: var(--medium-gray, #6b7280);
+  }
+  .payslip-sig-line {
+    width: 12rem;
+    border-top: 1px solid #111;
+    margin-top: 2rem;
+    padding-top: 0.25rem;
+  }
+  @media print {
+    body * { visibility: hidden; }
+    .jo-cos-payslip-sheet, .jo-cos-payslip-sheet * { visibility: visible; }
+    .jo-cos-payslip-sheet {
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 210mm;
+      min-height: 148.5mm;
+      border: none;
+      border-radius: 0;
+      margin: 0;
+      padding: 10mm 12mm;
+    }
+    .no-print { display: none !important; }
+    @page { size: A4 portrait; margin: 0; }
+  }
+</style>
+{% endblock %}
+
+{% block app_content %}
+<div class="payslip-page">
+<div class="payslip-actions no-print">
+            {% if is_admin_view %}
+            <a href="{{ url_for('routes.payroll_jo_cos', year=payslip.year, month=payslip.month, quincena=payslip.quincena, department_id=payslip.department_id, load=1) }}" class="btn-secondary">← JO/COS Payroll</a>
+            {% else %}
+            <a href="{{ url_for('routes.payroll_jo_cos_my_payslips') }}" class="btn-secondary">← My Payslips</a>
+            {% endif %}
+            <span class="muted" style="font-size: 0.85rem;">(View only)</span>
+        </div>
+
+        <div class="jo-cos-payslip-sheet" id="payslipSheet">
+            <h2>MUNICIPALITY OF JAGNA</h2>
+            <h3>PAYSLIP — DAILY WAGE (JO/COS)</h3>
+
+            <div class="payslip-meta">
+                <div><strong>Name:</strong> {{ payslip.employee_name }}</div>
+                <div><strong>Emp. No.:</strong> {{ payslip.employee_no or '—' }}</div>
+                <div class="full"><strong>Designation:</strong> {{ payslip.designation }}</div>
+                <div class="full"><strong>Department:</strong> {{ payslip.department_name }}</div>
+                <div><strong>Period:</strong> {{ payslip.period_label }}</div>
+                <div><strong>Payment:</strong> ATM</div>
+            </div>
+
+            <table class="payslip-table">
+                <thead>
+                    <tr>
+                        <th>Earnings</th>
+                        <th class="num">Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Days worked: {{ payslip.days_worked_display }} · Rate/day: {{ payslip.rate_per_day_display }}</td>
+                        <td class="num">{{ payslip.gross_salary_display }}</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <table class="payslip-table">
+                <thead>
+                    <tr>
+                        <th>Deductions</th>
+                        <th class="num">Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Late{% if payslip.late_hours_display %} ({{ payslip.late_hours_display }} hrs){% endif %}</td>
+                        <td class="num">{{ payslip.late_deduction_display or '—' }}</td>
+                    </tr>
+                    <tr>
+                        <td>HDMF</td>
+                        <td class="num">{{ payslip.hdmf_display or '—' }}</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="payslip-net">
+                <span>NET PAY</span>
+                <span>{{ payslip.net_amount_display }}</span>
+            </div>
+
+            <div class="payslip-sig">
+                <div>I acknowledge receipt of the net amount stated above.</div>
+                <div class="payslip-sig-line">Employee signature / date</div>
+            </div>
+        </div>
+</div>
+{% endblock %}

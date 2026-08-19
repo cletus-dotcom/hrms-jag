@@ -1,6 +1,13 @@
-{% extends "base.html" %}
+{% extends "layouts/app.html" %}
 
 {% block title %}Leave Application #{{ leave.id }} - HRMS{% endblock %}
+
+{% set navbar_title = 'Leave Request' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Leave Management'},
+    {'label': 'Leave Request'}
+] %}
 
 {% block extra_css %}
 <style>
@@ -39,13 +46,13 @@
   .csf6 { max-width: 210mm; margin: 0 auto; }
   .csf6 .print-wrap { box-shadow: none; }
   @media print {
-    .header-bar, .print-actions { display:none !important; }
+    .app-topbar, .app-sidebar, .print-actions { display:none !important; }
     .page-header, .alert { display:none !important; }
     html, body { background: #fff !important; }
     .dashboard-content { padding: 0 !important; }
     .print-wrap { border: none; border-radius: 0; padding: 0; }
     .csf6 .box { border-radius: 0; }
-    .dashboard-container { background: #fff !important; }
+    .app-main-content { background: #fff !important; }
     /* Prevent awkward splits inside main boxes */
     .csf6 .box { break-inside: avoid; page-break-inside: avoid; }
     /* Fit to one A4 page */
@@ -65,38 +72,8 @@
 </style>
 {% endblock %}
 
-{% block content %}
-<div class="dashboard-container">
-  <div class="header-bar">
-    <div class="header-content">
-      {% include 'includes/navbar_brand.html' %}
-      <nav class="main-nav">
-        <a href="{{ url_for('routes.leave_list') }}" class="nav-link">View Leave</a>
-        <div class="nav-dropdown">
-          <a href="#" class="nav-link">ABOUT <span class="dropdown-arrow">▼</span></a>
-          <div class="dropdown-menu">
-            <a href="{{ url_for('routes.users_manual') }}" class="dropdown-item">User's Manual</a>
-            <a href="{{ url_for('routes.hrmdo_manual') }}" class="dropdown-item">HRMDO Manual</a>
-          </div>
-        </div>
-      </nav>
-      <div class="user-dropdown">
-        <a href="#" class="user-info">
-          {% if employee %}{{ employee.full_name }}{% else %}{{ current_user.username }}{% endif %} ({{ current_user.role|title }})
-          <span class="dropdown-arrow">▼</span>
-        </a>
-        <div class="dropdown-menu dropdown-menu-right">
-          <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
-          <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
-            <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
-          </form>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="dashboard-content">
-    {% with messages = get_flashed_messages(with_categories=true) %}
+{% block app_content %}
+{% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% for category, message in messages %}
           <div class="alert alert-{{ category }} alert-dismissible">

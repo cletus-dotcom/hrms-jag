@@ -1,11 +1,18 @@
-{% extends "base.html" %}
+{% extends "layouts/app.html" %}
 
 {% block title %}JO/COS Payroll - HRMS{% endblock %}
+
+{% set navbar_title = 'JO/COS Payroll' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Payroll'},
+    {'label': 'JO/COS Payroll'}
+] %}
 
 {% block extra_css %}
 <style>
   .jo-cos-payroll-wrap { overflow-x: auto; }
-  .jo-cos-payroll-table { font-size: 0.8rem; min-width: 680px; }
+  .jo-cos-payroll-table { font-size: 0.8rem; min-width: 760px; }
   .jo-cos-payroll-table th,
   .jo-cos-payroll-table td { white-space: nowrap; padding: 0.45rem 0.5rem; }
   .jo-cos-payroll-table th { text-align: center; vertical-align: middle; }
@@ -51,52 +58,18 @@
     font-weight: 600;
     border-top: 2px solid var(--brand-border, #e5e7eb);
   }
+  .jo-cos-payroll-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    margin-left: auto;
+  }
 </style>
 {% endblock %}
 
-{% block content %}
-<div class="dashboard-container">
-    <div class="header-bar">
-        <div class="header-content">
-            {% include 'includes/navbar_brand.html' %}
-            <nav class="main-nav">
-                <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
-                {% if (current_user.role or '')|lower in ('admin', 'hr') %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Settings <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
-                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Manage Employees</a>
-                        <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
-                    </div>
-                </div>
-                {% endif %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
-                        {% include 'includes/nav_dtr_upload_link.html' %}
-                        {% include 'includes/nav_dtr_regenerate_link.html' %}
-                    </div>
-                </div>
-                {% include 'includes/nav_payroll_top_menu.html' %}
-            </nav>
-            <div class="user-dropdown">
-                <a href="#" class="user-info">
-                    {% if employee %}{{ employee.full_name }} ({{ current_user.role|title }}){% else %}{{ current_user.username }} ({{ current_user.role|title }}){% endif %}
-                    <span class="dropdown-arrow">▼</span>
-                </a>
-                <div class="dropdown-menu dropdown-menu-right">
-                    <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
-                        <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="dashboard-content">
-        {% with messages = get_flashed_messages(with_categories=true) %}
+{% block app_content %}
+{% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
                     <div class="alert alert-{{ category }} alert-dismissible">
@@ -164,9 +137,21 @@
             <div class="search-bar" style="flex-wrap: wrap; margin-bottom: 0.75rem;">
                 <input type="text" id="joCosPayrollSearch" class="search-input" placeholder="Search employees…" style="min-width: 220px;" autocomplete="off">
                 <span class="search-icon">🔍</span>
-                <div style="margin-left: auto; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
+                <div class="jo-cos-payroll-toolbar">
                     <span style="font-size: 0.85rem; color: var(--medium-gray);"><strong>{{ row_count }}</strong> employee(s)</span>
-                    <a class="btn-secondary" href="{{ url_for('routes.payroll_jo_cos_export', format='pdf', year=filters.year, month=filters.month, quincena=filters.quincena, department_id=filters.department_id, load=1) }}">Export PDF</a>
+                    {% if rows %}
+                    <form method="POST" action="{{ url_for('routes.payroll_jo_cos_payslips_generate') }}" style="margin: 0;">
+                        <input type="hidden" name="year" value="{{ filters.year }}">
+                        <input type="hidden" name="month" value="{{ filters.month }}">
+                        <input type="hidden" name="quincena" value="{{ filters.quincena }}">
+                        <input type="hidden" name="department_id" value="{{ filters.department_id }}">
+                        <button type="submit" class="btn-primary">Generate Payslip</button>
+                    </form>
+                    {% if payslip_count %}
+                    <a class="btn-secondary" href="{{ url_for('routes.payroll_jo_cos_payslips_export', year=filters.year, month=filters.month, quincena=filters.quincena, department_id=filters.department_id) }}">Export Payslips PDF</a>
+                    {% endif %}
+                    {% endif %}
+                    <a class="btn-secondary" href="{{ url_for('routes.payroll_jo_cos_export', format='pdf', year=filters.year, month=filters.month, quincena=filters.quincena, department_id=filters.department_id, load=1) }}">Export Payroll PDF</a>
                 </div>
             </div>
 
@@ -184,12 +169,13 @@
                             <th rowspan="2">No. of Days<br>Worked</th>
                             <th rowspan="2" class="num">Rate<br>Per Day</th>
                             <th rowspan="2" class="num">Gross<br>Salary</th>
-                            <th colspan="2" class="deductions-group">Deductions</th>
+                            <th colspan="3" class="deductions-group">Deductions</th>
                             <th rowspan="2" class="num">Net<br>Amount</th>
                         </tr>
                         <tr>
                             <th>No. of Hours<br>Late</th>
                             <th class="num">Late</th>
+                            <th class="num">HDMF</th>
                         </tr>
                     </thead>
                     <tbody id="joCosPayrollBody">
@@ -201,11 +187,12 @@
                             <td class="num">{{ r.gross_salary_display }}</td>
                             <td class="num num-center">{{ r.late_hours_display }}</td>
                             <td class="num">{{ r.late_deduction_display }}</td>
+                            <td class="num">{{ r.pagibig_display }}</td>
                             <td class="num">{{ r.net_amount_display }}</td>
                         </tr>
                         {% else %}
                         <tr id="joCosPayrollEmpty">
-                            <td colspan="7" class="no-data">No active JO/COS employees in this department, or no worktime for the selected quincena. Run <strong>Regenerate DTR</strong> first.</td>
+                            <td colspan="8" class="no-data">No active JO/COS employees in this department, or no worktime for the selected quincena. Run <strong>Regenerate DTR</strong> first.</td>
                         </tr>
                         {% endfor %}
                         {% if rows %}
@@ -214,6 +201,7 @@
                             <td class="num">{{ totals.gross_salary }}</td>
                             <td class="num num-center"></td>
                             <td class="num">{{ totals.late }}</td>
+                            <td class="num">{{ totals.pagibig }}</td>
                             <td class="num">{{ totals.net }}</td>
                         </tr>
                         {% endif %}

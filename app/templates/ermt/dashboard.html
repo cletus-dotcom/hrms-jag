@@ -1,0 +1,383 @@
+{% extends "layouts/app.html" %}
+
+{% block title %}eRMT Dashboard - HRMS{% endblock %}
+
+{% set navbar_title = 'eRMT — Records Management' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'eRMT'},
+    {'label': 'Dashboard'}
+] %}
+
+{% block extra_css %}
+<style>
+  .ermt-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+  }
+  .ermt-stat-tile {
+    background: linear-gradient(180deg, #fafcfe 0%, #f0f6fb 100%);
+    border: 1px solid var(--brand-border, #e5e7eb);
+    border-radius: 10px;
+    padding: 1rem;
+    text-align: center;
+  }
+  .ermt-stat-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--primary-blue, #013a63);
+  }
+  .ermt-stat-label {
+    font-size: 0.78rem;
+    color: var(--medium-gray, #6b7280);
+    margin-top: 0.2rem;
+  }
+  .ermt-detail-panel {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+  }
+  .ermt-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.65rem 1rem;
+  }
+  .ermt-detail-item label {
+    display: block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #64748b;
+    margin-bottom: 0.15rem;
+  }
+  .ermt-detail-item span,
+  .ermt-detail-item p,
+  .ermt-detail-item a {
+    font-size: 0.85rem;
+    color: #1e293b;
+    margin: 0;
+    word-break: break-word;
+  }
+  .ermt-detail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.85rem;
+  }
+  .ermt-expand-btn {
+    border: none;
+    background: transparent;
+    color: var(--primary-blue, #013a63);
+    cursor: pointer;
+    padding: 0.15rem;
+  }
+  tr.ermt-doc-row.expanded .ermt-expand-btn { transform: rotate(90deg); }
+  .ermt-mobile-list { display: block; }
+  .ermt-desktop-table { display: none; }
+  .ermt-card {
+    border: 1px solid var(--brand-border, #e5e7eb);
+    border-radius: 10px;
+    padding: 0.85rem;
+    margin-bottom: 0.75rem;
+    background: #fff;
+  }
+  .ermt-card .ermt-card-detail { display: none; margin-top: 0.75rem; }
+  .ermt-card.expanded .ermt-card-detail { display: block; }
+  @media (min-width: 768px) {
+    .ermt-mobile-list { display: none; }
+    .ermt-desktop-table { display: block; }
+  }
+</style>
+{% endblock %}
+
+{% block app_content %}
+{% include 'includes/flash_messages.html' %}
+
+<div class="page-header" style="flex-wrap: wrap; gap: 0.75rem;">
+    <div>
+        <h1 class="page-title">eRMT Dashboard</h1>
+        <p style="margin: 0.35rem 0 0; color: var(--medium-gray); font-size: 0.9rem;">
+            Electronic Records Management Tool — scanned PDF records with cabinet and shelf locations.
+        </p>
+    </div>
+    <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+        {% if can_edit %}
+        <a href="{{ url_for('ermt.add_record') }}" class="btn-primary">+ New Record</a>
+        {% endif %}
+        <a href="{{ url_for('routes.dashboard') }}" class="btn-secondary">HRMS Dashboard</a>
+    </div>
+</div>
+
+<div class="table-section" style="margin-bottom: 1rem; padding: 1rem 1.25rem;">
+    <p style="margin: 0 0 0.75rem; font-size: 0.9rem;">
+        Welcome, <strong>{{ fullname }}</strong>
+        <span style="color: var(--medium-gray);"> · {{ office }} · {{ role }}</span>
+    </p>
+    <div class="ermt-stats">
+        <div class="ermt-stat-tile">
+            <div class="ermt-stat-value" id="statTotal">—</div>
+            <div class="ermt-stat-label">Total Records</div>
+        </div>
+        <div class="ermt-stat-tile">
+            <div class="ermt-stat-value" id="statCabinets">—</div>
+            <div class="ermt-stat-label">Cabinets Used</div>
+        </div>
+        <div class="ermt-stat-tile">
+            <div class="ermt-stat-value" id="statWithPdf">—</div>
+            <div class="ermt-stat-label">With NAS PDF Link</div>
+        </div>
+    </div>
+</div>
+
+<div class="table-section">
+    <div class="search-bar" style="flex-wrap: wrap;">
+        <input type="text" id="recordsFilter" class="search-input" placeholder="Search by title, type, cabinet, shelf, or keywords…" style="min-width: 240px;">
+        <span class="search-icon">🔍</span>
+    </div>
+
+    <div class="ermt-mobile-list" id="recordsMobile"></div>
+    <div class="table-container ermt-desktop-table">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th style="width: 2.5rem;"></th>
+                    <th>Record #</th>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Title</th>
+                    <th>Cabinet</th>
+                    <th>Shelf</th>
+                </tr>
+            </thead>
+            <tbody id="recordsTableBody"></tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    const canEditRecords = {{ 'true' if can_edit else 'false' }};
+    const canDeleteRecords = {{ 'true' if can_delete else 'false' }};
+
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function recordSearchText(record) {
+        return [
+            record.record_number, record.record_date, record.record_type, record.title,
+            record.cabinet_number, record.shelf_number, record.keywords || '',
+            record.remarks || '', record.encoded_by || ''
+        ].join(' ').toLowerCase();
+    }
+
+    function actionButtons(record) {
+        const editBtn = canEditRecords
+            ? `<a href="/ermt/edit/${record.id}" class="btn-action">Update</a>`
+            : '';
+        const deleteBtn = canDeleteRecords
+            ? `<button type="button" class="btn-action btn-danger delete-btn" data-id="${record.id}">Delete</button>`
+            : '';
+        return `${editBtn}${deleteBtn}`;
+    }
+
+    function pdfLinkHtml(record) {
+        if (!record.pdf_link) return '<span>—</span>';
+        const path = record.pdf_link;
+        const href = record.pdf_open_href || path;
+        return (
+            `<div style="display:flex;flex-wrap:wrap;gap:0.4rem;align-items:center;margin-bottom:0.35rem;">` +
+            `<button type="button" class="btn-action copy-nas-path-btn" data-path="${escapeHtml(path)}">Copy path</button>` +
+            `<a class="btn-action" href="${escapeHtml(href)}" target="_blank" rel="noopener">Try browser open</a>` +
+            `</div>` +
+            `<div style="font-size:0.8rem;color:#1e293b;word-break:break-all;font-family:ui-monospace,Consolas,monospace;">${escapeHtml(path)}</div>` +
+            `<div style="font-size:0.75rem;color:#64748b;margin-top:0.35rem;line-height:1.4;">` +
+            `Office NAS: <code>\\\\192.168.20.3\\hrmdo</code>. Recommended: copy the path, then open it in <strong>File Explorer</strong>, ` +
+            `<strong>Adobe Acrobat/Reader</strong>, <strong>Microsoft Edge</strong>, or another installed PDF app. ` +
+            `Many browsers block direct <code>file://</code> links from this page.` +
+            `</div>`
+        );
+    }
+
+    function buildDetailPanel(record) {
+        return `
+            <div class="ermt-detail-panel">
+                <div class="ermt-detail-grid">
+                    <div class="ermt-detail-item"><label>Record No.</label><span>${escapeHtml(record.record_number)}</span></div>
+                    <div class="ermt-detail-item"><label>Record Date</label><span>${escapeHtml(record.record_date || '—')}</span></div>
+                    <div class="ermt-detail-item"><label>Record Type</label><span>${escapeHtml(record.record_type || '—')}</span></div>
+                    <div class="ermt-detail-item"><label>Cabinet</label><span>${escapeHtml(record.cabinet_number || '—')}</span></div>
+                    <div class="ermt-detail-item"><label>Shelf</label><span>${escapeHtml(record.shelf_number || '—')}</span></div>
+                    <div class="ermt-detail-item"><label>Encoded By</label><span>${escapeHtml(record.encoded_by || '—')}</span></div>
+                    <div class="ermt-detail-item"><label>Date Encoded</label><span>${escapeHtml(record.date_encoded || '—')}</span></div>
+                    <div class="ermt-detail-item"><label>PDF</label>${pdfLinkHtml(record)}</div>
+                    <div class="ermt-detail-item" style="grid-column: 1 / -1;"><label>Title</label><p>${escapeHtml(record.title || '—')}</p></div>
+                    <div class="ermt-detail-item" style="grid-column: 1 / -1;"><label>Keywords</label><p>${escapeHtml(record.keywords || '—')}</p></div>
+                    <div class="ermt-detail-item" style="grid-column: 1 / -1;"><label>Remarks</label><p>${escapeHtml(record.remarks || '—')}</p></div>
+                </div>
+                <div class="ermt-detail-actions">${actionButtons(record)}</div>
+            </div>`;
+    }
+
+    function toggleDesktopRow(row) {
+        const detailRow = row.nextElementSibling;
+        if (!detailRow || !detailRow.classList.contains('ermt-detail-row')) return;
+        const expanded = row.classList.toggle('expanded');
+        detailRow.style.display = expanded ? '' : 'none';
+    }
+
+    function renderRecords(records) {
+        const tableBody = document.getElementById('recordsTableBody');
+        const mobileList = document.getElementById('recordsMobile');
+        tableBody.innerHTML = '';
+        mobileList.innerHTML = '';
+
+        if (!records.length) {
+            tableBody.innerHTML = '<tr><td colspan="7" class="no-data">No records found</td></tr>';
+            mobileList.innerHTML = '<p style="color:var(--medium-gray);text-align:center;">No records found</p>';
+            return;
+        }
+
+        records.forEach(function (record) {
+            const searchText = recordSearchText(record);
+            const row = document.createElement('tr');
+            row.className = 'table-row ermt-doc-row';
+            row.dataset.search = searchText;
+            row.innerHTML =
+                `<td><button type="button" class="ermt-expand-btn" aria-label="Expand">▸</button></td>` +
+                `<td>${escapeHtml(record.record_number || '—')}</td>` +
+                `<td>${escapeHtml(record.record_date || '—')}</td>` +
+                `<td>${escapeHtml(record.record_type || '—')}</td>` +
+                `<td>${escapeHtml(record.title || '—')}</td>` +
+                `<td>${escapeHtml(record.cabinet_number || '—')}</td>` +
+                `<td>${escapeHtml(record.shelf_number || '—')}</td>`;
+
+            const detailRow = document.createElement('tr');
+            detailRow.className = 'ermt-detail-row';
+            detailRow.style.display = 'none';
+            detailRow.innerHTML = `<td colspan="7">${buildDetailPanel(record)}</td>`;
+
+            row.addEventListener('click', function (e) {
+                if (e.target.closest('.delete-btn, .copy-nas-path-btn, a')) return;
+                toggleDesktopRow(row);
+            });
+
+            tableBody.appendChild(row);
+            tableBody.appendChild(detailRow);
+
+            const card = document.createElement('div');
+            card.className = 'ermt-card';
+            card.dataset.search = searchText;
+            card.innerHTML =
+                `<div style="display:flex;justify-content:space-between;gap:0.5rem;">` +
+                `<strong>${escapeHtml(record.record_number || '—')}</strong>` +
+                `<button type="button" class="btn-secondary expand-mobile-btn" style="padding:0.2rem 0.5rem;font-size:0.75rem;">Details</button>` +
+                `</div>` +
+                `<div style="font-size:0.8rem;color:var(--medium-gray);margin-top:0.25rem;">` +
+                `${escapeHtml(record.record_date || '—')} · ${escapeHtml(record.record_type || '—')} · Cabinet ${escapeHtml(record.cabinet_number || '—')} / Shelf ${escapeHtml(record.shelf_number || '—')}` +
+                `</div>` +
+                `<div style="margin-top:0.35rem;font-size:0.9rem;">${escapeHtml(record.title || '—')}</div>` +
+                `<div class="ermt-card-detail">${buildDetailPanel(record)}</div>`;
+            card.querySelector('.expand-mobile-btn').addEventListener('click', function (e) {
+                e.stopPropagation();
+                card.classList.toggle('expanded');
+                this.textContent = card.classList.contains('expanded') ? 'Hide' : 'Details';
+            });
+            mobileList.appendChild(card);
+        });
+    }
+
+    function filterRecords(query) {
+        const normalized = query.trim().toLowerCase();
+        document.querySelectorAll('#recordsTableBody tr.ermt-doc-row').forEach(function (row) {
+            const visible = !normalized || (row.dataset.search || '').includes(normalized);
+            row.style.display = visible ? '' : 'none';
+            const detailRow = row.nextElementSibling;
+            if (detailRow && detailRow.classList.contains('ermt-detail-row')) {
+                if (!visible) {
+                    detailRow.style.display = 'none';
+                    row.classList.remove('expanded');
+                }
+            }
+        });
+        document.querySelectorAll('#recordsMobile .ermt-card').forEach(function (card) {
+            const haystack = card.dataset.search || '';
+            card.style.display = !normalized || haystack.includes(normalized) ? '' : 'none';
+        });
+    }
+
+    async function loadStats() {
+        const res = await fetch('{{ url_for("ermt.get_stats") }}');
+        const stats = await res.json();
+        if (stats.error) return;
+        document.getElementById('statTotal').textContent = stats.total_records ?? 0;
+        document.getElementById('statCabinets').textContent = stats.total_cabinets ?? 0;
+        document.getElementById('statWithPdf').textContent = stats.with_pdf ?? 0;
+    }
+
+    async function loadRecords() {
+        const res = await fetch('{{ url_for("ermt.get_records") }}');
+        const records = await res.json();
+        if (Array.isArray(records)) renderRecords(records);
+    }
+
+    document.getElementById('recordsFilter').addEventListener('input', function (e) {
+        filterRecords(e.target.value);
+    });
+
+    document.addEventListener('click', async function (e) {
+        const copyBtn = e.target.closest('.copy-nas-path-btn');
+        if (copyBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const path = copyBtn.getAttribute('data-path') || '';
+            async function copied() {
+                const original = copyBtn.textContent;
+                copyBtn.textContent = 'Copied!';
+                setTimeout(function () { copyBtn.textContent = original; }, 1500);
+            }
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    await navigator.clipboard.writeText(path);
+                } else {
+                    const ta = document.createElement('textarea');
+                    ta.value = path;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    ta.remove();
+                }
+                await copied();
+            } catch (err) {
+                window.prompt('Copy this NAS path, then open it with File Explorer, Adobe Reader, or Edge:', path);
+            }
+            return;
+        }
+
+        const deleteBtn = e.target.closest('.delete-btn');
+        if (!deleteBtn) return;
+        if (!confirm('Delete this record permanently?')) return;
+        const res = await fetch('/ermt/delete/' + deleteBtn.dataset.id, { method: 'POST' });
+        const data = await res.json();
+        alert(data.msg || 'Done');
+        if (data.status === 'success') {
+            loadStats();
+            loadRecords();
+        }
+    });
+
+    loadStats();
+    loadRecords();
+})();
+</script>
+{% endblock %}

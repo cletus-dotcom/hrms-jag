@@ -1,100 +1,20 @@
-{% extends "base.html" %}
+{% extends "layouts/app.html" %}
 
 {% block title %}{% if emp %}Edit{% else %}Add{% endif %} Employee - HRMS{% endblock %}
+
+{% set navbar_title = 'Edit Employee' if employee else 'Add Employee' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Administration'},
+    {'label': 'Employees'},
+    {'label': 'Edit' if employee else 'Add'}
+] %}
 
 {% block extra_css %}
 {% endblock %}
 
-{% block content %}
-<div class="dashboard-container">
-    <div class="header-bar">
-        <div class="header-content">
-            {% include 'includes/navbar_brand.html' %}
-            <nav class="main-nav">
-                <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
-                {% if (current_user.role or '')|lower in ('admin', 'hr') %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link nav-link-active">Settings <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
-                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Manage Employees</a>
-                        <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
-                        <hr class="dropdown-separator">
-                        <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
-                        <a href="{{ url_for('routes.jo_cos_designations_list') }}" class="dropdown-item">JO/COS designations</a>
-                        <a href="{{ url_for('routes.jo_cos_rates_list') }}" class="dropdown-item">JO and COS Rates</a>
-                        <a href="{{ url_for('routes.flexi_time_schedule_list') }}" class="dropdown-item">Flexi-time schedule</a>
-                        <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
-                        <hr class="dropdown-separator">
-                        <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
-                    </div>
-                </div>
-                {% endif %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
-                        {% include 'includes/nav_dtr_upload_link.html' %}
-                        <a href="{{ url_for('routes.dtr_justifications') }}" class="dropdown-item">DTR Justifications</a>
-                        {% include 'includes/nav_dtr_edit_link.html' %}
-                    </div>
-                </div>
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Leave Management <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        {% if (current_user.role or '')|lower in ('admin', 'hr') %}
-                        <a href="{{ url_for('routes.leave_settings_list') }}" class="dropdown-item">Leave Settings</a>
-                        <a href="{{ url_for('routes.leave_credits_list') }}" class="dropdown-item">Leave Credits</a>
-                        <hr class="dropdown-separator">
-                        {% endif %}
-                        <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply for Leave</a>
-                        <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
-                        {% if (current_user.role or '')|lower == 'manager' %}
-                        <hr class="dropdown-separator">
-                        <a href="{{ url_for('routes.leave_approvals') }}" class="dropdown-item">Leave Approvals</a>
-                        {% endif %}
-                    </div>
-                </div>
-                {% include 'includes/nav_payroll_top_menu.html' %}
-                {% if (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        {% include 'includes/reports_dropdown_links.html' %}
-                    </div>
-                </div>
-                {% else %}
-                <a href="#" class="nav-link">Reports</a>
-                {% endif %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">ABOUT <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.users_manual') }}" class="dropdown-item">User's Manual</a>
-                        <a href="{{ url_for('routes.hrmdo_manual') }}" class="dropdown-item">HRMDO Manual</a>
-                    </div>
-                </div>
-            </nav>
-            <div class="user-dropdown">
-                <a href="#" class="user-info">
-                    {% if employee %}
-                        {{ employee.full_name }} ({{ current_user.role|title }})
-                    {% else %}
-                        {{ current_user.username }} ({{ current_user.role|title }})
-                    {% endif %}
-                    <span class="dropdown-arrow">▼</span>
-                </a>
-                <div class="dropdown-menu dropdown-menu-right">
-                    <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
-                    <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
-                    <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
-                </form>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="dashboard-content">
-        {% with messages = get_flashed_messages(with_categories=true) %}
+{% block app_content %}
+{% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
                     <div class="alert alert-{{ category }} alert-dismissible">
@@ -107,24 +27,92 @@
         
         <div class="page-header">
             <h1 class="page-title">{% if emp %}Edit{% else %}Add{% endif %} Employee</h1>
-            <a href="{{ url_for('routes.employees_list') }}" class="btn-secondary">Back to List</a>
+            <div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
+                {% if emp %}
+                <a href="{{ url_for('routes.employee_service_record', id=emp.id) }}" class="btn-primary">Service Record</a>
+                <a href="{{ url_for('routes.employee_id_card_pdf', id=emp.id) }}" class="btn-primary">Print ID</a>
+                {% endif %}
+                <a href="{{ url_for('routes.employees_list') }}" class="btn-secondary">Back to List</a>
+            </div>
         </div>
+
+        {% if emp %}
+        <div class="form-section" style="margin-bottom:1rem;">
+            <h2 style="margin:0 0 0.65rem; font-size:1.05rem; color:var(--primary-blue,#013a63);">ID Photo (eRMT)</h2>
+            <div style="display:flex; gap:1.25rem; align-items:flex-start; flex-wrap:wrap;">
+                <div class="dashboard-welcome-photo" style="flex-shrink:0;">
+                    {% if emp.id_photo_ermt_record_id %}
+                    <img class="dashboard-welcome-photo-img" src="{{ url_for('routes.employee_id_photo', id=emp.id) }}" alt="ID photo" width="104" height="104" style="width:104px;height:104px;border-radius:10px;object-fit:cover;border:2px solid #cbd5e1;">
+                    {% else %}
+                    <div class="dashboard-welcome-photo-placeholder" style="width:104px;height:104px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:#e2e8f0;color:#475569;font-weight:700;">—</div>
+                    {% endif %}
+                </div>
+                <div style="flex:1; min-width:220px;">
+                    <label for="id_photo_ermt_number">eRMT record number</label>
+                    <input type="text" name="id_photo_ermt_number" id="id_photo_ermt_number" class="form-control"
+                           form="employeeForm"
+                           value="{{ emp.id_photo_ermt_record.record_number if emp.id_photo_ermt_record else '' }}"
+                           placeholder="e.g. ERMT-260716-01"
+                           autocomplete="off">
+                    <small style="color:var(--medium-gray); display:block; margin-top:0.35rem; line-height:1.45;">
+                        Link an eRMT record whose network path points to the employee’s photo (JPG/PNG on NAS or local share).
+                        Leave blank and save to clear the link. Temp demo: <code>ERMT-260716-01</code>.
+                    </small>
+                </div>
+            </div>
+        </div>
+        {% endif %}
         
         <div class="form-section">
-            <form method="POST" class="employee-form">
+            <form method="POST" class="employee-form" id="employeeForm">
                 <div class="form-grid">
                     <div class="form-group">
                         <label for="employee_id">Employee ID *</label>
-                        <input type="text" id="employee_id" name="employee_id" class="form-control" 
-                               value="{{ emp.employee_id if emp else (next_employee_id or '') }}" required {% if not emp %}readonly{% endif %}>
+                        <input type="text" id="employee_id" name="employee_id" class="form-control"
+                               value="{{ emp.employee_id if emp else (next_employee_id or '') }}" required
+                               {% if emp and not can_edit_employee_id %}readonly{% endif %}
+                               {% if not emp %}maxlength="5" pattern="[0-9]{5}" inputmode="numeric"{% endif %}
+                               placeholder="5-digit badge / ID number"
+                               autocomplete="off"
+                               title="Employee ID must be exactly 5 digits">
+                        {% if not emp %}
+                        <small style="color:#64748b; font-size:0.78rem; margin-top:0.25rem; display:block;">
+                            Enter the official 5-digit Employee ID (badge). A suggested ID is prefilled; change it if needed.
+                        </small>
+                        {% elif can_edit_employee_id %}
+                        <small style="color:#64748b; font-size:0.78rem; margin-top:0.25rem; display:block;">
+                            Admin only: changing this also updates the linked user login ID when present.
+                        </small>
+                        {% else %}
+                        <small style="color:#64748b; font-size:0.78rem; margin-top:0.25rem; display:block;">
+                            Employee ID can only be changed by an Admin.
+                        </small>
+                        {% endif %}
                     </div>
                     
                     <div class="form-group">
                         <label for="status">Status *</label>
                         <select id="status" name="status" class="form-control" required>
                             <option value="active" {% if emp and emp.status == 'active' %}selected{% endif %}>Active</option>
-                            <option value="on_leave" {% if emp and emp.status == 'on_leave' %}selected{% endif %}>On Leave</option>
-                            <option value="terminated" {% if emp and emp.status == 'terminated' %}selected{% endif %}>Terminated</option>
+                            <option value="inactive" {% if emp and emp.status == 'inactive' %}selected{% endif %}>Inactive</option>
+                            <option value="separated" {% if emp and emp.status == 'separated' %}selected{% endif %}>Separated</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-grid" id="separation_fields" style="display: none;">
+                    <div class="form-group">
+                        <label for="separation_date">Separation Date</label>
+                        <input type="date" id="separation_date" name="separation_date" class="form-control"
+                               value="{{ emp.separation_date.strftime('%Y-%m-%d') if emp and emp.separation_date else '' }}">
+                    </div>
+                    <div class="form-group" style="grid-column: 1 / -1;">
+                        <label for="separation_type">Separation Type</label>
+                        <select id="separation_type" name="separation_type" class="form-control">
+                            <option value="">— Select separation type —</option>
+                            {% for t in employee_separation_types %}
+                            <option value="{{ t }}" {% if emp and emp.separation_type == t %}selected{% endif %}>{{ t }}</option>
+                            {% endfor %}
                         </select>
                     </div>
                 </div>
@@ -210,9 +198,19 @@
                 
                 <div class="form-grid">
                     <div class="form-group">
-                        <label for="appointment_date">Appointment Date</label>
-                        <input type="date" id="appointment_date" name="appointment_date" class="form-control" 
-                               value="{{ emp.appointment_date.strftime('%Y-%m-%d') if emp and emp.appointment_date else '' }}">
+                        <label for="appointment_date">Appointment Date (original)</label>
+                        <input type="date" id="appointment_date" name="appointment_date" class="form-control"
+                               value="{{ emp.appointment_date.strftime('%Y-%m-%d') if emp and emp.appointment_date else '' }}"
+                               {% if emp and not can_edit_employee_id %}readonly{% endif %}>
+                        {% if emp and not can_edit_employee_id %}
+                        <small style="color:#64748b; font-size:0.78rem; margin-top:0.25rem; display:block;">
+                            Original appointment date is fixed. Record later changes under Status of Appointment.
+                        </small>
+                        {% elif emp and can_edit_employee_id %}
+                        <small style="color:#64748b; font-size:0.78rem; margin-top:0.25rem; display:block;">
+                            Admin only: correct the original appointment date here. Prefer Status of Appointment for later changes.
+                        </small>
+                        {% endif %}
                     </div>
                     <div class="form-group">
                         <label for="nature_of_appointment">Nature of Appointment</label>
@@ -265,6 +263,7 @@
                         <select id="salary_grade" name="salary_grade" class="form-control" data-initial="{{ emp.salary_grade if emp and emp.salary_grade is not none else '' }}">
                             <option value="">Select</option>
                         </select>
+                        <small id="salary_grade_hint" class="form-hint" style="display:none;color:#8a5a00;margin-top:0.35rem;"></small>
                     </div>
                     <div class="form-group">
                         <label for="salary_step">Salary Step</label>
@@ -273,8 +272,7 @@
                             <option value="{{ s }}" {% if emp and emp.salary_step == s %}selected{% endif %}>{{ s }}</option>
                             {% endfor %}
                         </select>
-                    </div>
-                    <div class="form-group">
+                    </div>                    <div class="form-group">
                         <label for="salary_amount_display">Amount</label>
                         <input type="text" id="salary_amount_display" class="form-control" readonly placeholder="Salary grade amount or JO/COS rate per day">
                     </div>
@@ -367,8 +365,23 @@ document.addEventListener('DOMContentLoaded', function() {
     function updateAgency() {
         if (!departmentSelect || !agencyDisplay) return;
         var opt = departmentSelect.options[departmentSelect.selectedIndex];
-        var name = opt ? (opt.getAttribute('data-name') || opt.textContent || '').trim() : '';
-        agencyDisplay.value = (name === 'MHO') ? 'National' : (name ? 'Local' : '');
+        var name = opt ? (opt.getAttribute('data-name') || opt.textContent || '').trim().toUpperCase() : '';
+        // Keep in sync with server `_agency_from_department`
+        agencyDisplay.value = (name === 'MHO' || name === 'RHU') ? 'National' : (name ? 'Local' : '');
+    }
+
+    function gatherSalaryGrades(pred) {
+        var sgs = [];
+        var seen = {};
+        salaryGradesData.forEach(function(r) {
+            if (!pred(r)) return;
+            if (r.sg != null && !seen[r.sg]) {
+                seen[r.sg] = true;
+                sgs.push(r.sg);
+            }
+        });
+        sgs.sort(function(a, b) { return a - b; });
+        return sgs;
     }
 
     function refreshSalaryGradeOptions() {
@@ -377,13 +390,19 @@ document.addEventListener('DOMContentLoaded', function() {
         var lgu = lguSelect ? lguSelect.value.trim() : '';
         var tranche = trancheSelect ? trancheSelect.value.trim() : '';
         var currentVal = salaryGradeSelect.value || (salaryGradeSelect.getAttribute('data-initial') || '');
-        var sgs = [];
-        var seen = {};
-        salaryGradesData.forEach(function(r) {
-            if (r.sg_agency !== agency || r.sg_lgu_class !== lgu || r.sg_tranche !== tranche) return;
-            if (r.sg != null && !seen[r.sg]) { seen[r.sg] = true; sgs.push(r.sg); }
+        var hint = document.getElementById('salary_grade_hint');
+        var usedFallback = false;
+        var sgs = gatherSalaryGrades(function(r) {
+            return r.sg_agency === agency && r.sg_lgu_class === lgu && r.sg_tranche === tranche;
         });
-        sgs.sort(function(a, b) { return a - b; });
+        // Stored tranche may not exist in salary_grade table (e.g. 3rd when only 2nd uploaded).
+        // Fall back so Salary Grade remains editable.
+        if (!sgs.length && agency && lgu) {
+            sgs = gatherSalaryGrades(function(r) {
+                return r.sg_agency === agency && r.sg_lgu_class === lgu;
+            });
+            usedFallback = sgs.length > 0;
+        }
         salaryGradeSelect.innerHTML = '<option value="">Select</option>';
         sgs.forEach(function(sg) {
             var opt = document.createElement('option');
@@ -392,11 +411,42 @@ document.addEventListener('DOMContentLoaded', function() {
             if (String(sg) === String(currentVal)) opt.selected = true;
             salaryGradeSelect.appendChild(opt);
         });
+        if (currentVal && !salaryGradeSelect.querySelector('option[value="' + currentVal + '"]')) {
+            var keep = document.createElement('option');
+            keep.value = currentVal;
+            keep.textContent = currentVal;
+            keep.selected = true;
+            salaryGradeSelect.appendChild(keep);
+        }
         if (salaryGradeSelect.getAttribute('data-initial')) {
             var initial = salaryGradeSelect.getAttribute('data-initial');
-            if (salaryGradeSelect.querySelector('option[value="' + initial + '"]')) salaryGradeSelect.value = initial;
+            if (salaryGradeSelect.querySelector('option[value="' + initial + '"]')) {
+                salaryGradeSelect.value = initial;
+            }
             salaryGradeSelect.removeAttribute('data-initial');
         }
+        if (hint) {
+            if (usedFallback) {
+                hint.style.display = 'block';
+                hint.textContent = 'No salary grades for tranche "' + tranche + '". Showing grades for this agency and LGU class so you can still choose SG — pick a matching tranche when available.';
+            } else if (agency && lgu && tranche && !sgs.length) {
+                hint.style.display = 'block';
+                hint.textContent = 'No salary grades found for this agency / LGU class / tranche. Upload or check Salary Grades first.';
+            } else {
+                hint.style.display = 'none';
+                hint.textContent = '';
+            }
+        }
+    }
+
+    function findSalaryGradeRow(agency, lgu, tranche, sg) {
+        var row = salaryGradesData.find(function(r) {
+            return r.sg_agency === agency && r.sg_lgu_class === lgu && r.sg_tranche === tranche && String(r.sg) === String(sg);
+        });
+        if (row) return row;
+        return salaryGradesData.find(function(r) {
+            return r.sg_agency === agency && r.sg_lgu_class === lgu && String(r.sg) === String(sg);
+        }) || null;
     }
 
     function updateAmount() {
@@ -406,11 +456,9 @@ document.addEventListener('DOMContentLoaded', function() {
         var tranche = trancheSelect ? trancheSelect.value.trim() : '';
         var sg = salaryGradeSelect ? salaryGradeSelect.value : '';
         var step = salaryStepSelect ? salaryStepSelect.value : '';
-        if (!agency || !lgu || !tranche || !sg || !step) { amountDisplay.value = ''; return; }
+        if (!agency || !lgu || !sg || !step) { amountDisplay.value = ''; return; }
         var stepKey = 'sg_step_' + step;
-        var row = salaryGradesData.find(function(r) {
-            return r.sg_agency === agency && r.sg_lgu_class === lgu && r.sg_tranche === tranche && String(r.sg) === String(sg);
-        });
+        var row = findSalaryGradeRow(agency, lgu, tranche, sg);
         var amt = row && row[stepKey] != null ? row[stepKey] : '';
         amountDisplay.value = amt !== '' ? Number(amt).toLocaleString('en-PH', { minimumFractionDigits: 2 }) : '';
     }
@@ -685,6 +733,23 @@ document.addEventListener('DOMContentLoaded', function() {
     if (statusAppt) statusAppt.addEventListener('change', syncPositionAppointmentUI);
     if (jocosSel) jocosSel.addEventListener('change', refreshSalaryDisplay);
     syncPositionAppointmentUI();
+
+    // Employment status: separated shows separation fields
+    var empStatus = document.getElementById('status');
+    var sepWrap = document.getElementById('separation_fields');
+    var sepDate = document.getElementById('separation_date');
+    var sepType = document.getElementById('separation_type');
+    function syncSeparationUI() {
+        if (!empStatus || !sepWrap) return;
+        var isSeparated = empStatus.value === 'separated';
+        sepWrap.style.display = isSeparated ? '' : 'none';
+        if (!isSeparated) {
+            if (sepDate) sepDate.value = '';
+            if (sepType) sepType.value = '';
+        }
+    }
+    if (empStatus) empStatus.addEventListener('change', syncSeparationUI);
+    syncSeparationUI();
 });
 </script>
 {% endblock %}

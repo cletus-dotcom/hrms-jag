@@ -1,11 +1,12 @@
 {% extends "base.html" %}
 
 {% block title %}Login - HRMS{% endblock %}
+{% block body_class %}has-app-navbar{% endblock %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/landing.css') }}">
 <style>
-  .public-login { padding-top: var(--landing-nav-height); min-height: 100vh; background: var(--brand-bg, #f4f7fb); }
+  .public-login { min-height: calc(100vh - var(--app-topbar-height, 3.75rem)); background: var(--bg-light, #f8f9fa); }
   .public-login .login-wrapper { padding: 1.25rem 1rem 2.25rem; }
   .public-login .login-card { width: 100%; max-width: 520px; }
   .public-login .login-header h1 { font-size: 1.05rem; }
@@ -19,13 +20,14 @@
 
 {% block content %}
 <div class="public-login">
-    {% include 'includes/public_nav.html' %}
+    {% set navbar_show_landing_login = true %}
+    {% include 'includes/app_navbar.html' %}
     <div class="login-wrapper" style="max-width: 1200px; margin: 0 auto;">
         <div class="login-card">
             <div class="login-header">
                 <div class="login-header-content">
                     <img src="{{ url_for('static', filename='jagna_logo.png') }}" alt="HRMDO Jagna seal" class="login-icon">
-                    <h1>HRMDO System</h1>
+                    <h1>{% if request.args.get('next', '').startswith('/ermt') %}eRMT Sign-In{% else %}HRMDO System{% endif %}</h1>
                 </div>
             </div>
             
@@ -40,7 +42,10 @@
                     {% endif %}
                 {% endwith %}
                 
-                <form method="POST" action="{{ url_for('routes.login') }}" class="login-form">
+                <form method="POST" action="{{ url_for('routes.login', next=request.args.get('next')) }}" class="login-form">
+                    {% if request.args.get('next') %}
+                    <input type="hidden" name="next" value="{{ request.args.get('next') }}">
+                    {% endif %}
                     <div class="form-group">
                         <label for="employee_id">ID Number</label>
                         <input 
@@ -51,6 +56,7 @@
                             placeholder="Enter your ID Number"
                             required 
                             autofocus
+                            autocomplete="username"
                         >
                     </div>
                     

@@ -1,6 +1,13 @@
-{% extends "base.html" %}
+{% extends "layouts/app.html" %}
 
 {% block title %}User's Manual - HRMS{% endblock %}
+
+{% set navbar_title = "User's Manual" %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Help & Resources'},
+    {'label': "User's Manual"}
+] %}
 
 {% block extra_css %}
 <style>
@@ -90,11 +97,65 @@
   .manual-doc .card-title { font-weight: 900; margin: 0 0 0.25rem; color: #0f172a; }
   .manual-doc .muted { color: #64748b; }
   .manual-doc .steps > li { margin: 0.35rem 0; }
+  .manual-doc .role-guide {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 0.9rem 1rem 1rem;
+    margin: 0.75rem 0;
+    background: #fff;
+  }
+  .manual-doc .role-guide.is-your-role {
+    border-color: #93c5fd;
+    background: #f8fbff;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.12);
+  }
+  .manual-doc .role-badge {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #1d4ed8;
+    background: #dbeafe;
+    border-radius: 999px;
+    padding: 0.15rem 0.55rem;
+    margin-left: 0.35rem;
+    vertical-align: middle;
+  }
+  .manual-doc .flow-steps {
+    counter-reset: flow;
+    list-style: none;
+    padding-left: 0;
+    margin: 0.5rem 0 0.75rem;
+  }
+  .manual-doc .flow-steps > li {
+    counter-increment: flow;
+    position: relative;
+    padding: 0.45rem 0 0.45rem 2rem;
+    border-left: 2px solid #cbd5e1;
+    margin-left: 0.65rem;
+  }
+  .manual-doc .flow-steps > li::before {
+    content: counter(flow);
+    position: absolute;
+    left: -0.55rem;
+    top: 0.35rem;
+    width: 1.25rem;
+    height: 1.25rem;
+    border-radius: 50%;
+    background: #1f4aa5;
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 700;
+    line-height: 1.25rem;
+    text-align: center;
+  }
+  .manual-doc .flow-steps > li:last-child { border-left-color: transparent; }
   @media (max-width: 920px) {
     .manual-doc .grid { grid-template-columns: 1fr; }
   }
   @media print {
-    .header-bar { display: none !important; }
+    .app-topbar, .app-sidebar { display: none !important; }
     .dashboard-content { padding: 0 !important; }
     .manual-doc { border: none; box-shadow: none; padding: 0; }
     @page { size: A4; margin: 14mm; }
@@ -102,118 +163,52 @@
 </style>
 {% endblock %}
 
-{% block content %}
-<div class="dashboard-container">
-    <div class="header-bar">
-        <div class="header-content">
-            {% include 'includes/navbar_brand.html' %}
-            <nav class="main-nav">
-                <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
-                {% if (current_user.role or '')|lower in ('admin', 'hr') %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Settings <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
-                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Manage Employees</a>
-                        <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
-                        <hr class="dropdown-separator">
-                        <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
-                        <a href="{{ url_for('routes.jo_cos_designations_list') }}" class="dropdown-item">JO/COS designations</a>
-                        <a href="{{ url_for('routes.jo_cos_rates_list') }}" class="dropdown-item">JO and COS Rates</a>
-                        <a href="{{ url_for('routes.flexi_time_schedule_list') }}" class="dropdown-item">Flexi-time schedule</a>
-                        <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
-                        <hr class="dropdown-separator">
-                        <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
-                    </div>
-                </div>
-                {% endif %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
-                        {% include 'includes/nav_dtr_upload_link.html' %}
-                        <a href="{{ url_for('routes.dtr_justifications') }}" class="dropdown-item">DTR Justifications</a>
-                        {% include 'includes/nav_dtr_edit_link.html' %}
-                    </div>
-                </div>
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Leave Management <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        {% if (current_user.role or '')|lower in ('admin', 'hr') %}
-                        <a href="{{ url_for('routes.leave_settings_list') }}" class="dropdown-item">Leave Settings</a>
-                        <a href="{{ url_for('routes.leave_credits_list') }}" class="dropdown-item">Leave Credits</a>
-                        <hr class="dropdown-separator">
-                        {% endif %}
-                        <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply for Leave</a>
-                        <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
-                        {% if (current_user.role or '')|lower == 'manager' %}
-                        <hr class="dropdown-separator">
-                        <a href="{{ url_for('routes.leave_approvals') }}" class="dropdown-item">Leave Approvals</a>
-                        {% endif %}
-                    </div>
-                </div>
-                {% include 'includes/nav_payroll_top_menu.html' %}
-                {% if (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        {% include 'includes/reports_dropdown_links.html' %}
-                    </div>
-                </div>
-                {% else %}
-                <a href="#" class="nav-link">Reports</a>
-                {% endif %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link nav-link-active">ABOUT <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.users_manual') }}" class="dropdown-item">User's Manual</a>
-                        <a href="{{ url_for('routes.hrmdo_manual') }}" class="dropdown-item">HRMDO Manual</a>
-                    </div>
-                </div>
-            </nav>
-            <div class="user-dropdown">
-                <a href="#" class="user-info">
-                    {% if employee %}
-                        {{ employee.full_name }} ({{ current_user.role|title }})
-                    {% else %}
-                        {{ current_user.username }} ({{ current_user.role|title }})
-                    {% endif %}
-                    <span class="dropdown-arrow">▼</span>
-                </a>
-                <div class="dropdown-menu dropdown-menu-right">
-                    <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
-                    <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
-                    <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
-                </form>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="dashboard-content">
-        <div class="page-header">
+{% block app_content %}
+<div class="page-header">
             <h1 class="page-title">User's Manual</h1>
         </div>
         <div class="manual-doc" style="font-family: Calibri, Arial, sans-serif;">
             <h2 class="title">HRMS User’s Manual</h2>
             <p class="subtitle">
-                Welcome! This guide shows you how to use the HRMS app in simple steps—whether you’re filing leave,
-                managing employees, uploading DTR logs, or generating payroll reports.
+                Welcome! This guide covers the HRMS portal by role—leave, DTR, payroll, eRMT electronic records,
+                Service Record / Leave Credits reports, Employee ID Cards, and self-service payslips.
             </p>
 
             <div class="callout">
-                <strong>Tip:</strong> If you ever get stuck, open this page again from
-                <code>ABOUT → User’s Manual</code>.
-                You can also use <strong>Change password</strong> under your name at the top-right.
+                <strong>Your role:</strong> {{ viewer_role_label }}
+                {% if viewer_role in ('admin', 'hr') %}
+                — use the <a href="#role-admin-hr">Admin &amp; HR guide</a>, <a href="#um-dtr-workflow">DTR-to-payroll workflow</a>,
+                <a href="#um-id-cards">Employee ID Cards</a>, and <a href="#um-ermt">eRMT</a> below.
+                {% elif viewer_role == 'employee' %}
+                — start with <a href="#role-employee">Employee guide</a>, <a href="#um-dtr-workflow">My DTR review</a>, and <a href="#um-ermt">eRMT</a> (view/search).
+                {% elif viewer_role == 'manager' %}
+                — see <a href="#role-manager">Manager guide</a>.
+                {% elif viewer_role == 'dtr_uploader' %}
+                — see <a href="#role-dtr-uploader">DTR Uploader guide</a>.
+                {% elif viewer_role == 'payroll_maker' %}
+                — see <a href="#role-payroll-maker">Payroll Maker guide</a>.
+                {% endif %}
+                For a module overview, open <a href="{{ url_for('routes.about_platform') }}">About the Platform</a>.
             </div>
 
             <div class="toc">
                 <h2>Contents</h2>
                 <ol>
                     <li><a href="#um-quick-start">Quick start</a></li>
-                    <li><a href="#um-navigation">Navigation & menus</a></li>
+                    <li><a href="#um-navigation">Navigation &amp; menus</a></li>
+                    <li><a href="#um-dtr-workflow">DTR-to-payroll workflow</a></li>
+                    <li><a href="#um-role-guides">Guides by role</a>
+                        <ol style="margin-top:0.35rem;">
+                            <li><a href="#role-admin-hr">Admin &amp; HR</a></li>
+                            <li><a href="#role-manager">Manager</a></li>
+                            <li><a href="#role-employee">Employee</a></li>
+                            <li><a href="#role-dtr-uploader">DTR Uploader</a></li>
+                            <li><a href="#role-payroll-maker">Payroll Maker</a></li>
+                        </ol>
+                    </li>
                     <li><a href="#um-common-tasks">Common tasks (step-by-step)</a></li>
-                    <li><a href="#um-roles">What each role can do</a></li>
+                    <li><a href="#um-ermt">eRMT (electronic records)</a></li>
+                    <li><a href="#um-id-cards">Employee ID Cards &amp; ID photo</a></li>
                     <li><a href="#um-best-practices">Best practices</a></li>
                     <li><a href="#um-troubleshooting">Troubleshooting</a></li>
                 </ol>
@@ -238,25 +233,137 @@
                     <p class="muted" style="margin:0;">Home screen with quick stats and recent activity.</p>
                 </div>
                 <div class="card">
-                    <div class="card-title">Settings (Admin/HR)</div>
-                    <p class="muted" style="margin:0;">Manage users, departments, positions, salary grades, and status of appointment.</p>
+                    <div class="card-title">eRMT</div>
+                    <p class="muted" style="margin:0;">Search electronic records by type, keywords, and cabinet/shelf. PDFs open from your office NAS path (not uploaded to the app server).</p>
                 </div>
                 <div class="card">
-                    <div class="card-title">Employee Management</div>
-                    <p class="muted" style="margin:0;">View employees, add new employees, edit details, and open PDS records.</p>
+                    <div class="card-title">Settings (Admin/HR)</div>
+                    <p class="muted" style="margin:0;">Users, employees, departments, positions, JO/COS rates, flexi-time, salary grades, leave settings, and (portal admin) Portal Console.</p>
                 </div>
                 <div class="card">
                     <div class="card-title">Daily Time Records (DTR)</div>
-                    <p class="muted" style="margin:0;">View DTR records, upload logs (if allowed), and manage justifications.</p>
+                    <p class="muted" style="margin:0;">My DTR / View DTR, upload logs, justifications, and (HR) quincena processing, monthly submissions, prepare period, and process worktime.</p>
                 </div>
                 <div class="card">
                     <div class="card-title">Leave Management</div>
-                    <p class="muted" style="margin:0;">Apply for leave, view leave history, approve leave (Managers/Admin).</p>
+                    <p class="muted" style="margin:0;">Apply/view leave; Managers/Admin approve leave; Admin/HR maintain leave credits and export Leave Credits PDF.</p>
                 </div>
                 <div class="card">
-                    <div class="card-title">Reports (Payroll Maker/Admin/HR)</div>
-                    <p class="muted" style="margin:0;">Payroll summary, submitted payroll history, and a filterable employees list (export CSV, Excel, or PDF).</p>
+                    <div class="card-title">Payroll (Admin/HR)</div>
+                    <p class="muted" style="margin:0;">Deductions (GSIS, HDMF, PHIC, LBP, JOFEMCO, withholding tax), Worktime Summary, JO/COS and Plantilla payroll.</p>
                 </div>
+                <div class="card">
+                    <div class="card-title">Reports</div>
+                    <p class="muted" style="margin:0;">Employees List (Admin/HR/Payroll Maker). Service Records, Leave Credits, and Employee ID Cards (Admin/HR).</p>
+                </div>
+                <div class="card">
+                    <div class="card-title">My Records</div>
+                    <p class="muted" style="margin:0;">When your account is linked to an employee: My PDS, My Service Record, My Payslips (and overtime credits for JO/COS).</p>
+                </div>
+            </div>
+
+            <h2 class="section" id="um-dtr-workflow">DTR-to-payroll workflow</h2>
+            <p>
+                Time and attendance moves through clear phases each quincena. HR tracks status on
+                <code>Time &amp; Attendance → Quincena Processing</code>.
+            </p>
+            <ol class="flow-steps">
+                <li><strong><a href="#um-prepare-dtr-period">Prepare DTR period</a></strong> (HR/Admin) — Generate blank rows for <strong>all employees</strong> in the quincena, plus holidays and workweek segments. Set flexible worktime, overtime authorization, and X-Service authorization.</li>
+                <li><strong>Upload DTR log</strong> (HR/Admin/DTR Uploader) — Upload the biometric <code>.dat</code> file for the quincena. Employees are notified to review their DTR.</li>
+                <li><strong>Employee review</strong> — Employees open <code>My DTR</code>, check late/undertime/absence flags, submit justifications, and may print their DTR.</li>
+                <li><strong>HR review &amp; adjustment</strong> — HR closes employee review, approves or rejects justifications, and uses <code>Adjust DTR</code> to correct times or remarks.</li>
+                <li><strong>Process worktime</strong> (HR/Admin) — Recomputes late, undertime, absences, worktime summaries, leave ledger entries, and JO/COS overtime credits.</li>
+                <li><strong>Payroll</strong> (HR/Admin) — Worktime Summary, deductions, JO/COS or Plantilla payroll, and payslips for employee self-service.</li>
+            </ol>
+            <p class="muted">
+                <strong>Quincena statuses:</strong> Draft → Review open → Review closed → Processed.
+                After a quincena is <strong>Processed</strong>, DTR rows are locked until HR reopens the period from Quincena Processing.
+            </p>
+
+            <h2 class="section" id="um-role-guides">Guides by role</h2>
+            <p class="muted">Sections marked <span class="role-badge">Your role</span> match your current account.</p>
+
+            <div class="role-guide{% if viewer_role in ('admin', 'hr') %} is-your-role{% endif %}" id="role-admin-hr">
+                <h3 class="sub">Admin &amp; HR{% if viewer_role in ('admin', 'hr') %}<span class="role-badge">Your role</span>{% endif %}</h3>
+                <p><strong>Sidebar access:</strong> eRMT (add/edit; Admin can delete), Settings, full Time &amp; Attendance (Processing), Leave Credits, Payroll, Reports (Employees List, Service Records, Leave Credits, Employee ID Cards), Notifications.</p>
+                <p><strong>Typical quincena duties:</strong></p>
+                <ol class="steps">
+                    <li>Open <code>Quincena Processing</code> and confirm setup checklist (prepare period, authorizations).</li>
+                    <li>Use <code>Prepare DTR Period</code> to create blank rows and set <a href="#um-prepare-dtr-period">workweek segments</a> and holidays for the quincena.</li>
+                    <li>Upload DTR log or verify uploader completed upload.</li>
+                    <li>Monitor pending justifications; approve or reject with supporting review.</li>
+                    <li>Track plantilla <code>Monthly DTR Submissions</code> after the 2nd quincena upload.</li>
+                    <li>Close employee review when the deadline passes.</li>
+                    <li>Use <code>View DTR Records → Adjust DTR</code> to correct employee rows.</li>
+                    <li>Run <code>Process Worktime</code>, then review <code>Worktime Summary</code> and proceed to JO/COS or Plantilla payroll.</li>
+                </ol>
+                <p><strong>Also:</strong></p>
+                <ul>
+                    <li><strong>Employees:</strong> Add/edit employees and PDS; link <strong>ID Photo (eRMT)</strong> on the employee form; open <strong>Service Record</strong> or <strong>Print ID</strong> from the list/form.</li>
+                    <li><strong>Leave credits:</strong> Maintain ledger under <code>Leave → Leave Credits</code>; export Leave Credits PDF from the card or <code>Reports → Leave Credits</code>.</li>
+                    <li><strong>Reports:</strong> <code>Reports → Service Records</code>, <code>Leave Credits</code>, and <code>Employee ID Cards</code>; Employees List export (CSV/Excel/PDF).</li>
+                    <li><strong>Payroll:</strong> Upload/manage deductions, load JO/COS and Plantilla payroll, generate payslips for employee self-service.</li>
+                    <li><strong>eRMT:</strong> Encode records with cabinet/shelf and <strong>Network PDF path (NAS)</strong> (including type <strong>ID Photo</strong>); see <a href="#um-ermt">eRMT</a> and <a href="#um-id-cards">ID Cards</a>.</li>
+                    <li><strong>Admin only:</strong> Delete eRMT records (DB entry only; NAS file is kept). Portal Console when signed in as portal admin.</li>
+                </ul>
+            </div>
+
+            <div class="role-guide{% if viewer_role == 'manager' %} is-your-role{% endif %}" id="role-manager">
+                <h3 class="sub">Manager{% if viewer_role == 'manager' %}<span class="role-badge">Your role</span>{% endif %}</h3>
+                <p><strong>Sidebar access:</strong> Dashboard, eRMT (view/search), DTR records (department scope), leave apply/view, leave approvals, overtime offset approvals, My Records (if linked), Notifications.</p>
+                <ul>
+                    <li><strong>Leave:</strong> Approve or reject leave for staff in your department via <code>Leave → Leave Approvals</code>.</li>
+                    <li><strong>DTR:</strong> View DTR for employees in your managed department(s). You cannot upload logs or process worktime.</li>
+                    <li><strong>Overtime offset:</strong> Review JO/COS overtime offset requests when assigned.</li>
+                    <li><strong>Self-service:</strong> Apply leave, review your own DTR/justifications if linked, view My PDS / Service Record / Payslips.</li>
+                    <li><strong>eRMT:</strong> Search and open NAS PDF links; you cannot add or edit records.</li>
+                </ul>
+            </div>
+
+            <div class="role-guide{% if viewer_role == 'employee' %} is-your-role{% endif %}" id="role-employee">
+                <h3 class="sub">Employee{% if viewer_role == 'employee' %}<span class="role-badge">Your role</span>{% endif %}</h3>
+                <p><strong>Sidebar access:</strong> Dashboard, eRMT (view/search), <code>My DTR</code>, Leave self-service, My PDS, My Service Record, My Payslips, Notifications.</p>
+                <p><strong>When DTR is uploaded for your quincena:</strong></p>
+                <ol class="steps">
+                    <li>Open <code>Time &amp; Attendance → My DTR</code> (you receive a notification).</li>
+                    <li>Review each day for <strong>Late</strong>, <strong>Undertime</strong>, or <strong>Absent</strong> flags.</li>
+                    <li>Click <strong>Justify this day</strong> on a flagged row before the review deadline; attach proof when available.</li>
+                    <li>Use <strong>Print DTR</strong> to download a PDF copy (includes justification status).</li>
+                    <li>HR may still adjust your record before worktime is processed; check Notifications for updates.</li>
+                </ol>
+                <p><strong>Plantilla — monthly submission:</strong> After the 2nd quincena upload, open <code>My DTR → Month (monthly submission)</code>, justify remaining flagged days, <strong>Print monthly DTR</strong>, then <strong>Submit monthly DTR</strong> before the deadline (default: 5th of the following month).</p>
+                <ul>
+                    <li><strong>Leave:</strong> <code>Leave → Apply for Leave</code>; track under <code>View Leave</code>.</li>
+                    <li><strong>My Records:</strong> My PDS, My Service Record (appointment history), My Payslips (JO/COS or Plantilla). Dashboard shows your ID photo when HR has linked one.</li>
+                    <li><strong>JO/COS:</strong> Overtime Credits when applicable.</li>
+                    <li><strong>eRMT:</strong> Search records; use <strong>Copy path</strong> or try browser open for NAS PDFs (open via File Explorer / Adobe if the browser blocks <code>file://</code>).</li>
+                </ul>
+            </div>
+
+            <div class="role-guide{% if viewer_role == 'dtr_uploader' %} is-your-role{% endif %}" id="role-dtr-uploader">
+                <h3 class="sub">DTR Uploader{% if viewer_role == 'dtr_uploader' %}<span class="role-badge">Your role</span>{% endif %}</h3>
+                <p><strong>Sidebar access:</strong> Dashboard, eRMT (view), View DTR Records, Upload DTR Log, Leave self-service, My Records (if linked), Notifications.</p>
+                <p><strong>Primary task:</strong> Upload biometric attendance files for the correct quincena.</p>
+                <ol class="steps">
+                    <li>Confirm with HR which quincena and file to upload.</li>
+                    <li>Open <code>Time &amp; Attendance → Upload DTR Log</code>.</li>
+                    <li>Select the quincena, choose the <code>.dat</code> file, and click <strong>Upload and Save</strong>.</li>
+                    <li>Review the summary (records saved, dates outside quincena skipped, missing days).</li>
+                    <li>If you uploaded the wrong file, use <strong>Undo upload</strong> on your own recent batch (Admin/HR can undo any batch).</li>
+                </ol>
+                <p class="muted">You can view DTR records and use self-service leave/DTR if your account is linked to an employee. You cannot process worktime or run payroll.</p>
+            </div>
+
+            <div class="role-guide{% if viewer_role == 'payroll_maker' %} is-your-role{% endif %}" id="role-payroll-maker">
+                <h3 class="sub">Payroll Maker{% if viewer_role == 'payroll_maker' %}<span class="role-badge">Your role</span>{% endif %}</h3>
+                <p><strong>Sidebar access:</strong> Dashboard, eRMT (view), View DTR Records, DTR Justifications, Leave self-service, Reports → Employees List, My Records (if linked), Notifications.</p>
+                <ul>
+                    <li><strong>DTR records:</strong> View attendance for active employees in your department.</li>
+                    <li><strong>Justifications:</strong> Review submissions; use <strong>Forward</strong> to send to HR/Admin for approve/reject.</li>
+                    <li><strong>Reports:</strong> <code>Reports → Employees List</code> (CSV, Excel, or PDF). Service Records, Leave Credits, and Employee ID Cards are Admin/HR only.</li>
+                    <li><strong>eRMT:</strong> View/search only.</li>
+                </ul>
+                <p class="muted">Payroll load and Process Worktime are performed by HR/Admin after employee review is closed.</p>
             </div>
 
             <h2 class="section" id="um-common-tasks">Common tasks (step-by-step)</h2>
@@ -303,22 +410,82 @@
                 <li>Approve or reject (when available).</li>
             </ol>
 
-            <h3 class="sub">F) Upload DTR log (DTR Uploader, HR, or Admin)</h3>
+            <h3 class="sub" id="um-prepare-dtr-period">F) Prepare DTR period (Admin/HR)</h3>
+            <p>
+                Run this <strong>before</strong> uploading the biometric log. It creates blank DTR rows for the selected period and can stamp
+                rest days, holidays, and work suspensions. It does <strong>not</strong> fill 8:00/5:00 or 7:00/6:00 present-day times — plantilla and JO/COS keep actual biometric punches only.
+            </p>
             <ol class="steps">
-                <li>Open <code>Daily Time Records → Upload DTR Log</code>.</li>
-                <li>Pick the correct <strong>quincena</strong>.</li>
-                <li>Select the <code>.dat</code> file and upload.</li>
-                <li>Review parsed rows before saving.</li>
+                <li>Open <code>Time &amp; Attendance → Prepare DTR Period</code> (also available from <code>Quincena Processing</code>).</li>
+                <li>Select <strong>Quincena</strong> (1st or 2nd half), <strong>Month</strong>, and <strong>Year</strong>. Preparation always covers <strong>all active employees</strong> for that quincena (plantilla and non-plantilla).</li>
+                <li>
+                    <strong>Compressed workweek segments (optional)</strong> — use when the duty scheme is 4-day or 5-day compressed, or when it
+                    <strong>changes within the same quincena</strong>:
+                    <ol style="margin-top:0.35rem;">
+                        <li>Click <strong>Add workweek segment</strong> for each date range.</li>
+                        <li>Per segment, set <strong>Model</strong> (5-day or 4-day), <strong>Applies To</strong> (all employees, plantilla only, or non-plantilla only), and <strong>Start</strong> / <strong>End</strong> dates.</li>
+                        <li>Example: Segment 1 — 5-day, all employees, May 1–7; Segment 2 — 4-day, all employees, May 8–15.</li>
+                        <li>Each segment must fall entirely within the selected period. Segments that overlap for the <em>same</em> employee group are not allowed (e.g. two “all employees” ranges on the same dates). Different groups may overlap (e.g. plantilla 5-day and non-plantilla 4-day on the same dates).</li>
+                        <li>Leave segments empty if you only need blank rows (no REST DAY overlay).</li>
+                    </ol>
+                </li>
+                <li><strong>What each model does</strong> (excluding holidays and work suspensions):
+                    <ul>
+                        <li><strong>5-day compressed</strong> — used for late/undertime targets (8:00 AM / 12:00 PM / 1:00 PM / 5:00 PM). DTR In/Out stay blank until biometric upload.</li>
+                        <li><strong>4-day compressed</strong> — late/undertime targets Monday–Thursday (7:00 AM / 12:00 PM / 1:00 PM / 6:00 PM); <strong>Friday</strong> marked <code>REST DAY</code>. No default 7:00/6:00 times on the DTR row.</li>
+                        <li>Employees on the <strong>Flexible Worktime</strong> list (or the employee flexi flag) skip the 4-day Friday REST DAY overlay; that day’s flexi row (including Rest mode) owns the schedule.</li>
+                    </ul>
+                </li>
+                <li>
+                    <strong>Holidays / work suspension</strong> — pick dates on the calendar (full day, AM, or PM) or type one date per line
+                    (<code>YYYY-MM-DD</code>, optional <code>AM</code> or <code>PM</code>). These apply org-wide for the listed days.
+                </li>
+                <li>Before generating, set <code>Flexible Worktime</code>, <code>Overtime Authorization</code>, and <code>X-Service Authorization</code> on the same Time &amp; Attendance menu when required for the period.</li>
+                <li>Click <strong>Generate</strong>. The system saves workweek settings for late/undertime lookup and creates or updates DTR rows for the quincena.</li>
+            </ol>
+            <p class="muted">
+                To print a <strong>full-month</strong> DTR for plantilla employees (monthly submission requirement), open
+                <code>View DTR Records</code>, set <strong>View by</strong> to <strong>Month</strong>, and use <strong>Print monthly DTR</strong>.
+                Day-to-day payroll and review still use the <strong>Quincena</strong> view.
+            </p>
+
+            <h3 class="sub">G2) Monthly plantilla DTR submissions (Admin/HR)</h3>
+            <ol class="steps">
+                <li>After the <strong>2nd quincena</strong> DTR is uploaded and both quincenas are closed for employee review, open <code>Time &amp; Attendance → Monthly DTR Submissions</code>.</li>
+                <li>Select month, year, and optional department filter.</li>
+                <li>Review employees who have <strong>Submitted</strong> monthly DTR; open their month view if needed.</li>
+                <li><strong>Accept</strong> complete packets or <strong>Return for resubmit</strong> with review notes.</li>
+                <li>Default employee deadline is the <strong>5th of the following month</strong> (plantilla employees are notified after Q2 upload and reminded near the deadline).</li>
             </ol>
 
-            <h3 class="sub">G) Submit DTR justification</h3>
+            <h3 class="sub">G) Upload DTR log (DTR Uploader, HR, or Admin)</h3>
             <ol class="steps">
-                <li>Open <code>Daily Time Records → DTR Justifications</code>.</li>
-                <li>Choose the date, add a clear reason, and attach proof if needed.</li>
-                <li>Submit and monitor the status.</li>
+                <li>Open <code>Time &amp; Attendance → Upload DTR Log</code>.</li>
+                <li>Select the correct <strong>quincena</strong>.</li>
+                <li>Choose the biometric <code>.dat</code> file and click <strong>Upload and Save</strong>.</li>
+                <li>Read the summary: records saved, outside-quincena dates skipped, and any missing calendar days.</li>
+                <li>Employees are notified to review <code>My DTR</code>. HR monitors progress on <code>Quincena Processing</code>.</li>
             </ol>
 
-            <h3 class="sub">H) View worktime summary (Admin/HR)</h3>
+            <h3 class="sub">H) Review and justify your DTR (Employee)</h3>
+            <ol class="steps">
+                <li>Open <code>Time &amp; Attendance → My DTR</code> for the quincena.</li>
+                <li>On a flagged day, click <strong>Justify this day</strong> (or open <code>DTR Justifications</code>).</li>
+                <li>Enter a clear reason and attach supporting document if available.</li>
+                <li>Submit before the review deadline shown on the page.</li>
+                <li>Optionally click <strong>Print DTR</strong> to save a PDF copy.</li>
+            </ol>
+
+            <h3 class="sub">I) Process a quincena (Admin/HR)</h3>
+            <ol class="steps">
+                <li>Open <code>Time &amp; Attendance → Quincena Processing</code> and select the quincena.</li>
+                <li>Complete the setup checklist (prepare period, flexi, authorizations, upload).</li>
+                <li>When employees finish reviewing, click <strong>Close employee review</strong>.</li>
+                <li>Approve/reject justifications and <code>Adjust DTR</code> as needed.</li>
+                <li>Run <code>Process Worktime</code>, then open <code>Worktime Summary</code> before payroll.</li>
+            </ol>
+
+            <h3 class="sub">J) View worktime summary (Admin/HR)</h3>
             <ol class="steps">
                 <li>Open <code>Payroll → Worktime Summary</code>.</li>
                 <li>Select year, month, quincena, employee type, and optional department or employee filters.</li>
@@ -326,21 +493,119 @@
                 <li>Use <strong>CSV</strong> or <strong>PDF</strong> export if needed.</li>
             </ol>
 
-            <h2 class="section" id="um-roles">What each role can do</h2>
+            <h3 class="sub">K) Export Service Record PDF (Admin/HR)</h3>
+            <ol class="steps">
+                <li>Open <code>Reports → Service Records</code> (or an employee’s form / list action <strong>Service Record</strong>).</li>
+                <li>Select the employee and open the Service Record page.</li>
+                <li>Click <strong>Export PDF</strong> for a printable appointment history (municipal header, no department/position columns in the table).</li>
+            </ol>
+            <p class="muted">Employees with a linked account can view their own history under <code>My Records → My Service Record</code> (on-screen; PDF export is for Admin/HR).</p>
+
+            <h3 class="sub">L) Export Leave Credits PDF (Admin/HR)</h3>
+            <ol class="steps">
+                <li>Open <code>Leave → Leave Credits</code> and open an employee card, or use <code>Reports → Leave Credits</code>.</li>
+                <li>Review the ledger (VL, SL, SPL, WL, CTO, LWOP).</li>
+                <li>Click <strong>Export PDF</strong> (landscape A4).</li>
+            </ol>
+
+            <h3 class="sub">M) Run Plantilla or JO/COS payroll (Admin/HR)</h3>
+            <ol class="steps">
+                <li>Confirm the quincena is <strong>Processed</strong> and Worktime Summary looks correct.</li>
+                <li>Upload or refresh deduction schedules (GSIS, HDMF, PHIC, LBP, JOFEMCO, withholding tax) as needed.</li>
+                <li>Open <code>Payroll → Plantilla</code> or <code>Payroll → JO/COS</code>, select department/period, and load payroll.</li>
+                <li>Generate payslips so employees can open them under <code>My Payslips</code>.</li>
+            </ol>
+
+            <h3 class="sub">N) Print Employee ID Cards (Admin/HR)</h3>
+            <ol class="steps">
+                <li>Ensure each employee has an <strong>ID Photo</strong> linked (see <a href="#um-id-cards">Employee ID Cards &amp; ID photo</a>).</li>
+                <li>Open <code>Reports → Employee ID Cards</code> (or click <strong>Print ID</strong> on an employee list/form row).</li>
+                <li>Optional: filter by department, status, and <strong>ID format</strong> (All / JO/COS only / Plantilla only).</li>
+                <li>Click <strong>Print ID</strong> on one row for a single PDF, or select several employees and click <strong>Print selected (batch PDF)</strong>.</li>
+            </ol>
+            <p class="muted">
+                Template is chosen automatically from appointment status: Job Order / Contract of Service → JO/COS ID;
+                other plantilla appointments → Plantilla ID. Department text prefers the department <em>description</em>.
+            </p>
+
+            <h2 class="section" id="um-ermt">eRMT (electronic records)</h2>
+            <p>
+                <strong>Overview → eRMT</strong> catalogs scanned HR documents. The app stores metadata and a
+                <strong>Network PDF path (NAS)</strong> only—files are not uploaded to the application server.
+            </p>
+            <p><strong>Who can do what:</strong></p>
             <ul>
-                <li><strong>Admin</strong>: Full access (settings, employees, leave approvals, reports).</li>
-                <li><strong>HR</strong>: Similar to Admin for HR operations (users/departments/employees/leave settings/reports).</li>
-                <li><strong>Manager</strong>: Can review/approve leave within scope and view relevant employee data.</li>
-                <li><strong>Employee</strong>: Applies leave, views own leave, views personal dashboard/PDS (if enabled).</li>
-                <li><strong>DTR Uploader</strong>: Uploads DTR logs and may view DTR-related pages.</li>
-                <li><strong>Payroll Maker</strong>: Access to DTR records, justifications, and employee reports within their department scope.</li>
+                <li><strong>All signed-in users:</strong> Search/filter records; copy NAS path; try browser open.</li>
+                <li><strong>Admin / HR:</strong> Add and edit records (record number like <code>ERMT-YYMMDD-NN</code>, type, title, keywords, cabinet, shelf, remarks, NAS path).</li>
+                <li><strong>Admin:</strong> Delete a record from the database (the file on the NAS remains).</li>
             </ul>
+            <p><strong>Record types:</strong> Memorandum, Office Order, Reports, Certificates, Contracts, Personnel Records, 201 File, 2316 File, <strong>ID Photo</strong>, Others.</p>
+            <h3 class="sub">Add or update a record (Admin/HR)</h3>
+            <ol class="steps">
+                <li>Open <code>Overview → eRMT</code> and click <strong>+ New Record</strong> (or <strong>Update</strong> on an existing row).</li>
+                <li>Fill record date, type, title, keywords, cabinet/shelf, and remarks.</li>
+                <li>Paste the <strong>Network PDF path</strong> (UNC on the office NAS
+                    <code>\\192.168.20.3\hrmdo\...</code>, e.g.
+                    <code>\\192.168.20.3\hrmdo\ID PICTURES\PLANTILLA\40555.jpg</code>,
+                    or a mapped drive path). For ID photos, use an image path (<code>.jpg</code> / <code>.png</code> / similar). Save.</li>
+            </ol>
+            <h3 class="sub">Open a NAS PDF</h3>
+            <ol class="steps">
+                <li>Expand a record and use <strong>Copy path</strong>, then open the file in File Explorer, Adobe Acrobat, or Edge.</li>
+                <li>Optional: <strong>Try browser open</strong> — many browsers block <code>file://</code> links from an http(s) site; use Copy path if that fails.</li>
+                <li>Your PC must be on the office network with access to <code>\\192.168.20.3\hrmdo</code>.</li>
+            </ol>
+
+            <h2 class="section" id="um-id-cards">Employee ID Cards &amp; ID photo</h2>
+            <p>
+                Admin/HR can print official <strong>LGU Jagna</strong> ID cards. Photos are not uploaded into the app database—
+                they are linked from an <strong>eRMT</strong> image file on the office NAS (same pattern as other eRMT records).
+            </p>
+
+            <h3 class="sub">1) Encode the ID photo in eRMT (Admin/HR)</h3>
+            <ol class="steps">
+                <li>Copy the employee’s ID photo into the NAS folder
+                    <code>\\192.168.20.3\hrmdo\ID PICTURES\PLANTILLA</code> or
+                    <code>\\192.168.20.3\hrmdo\ID PICTURES\JO</code> (JPG/PNG recommended).</li>
+                <li>In <code>Overview → eRMT</code>, create a record with type <strong>ID Photo</strong>.</li>
+                <li>Set the <strong>Network file path</strong> to the full UNC path
+                    (e.g. <code>\\192.168.20.3\hrmdo\ID PICTURES\PLANTILLA\40555.jpg</code>) and save.
+                    Note the record number (e.g. <code>ERMT-YYMMDD-NN</code>).</li>
+            </ol>
+
+            <h3 class="sub">2) Link the photo to the employee (Admin/HR)</h3>
+            <ol class="steps">
+                <li>Open <code>Settings → Employees</code> and edit the employee.</li>
+                <li>In <strong>ID Photo (eRMT)</strong>, enter the eRMT <strong>record number</strong> and save.</li>
+                <li>A preview appears when the path is readable from the app server. The same photo can show on the dashboard welcome card.</li>
+            </ol>
+
+            <h3 class="sub">3) Print Plantilla or JO/COS ID cards (Admin/HR)</h3>
+            <ol class="steps">
+                <li>Open <code>Reports → Employee ID Cards</code>.</li>
+                <li>Filter by department, employment status, and ID format if needed.</li>
+                <li>Use <strong>Print ID</strong> for one employee, or select multiple rows and <strong>Print selected (batch PDF)</strong>.</li>
+                <li>You can also print from the employee list/form via the <strong>Print ID</strong> action.</li>
+            </ol>
+            <p><strong>What appears on the card:</strong></p>
+            <ul>
+                <li><strong>Plantilla:</strong> Official plantilla template; photo (~3.5 × 4.5 cm) with gold frame; name as <code>FIRSTNAME M.I. LASTNAME</code>, department description, and ID NO box on the lower left; QR code of the employee ID on the lower right.</li>
+                <li><strong>JO/COS:</strong> JO/COS template (auto-selected for Job Order / Contract of Service); photo in the template slot; condensed name, department description, and ID NO box on the lower left; QR code of the employee ID on the lower right.</li>
+            </ul>
+            <p class="muted">
+                If the photo is missing, the card still prints with an empty photo area—link a valid eRMT ID Photo first for a complete card.
+            </p>
 
             <h2 class="section" id="um-best-practices">Best practices</h2>
             <ul>
+                <li><strong>Follow the quincena workflow</strong>: Do not run payroll until worktime is processed for that quincena.</li>
+                <li><strong>Close employee review</strong> before adjusting DTR and processing worktime.</li>
                 <li><strong>Be consistent</strong>: Use complete names and correct departments to keep reports accurate.</li>
-                <li><strong>Double-check dates</strong>: Leave and DTR are date-sensitive; wrong dates cause payroll issues.</li>
+                <li><strong>Double-check dates</strong>: Leave and DTR are date-sensitive; wrong dates cause payroll issues. Workweek segment dates must match the quincena or month you are preparing.</li>
                 <li><strong>Attach proof when needed</strong>: Justifications are faster to review with supporting files.</li>
+                <li><strong>eRMT paths</strong>: Prefer stable UNC paths on the shared NAS; avoid personal desktop folders.</li>
+                <li><strong>ID photos</strong>: Use a clear front-facing photo; keep the eRMT path pointing at the current file after NAS folder moves.</li>
+                <li><strong>ID card print</strong>: Filter by Plantilla vs JO/COS when batch-printing so you load the correct paper/stock.</li>
                 <li><strong>Use search</strong>: Most lists support searching—use it instead of scrolling.</li>
                 <li><strong>Log out</strong>: Always log out after using the system on shared devices.</li>
             </ul>
@@ -358,20 +623,58 @@
             <ul>
                 <li>Your role may not have permission for that page. Confirm your role with Admin/HR.</li>
                 <li>Try logging out and logging back in after role changes.</li>
+                <li>Service Records / Leave Credits / Employee ID Cards under Reports, Payroll menu, and eRMT edit/delete require Admin or HR (delete = Admin).</li>
+            </ul>
+
+            <h3 class="sub">Prepare DTR / workweek segment issues</h3>
+            <ul>
+                <li><strong>Overlapping segments</strong>: Two segments for the same employee group cannot cover the same dates. Split or adjust ranges, or use different <em>Applies To</em> values when plantilla and non-plantilla follow different schemes.</li>
+                <li><strong>Dates outside the period</strong>: Start and end dates must fall within the selected quincena or month. Change the period or shorten the segment.</li>
+                <li><strong>Wrong late/undertime targets</strong>: The system uses the workweek segment active on each calendar day. Re-run <code>Prepare DTR Period</code> with corrected segments before upload if you prepared the wrong scheme.</li>
+                <li><strong>No default times stamped</strong>: Workweek segments are optional. Add at least one segment, or adjust DTR manually after upload.</li>
             </ul>
 
             <h3 class="sub">DTR upload issues</h3>
             <ul>
-                <li><strong>Wrong quincena</strong>: Select the correct quincena before uploading.</li>
-                <li><strong>Incomplete quincena in file</strong>: If some calendar days in the selected quincena are not in the upload, the page shows a notice; you can still save the rows that were parsed.</li>
-                <li><strong>Employee ID not found</strong>: Make sure the employee exists and the ID in the file matches the employee record.</li>
-                <li><strong>Same day saved again</strong>: If a DTR row already exists for that employee and date, new uploads <strong>merge</strong> times (missing slots are filled; if both uploads have a value for the same slot, arrivals use the earlier time and departures the later time). Upload another att log to complete partial days.</li>
+                <li><strong>Wrong quincena</strong>: Select the correct quincena before uploading. Dates outside the quincena are skipped automatically.</li>
+                <li><strong>Incomplete quincena in file</strong>: Missing calendar days are listed in the upload summary; you can upload another file or let HR adjust.</li>
+                <li><strong>Employee ID not found</strong>: Ensure the employee exists and the ID in the file matches the employee record.</li>
+                <li><strong>Duplicate upload</strong>: New uploads <strong>merge</strong> with existing rows for the same day. Use <strong>Undo upload</strong> on the batch if the entire upload was wrong.</li>
+                <li><strong>Cannot adjust DTR</strong>: If the quincena is <strong>Processed</strong>, HR must <strong>Reopen for adjustment</strong> on Quincena Processing first.</li>
+            </ul>
+
+            <h3 class="sub">DTR justification issues</h3>
+            <ul>
+                <li><strong>Cannot submit justification</strong>: The employee review window may be closed or past the deadline. Contact HR.</li>
+                <li><strong>Flag still showing after justification</strong>: Justifications are documentation; HR must approve and may still adjust DTR times before worktime is processed.</li>
+                <li><strong>Payroll Maker</strong>: Use <strong>Forward</strong> to send justifications to HR; only HR/Admin can approve or reject.</li>
+            </ul>
+
+            <h3 class="sub">eRMT / NAS PDF issues</h3>
+            <ul>
+                <li><strong>Browser won’t open the PDF</strong>: Copy the path and open it in File Explorer or Adobe. Browsers often block local/network <code>file://</code> links from web apps.</li>
+                <li><strong>Access denied / path not found</strong>: Confirm you are on the office network and can open
+                    <code>\\192.168.20.3\hrmdo</code> in File Explorer; ask IT if the share moved. The app server must also be able to read that path for ID photo previews/cards.</li>
+                <li><strong>Cannot add/edit</strong>: Only Admin/HR can encode records. Only Admin can delete.</li>
+            </ul>
+
+            <h3 class="sub">ID photo / ID card issues</h3>
+            <ul>
+                <li><strong>No photo on card or dashboard</strong>: Link an eRMT record (type <strong>ID Photo</strong>) on the employee form; confirm the NAS image path exists and the app server can read it.</li>
+                <li><strong>Works on dev PC but not on server (<code>hrms.exe</code>)</strong>: The server process must log in to the NAS share. Either place a <code>.env</code> file in the same folder as <code>hrms.exe</code>, or set Windows environment variables before starting HRMS:
+                    <code>ERMT_NAS_ROOT=\\192.168.20.3\hrmdo</code>,
+                    <code>ERMT_NAS_USER=hrmdo</code>,
+                    <code>ERMT_NAS_PASSWORD=…</code> (share password). Restart <code>hrms.exe</code> and check the console for <strong>NAS connected</strong>.</li>
+                <li><strong>Wrong template (Plantilla vs JO/COS)</strong>: Check the employee’s appointment / employment status. JO and Contract of Service use the JO/COS template; other plantilla statuses use the Plantilla template.</li>
+                <li><strong>Blank or incomplete name/department</strong>: Complete the employee name fields and department description (falls back to department name).</li>
+                <li><strong>Batch print empty</strong>: Select at least one visible row after filtering; “Select all visible” only covers the current filtered list.</li>
             </ul>
 
             <h3 class="sub">Leave printing / export issues</h3>
             <ul>
                 <li>Some print/export options may only work when a leave request is <strong>Approved</strong>.</li>
                 <li>If PDF export looks clipped, try browser print settings: set paper to A4 and margins to “Default”.</li>
+                <li>Leave Credits PDF is Admin/HR only (landscape).</li>
             </ul>
 
             <h3 class="sub">If something looks wrong</h3>
@@ -381,7 +684,4 @@
                 <li>If the error message mentions “database” or “constraint”, contact Admin/HR and include a screenshot of the message.</li>
             </ul>
         </div>
-    </div>
-</div>
 {% endblock %}
-

@@ -1,0 +1,228 @@
+{% extends "layouts/app.html" %}
+
+{% block title %}DTR to Payroll Process Flow - HRMS{% endblock %}
+
+{% set navbar_title = 'DTR to Payroll Process Flow' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Help & Resources'},
+    {'label': 'DTR to Payroll Process Flow'}
+] %}
+
+{% block extra_css %}
+<style>
+  .manual-doc {
+    max-width: 980px;
+    margin: 0 auto;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .manual-doc .title {
+    margin: 0;
+    font-size: 1.35rem;
+    font-weight: 900;
+    color: #0f172a;
+  }
+  .manual-doc .subtitle {
+    margin: 0.35rem 0 1.1rem;
+    color: #475569;
+    line-height: 1.55;
+    font-size: 0.98rem;
+  }
+  .manual-doc .callout {
+    background: #f8fafc;
+    border: 1px solid #e5e7eb;
+    border-left: 4px solid #1b5e3b;
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+    margin: 0.9rem 0 1.1rem;
+  }
+  .manual-doc .downloads {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+    margin: 0 0 1.1rem;
+  }
+  .manual-doc .toc {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 0.9rem 1rem;
+    background: #f8fafc;
+    margin: 0 0 1.1rem;
+  }
+  .manual-doc .toc h2 { margin: 0 0 0.5rem; font-size: 1rem; font-weight: 800; }
+  .manual-doc .toc a { color: #1b5e3b; text-decoration: none; }
+  .manual-doc .toc a:hover { text-decoration: underline; }
+  .manual-doc h2.section {
+    margin: 1.25rem 0 0.55rem;
+    font-size: 1.05rem;
+    font-weight: 900;
+    color: #0f172a;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    border-top: 1px solid #eef2f7;
+    padding-top: 0.75rem;
+  }
+  .manual-doc h3.sub {
+    margin: 0.85rem 0 0.25rem;
+    font-size: 1rem;
+    font-weight: 800;
+    color: #111827;
+  }
+  .manual-doc p, .manual-doc li {
+    color: #111827;
+    line-height: 1.65;
+    font-size: 0.98rem;
+  }
+  .manual-doc ul, .manual-doc ol { margin: 0.35rem 0 0.75rem; padding-left: 1.35rem; }
+  .manual-doc li { margin: 0.22rem 0; }
+  .manual-doc .flow-line {
+    font-family: ui-monospace, Consolas, monospace;
+    font-size: 0.88rem;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 0.75rem 0.9rem;
+    color: #0f172a;
+    line-height: 1.55;
+    white-space: pre-wrap;
+  }
+</style>
+{% endblock %}
+
+{% block app_content %}
+{% include 'includes/flash_messages.html' %}
+
+<div class="manual-doc">
+    <h1 class="title">HRMS — DTR Process to Payroll</h1>
+    <p class="subtitle">LGU Jagna · Quincena workflow for Admin, HR, and Payroll Maker</p>
+
+    <div class="downloads">
+        <a class="btn-primary" href="{{ url_for('routes.dtr_payroll_process_download', kind='docx') }}">Download Word (.docx)</a>
+        <a class="btn-secondary" href="{{ url_for('routes.dtr_payroll_process_download', kind='pdf') }}">Download flowchart PDF</a>
+    </div>
+
+    <div class="callout">
+        <strong>Key point:</strong> Payroll reads quincena snapshots (<code>work_hours</code> and <code>DtrQuincenaWorktimeSummary</code>)
+        produced by <strong>Process Worktime</strong>. It does not re-read live punch rows on every pay run when those snapshots exist.
+    </div>
+
+    <div class="toc">
+        <h2>Contents</h2>
+        <ol>
+            <li><a href="#overview">Overview</a></li>
+            <li><a href="#steps">Step-by-step process</a></li>
+            <li><a href="#checklist">Operator checklist</a></li>
+            <li><a href="#tracks">Computation by employment track</a></li>
+            <li><a href="#data">Data produced for payroll</a></li>
+            <li><a href="#menus">System menu path</a></li>
+        </ol>
+    </div>
+
+    <h2 class="section" id="overview">A. Overview (text flow)</h2>
+    <div class="flow-line">Prepare DTR Period
+→ Open Quincena Processing
+→ Upload / fix DTR
+→ Set duty rules (Flexible Worktime, X-Service, OT Auth)
+→ Process Worktime (write snapshots)
+→ Worktime Summary
+→ JO/COS or Plantilla Payroll
+→ Generate payslips</div>
+
+    <h2 class="section" id="steps">B. Step-by-step process</h2>
+
+    <h3 class="sub">1. Prepare period</h3>
+    <ol>
+        <li><strong>Prepare DTR Period</strong> — select year, month, and quincena half (1–15 or 16–end).</li>
+        <li><strong>Quincena Processing</strong> — set or confirm the review window and deadline for the period.</li>
+    </ol>
+
+    <h3 class="sub">2. Capture attendance</h3>
+    <ol>
+        <li><strong>Upload DTR Log</strong> — import biometrics or Excel punch file.</li>
+        <li>System stores punches in <strong>daily_time_records</strong> (AM in/out, PM in/out).</li>
+        <li>Resolve punch flags; edit DTR remarks; process DTR justifications.</li>
+        <li>Apply approved leave, holidays, and special-day remarks that affect payable days.</li>
+    </ol>
+
+    <h3 class="sub">3. Set duty rules (before Process Worktime)</h3>
+    <ol>
+        <li><strong>Flexible Worktime</strong> — assign custom schedules (including overnight / weekend duty where applicable).</li>
+        <li><strong>X-Service Authorization (JO/COS)</strong> — authorize extended-service dates; OT is credited to <code>jo_cos_overtime</code> when punches fall within authorized windows (does not add to regular work_hours payroll base).</li>
+        <li><strong>Overtime Authorization (Plantilla)</strong> — authorize OT windows; regeneration may post CTO to <code>leave_ledger</code>. This does not change work_hours / payroll hours.</li>
+    </ol>
+
+    <h3 class="sub">4. Process Worktime (critical handoff)</h3>
+    <ol>
+        <li>Run <strong>Process Worktime / Regenerate DTR</strong> for the quincena.</li>
+        <li>System computes per employee per day: gross, late, undertime, and absence minutes.</li>
+        <li>Writes daily snapshot rows to <code>work_hours</code>.</li>
+        <li>Writes quincena totals to <code>DtrQuincenaWorktimeSummary</code>.</li>
+        <li>Applies side effects as configured: VL/SL ledger entries, Plantilla CTO, JO/COS overtime credits.</li>
+    </ol>
+    <div class="callout">
+        <strong>Important:</strong> Re-run Process Worktime after changing Flexible Worktime, X-Service, OT Authorization,
+        or punches for that quincena. Otherwise payroll still uses the old snapshot.
+    </div>
+
+    <h3 class="sub">5. Plantilla monthly gate</h3>
+    <ol>
+        <li><strong>Monthly DTR Submissions</strong> — Plantilla employees review/submit monthly DTR where this gate is configured.</li>
+    </ol>
+    <p>JO/COS typically follow the quincena path without this monthly submission gate.</p>
+
+    <h3 class="sub">6. Payroll</h3>
+    <ol>
+        <li>Open <strong>Worktime Summary</strong> — verify quincena snapshots before computing pay.</li>
+        <li><strong>JO/COS Payroll</strong> — paid days from gross minutes ÷ shift length (rounded) × daily rate; deduct late/undertime and other deductions; generate payslips.</li>
+        <li><strong>Plantilla Payroll</strong> — accrued pay less government and other deductions (GSIS, HDMF, PHIC, LBP, etc.); generate payslips.</li>
+    </ol>
+
+    <h2 class="section" id="checklist">C. Operator checklist</h2>
+    <ol>
+        <li>Prepare DTR Period → open Quincena Processing</li>
+        <li>Upload DTR → fix flags / remarks / justifications</li>
+        <li>Set Flexible Worktime, X-Service (JO/COS), and OT Auth (Plantilla) if needed</li>
+        <li>Run Process Worktime (writes the snapshots payroll uses)</li>
+        <li>Check Worktime Summary</li>
+        <li>Run JO/COS or Plantilla payroll → generate payslips</li>
+    </ol>
+
+    <h2 class="section" id="tracks">D. Computation summary by employment track</h2>
+
+    <h3 class="sub">JO/COS</h3>
+    <ul>
+        <li><strong>Pay base:</strong> Gross work minutes ÷ shift length (480 minutes default, or flexi average when on Flexible Worktime) → paid days (rounded) × daily rate.</li>
+        <li><strong>Late / undertime:</strong> Deducted separately from gross (not double-counted from net-rendered minutes).</li>
+        <li><strong>X-Service:</strong> Authorized dates are excluded from regular worktime and credited to <code>jo_cos_overtime</code> only when punches fall within authorized windows.</li>
+        <li><strong>Snapshot used:</strong> <code>work_hours</code> + <code>DtrQuincenaWorktimeSummary</code> for the selected year / month / quincena.</li>
+    </ul>
+
+    <h3 class="sub">Plantilla</h3>
+    <ul>
+        <li><strong>Pay base:</strong> Accrued from appointment / schedule; plantilla net worktime for snapshot purposes is essentially gross (leave handled via <code>leave_ledger</code>).</li>
+        <li><strong>Leave / CTO:</strong> VL/SL deductions and CTO earned are posted on <code>leave_ledger</code> during regeneration where applicable.</li>
+        <li><strong>OT Authorization:</strong> Does not change work_hours; earns CTO only for punches inside authorized windows.</li>
+        <li><strong>Monthly gate:</strong> Monthly DTR Submissions where plantilla review/submit is required.</li>
+    </ul>
+
+    <h2 class="section" id="data">E. Data produced for payroll</h2>
+    <ul>
+        <li><code>work_hours</code> — one row per employee per calendar day in the quincena (gross, late, undertime, absence, net, remarks, year/month/quincena).</li>
+        <li><code>DtrQuincenaWorktimeSummary</code> — quincena-level totals used by Worktime Summary and payroll screens.</li>
+        <li>Related ledgers (side effects): <code>leave_ledger</code> (VL/SL/CTO), <code>jo_cos_overtime</code> (X-Service OT).</li>
+    </ul>
+
+    <h2 class="section" id="menus">F. Menu path (system)</h2>
+    <ul>
+        <li><strong>Time &amp; Attendance → Daily Time Records:</strong> Upload DTR Log, Edit remarks, Justifications, Flexible Worktime, X-Service Authorization</li>
+        <li><strong>Processing:</strong> Quincena Processing, Monthly DTR Submissions, Prepare DTR Period, Process Worktime</li>
+        <li><strong>Authorizations:</strong> Overtime Authorization (Plantilla)</li>
+        <li><strong>Payroll → Processing:</strong> Worktime Summary, JO/COS, Plantilla</li>
+        <li><strong>Payroll → Deductions:</strong> GSIS, HDMF, PHIC, LBP, JOFEMCO, Withholding Tax</li>
+    </ul>
+</div>
+{% endblock %}

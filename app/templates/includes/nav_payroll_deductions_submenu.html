@@ -2,7 +2,18 @@
     'routes.payroll_deductions_gsis',
     'routes.payroll_deductions_phic',
     'routes.payroll_deductions_phic_submit',
-    'routes.payroll_deductions_plantilla',
+    'routes.payroll_deductions_lbp',
+    'routes.payroll_deductions_lbp_preview',
+    'routes.payroll_deductions_lbp_upload_submit',
+    'routes.payroll_deductions_lbp_deductions_submit',
+    'routes.payroll_deductions_jofemco',
+    'routes.payroll_deductions_jofemco_preview',
+    'routes.payroll_deductions_jofemco_upload_submit',
+    'routes.payroll_deductions_jofemco_deductions_submit',
+    'routes.payroll_deductions_withholding_tax',
+    'routes.payroll_deductions_withholding_tax_preview',
+    'routes.payroll_deductions_withholding_tax_upload_submit',
+    'routes.payroll_deductions_withholding_tax_deductions_submit',
     'routes.payroll_deductions_hdmf',
     'routes.payroll_deductions_hdmf_contributions_preview',
     'routes.payroll_deductions_hdmf_contributions_upload_submit',
@@ -18,11 +29,13 @@
         <div class="nav-dropdown-sub{% if request.endpoint and request.endpoint.startswith('routes.payroll_deductions_hdmf') %} nav-dropdown-sub-active{% endif %}">
             <span class="dropdown-item dropdown-item-submenu">HDMF <span class="submenu-arrow">▶</span></span>
             <div class="dropdown-menu dropdown-submenu">
-                <a href="{{ url_for('routes.payroll_deductions_hdmf', scope='jo-cos') }}#contribution" class="dropdown-item">JO/COS</a>
-                <a href="{{ url_for('routes.payroll_deductions_hdmf', scope='plantilla') }}#contribution" class="dropdown-item">Plantilla</a>
+                <a href="{{ url_for('routes.payroll_deductions_hdmf', scope='jo-cos') }}#contribution" class="dropdown-item{% if request.view_args and request.view_args.get('scope') == 'jo-cos' and request.endpoint and request.endpoint.startswith('routes.payroll_deductions_hdmf') %} active{% endif %}">JO/COS</a>
+                <a href="{{ url_for('routes.payroll_deductions_hdmf', scope='plantilla') }}#contribution" class="dropdown-item{% if request.view_args and request.view_args.get('scope') == 'plantilla' and request.endpoint and request.endpoint.startswith('routes.payroll_deductions_hdmf') %} active{% endif %}">Plantilla</a>
             </div>
         </div>
         <a href="{{ url_for('routes.payroll_deductions_phic') }}" class="dropdown-item{% if request.endpoint in ('routes.payroll_deductions_phic', 'routes.payroll_deductions_phic_submit') %} active{% endif %}">PHIC</a>
-        <a href="{{ url_for('routes.payroll_deductions_plantilla') }}" class="dropdown-item{% if request.endpoint == 'routes.payroll_deductions_plantilla' %} active{% endif %}">Plantilla</a>
+        <a href="{{ url_for('routes.payroll_deductions_lbp') }}" class="dropdown-item{% if request.endpoint in ('routes.payroll_deductions_lbp', 'routes.payroll_deductions_lbp_preview', 'routes.payroll_deductions_lbp_upload_submit', 'routes.payroll_deductions_lbp_deductions_submit') %} active{% endif %}">LBP</a>
+        <a href="{{ url_for('routes.payroll_deductions_jofemco') }}" class="dropdown-item{% if request.endpoint in ('routes.payroll_deductions_jofemco', 'routes.payroll_deductions_jofemco_preview', 'routes.payroll_deductions_jofemco_upload_submit', 'routes.payroll_deductions_jofemco_deductions_submit') %} active{% endif %}">JOFEMCO</a>
+        <a href="{{ url_for('routes.payroll_deductions_withholding_tax') }}" class="dropdown-item{% if request.endpoint in ('routes.payroll_deductions_withholding_tax', 'routes.payroll_deductions_withholding_tax_preview', 'routes.payroll_deductions_withholding_tax_upload_submit', 'routes.payroll_deductions_withholding_tax_deductions_submit') %} active{% endif %}">Withholding Tax</a>
     </div>
 </div>

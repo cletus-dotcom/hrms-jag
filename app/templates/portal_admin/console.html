@@ -1,0 +1,81 @@
+{% extends 'portal_admin/_layout.html' %}
+{% block portal_title %}Overview{% endblock %}
+{% block portal_content %}
+<div class="portal-admin-page-header">
+    <h1>Portal Console</h1>
+    <p>Configure this installation for another LGU or agency. Branding and landing content apply site-wide; import tools cover all database tables.</p>
+</div>
+<div class="portal-admin-grid">
+    <article class="portal-admin-card">
+        <h2>HRMS Administration</h2>
+        <p>Open the main HRMS dashboard with full Admin access — employees, DTR, leave, payroll, and reports.</p>
+        <a href="{{ url_for('routes.dashboard') }}" class="btn-primary">Open HRMS Dashboard</a>
+    </article>
+    <article class="portal-admin-card">
+        <h2>Branding</h2>
+        <p>Organization name, portal title, tagline, and uploaded logos for white-label deployments.</p>
+        <div class="portal-admin-card-preview">
+            <img src="{{ logo_url }}" alt="" class="portal-admin-preview-logo">
+            <div>
+                <strong>{{ branding.portal_name }}</strong><br>
+                <span class="muted">{{ branding.org_name }}</span>
+            </div>
+        </div>
+        <a href="{{ url_for('portal_admin.branding') }}" class="btn-primary">Edit Branding</a>
+    </article>
+    <article class="portal-admin-card">
+        <h2>Landing Page CMS</h2>
+        <p>Edit hero, notice carousel, Growth Pulse splash, services, mission, stats headings, and footer copy.</p>
+        <a href="{{ url_for('portal_admin.cms_landing') }}" class="btn-primary">Edit Landing</a>
+    </article>
+    <article class="portal-admin-card">
+        <h2>Database Backup</h2>
+        <p>Create a PostgreSQL custom-format dump (pg_dump). The seven most recent backups are kept in <code>data/backups/</code>.</p>
+        <form method="POST" action="{{ url_for('portal_admin.backup_database') }}" class="portal-admin-inline-form">
+            <button type="submit" class="btn-primary">Run Backup Now</button>
+        </form>
+        {% if recent_backups %}
+        <ul class="portal-admin-backup-list">
+            {% for b in recent_backups %}
+            <li>
+                <span>{{ b.name }}</span>
+                <span class="muted">{{ b.size_mb }} MB</span>
+                <a href="{{ url_for('portal_admin.backup_download', filename=b.name) }}">Download</a>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="muted">No backups yet.</p>
+        {% endif %}
+    </article>
+    <article class="portal-admin-card">
+        <h2>Data Import</h2>
+        <p>{{ table_count }} database tables registered for CSV/Excel template download, preview import, export, and purge.</p>
+        <a href="{{ url_for('portal_admin.import_home') }}" class="btn-primary">Open Import Tools</a>
+    </article>
+</div>
+<div class="portal-admin-card portal-admin-card--wide">
+    <h2>Registered tables (snapshot)</h2>
+    <div class="table-container">
+        <table class="data-table portal-admin-table">
+            <thead>
+                <tr><th>Table</th><th>Model</th><th>Rows</th><th>Columns</th><th></th></tr>
+            </thead>
+            <tbody>
+                {% for t in tables[:12] %}
+                <tr>
+                    <td><code>{{ t.key }}</code></td>
+                    <td>{{ t.label }}</td>
+                    <td>{{ t.row_count }}</td>
+                    <td>{{ t.column_count }}</td>
+                    <td><a href="{{ url_for('portal_admin.import_home') }}#table-{{ t.key }}">Import</a></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if tables|length > 12 %}
+    <p class="muted">Showing 12 of {{ tables|length }} tables. <a href="{{ url_for('portal_admin.import_home') }}">View all</a></p>
+    {% endif %}
+</div>
+{% endblock %}

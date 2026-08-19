@@ -1,6 +1,13 @@
-{% extends "base.html" %}
+{% extends "layouts/app.html" %}
 
 {% block title %}Flexible Worktime - HRMS{% endblock %}
+
+{% set navbar_title = 'Flexible Worktime' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Time & Attendance'},
+    {'label': 'Flexible Worktime'}
+] %}
 
 {% block extra_css %}
 <style>
@@ -52,91 +59,24 @@
     margin-left: 0.35rem;
     vertical-align: middle;
   }
+  .flexi-rest-badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    background: #4b5563;
+    color: #fff;
+    margin-left: 0.35rem;
+    vertical-align: middle;
+  }
   .flexi-shift-hrs { font-size: 0.75rem; color: var(--medium-gray); }
+  .flexi-time-field.is-hidden { display: none !important; }
 </style>
 {% endblock %}
 
-{% block content %}
-<div class="dashboard-container">
-  <div class="header-bar">
-    <div class="header-content">
-      {% include 'includes/navbar_brand.html' %}
-      <nav class="main-nav">
-        <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
-        {% if (current_user.role or '')|lower in ('admin', 'hr') %}
-        <div class="nav-dropdown">
-          <a href="#" class="nav-link">Settings <span class="dropdown-arrow">▼</span></a>
-          <div class="dropdown-menu">
-            <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
-            <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Manage Employees</a>
-            <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
-            <hr class="dropdown-separator">
-            <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
-            <a href="{{ url_for('routes.jo_cos_designations_list') }}" class="dropdown-item">JO/COS designations</a>
-            <a href="{{ url_for('routes.jo_cos_rates_list') }}" class="dropdown-item">JO and COS Rates</a>
-            <a href="{{ url_for('routes.flexi_time_schedule_list') }}" class="dropdown-item">Flexi-time schedule</a>
-            <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
-            <hr class="dropdown-separator">
-            <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
-          </div>
-        </div>
-        {% endif %}
-        <div class="nav-dropdown">
-          <a href="#" class="nav-link nav-link-active">Daily Time Records <span class="dropdown-arrow">▼</span></a>
-          <div class="dropdown-menu">
-            <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
-            {% include 'includes/nav_dtr_upload_link.html' %}
-            <a href="{{ url_for('routes.dtr_justifications') }}" class="dropdown-item">DTR Justifications</a>
-            {% include 'includes/nav_dtr_edit_link.html' %}
-            {% include 'includes/nav_dtr_regenerate_link.html' %}
-          </div>
-        </div>
-        <div class="nav-dropdown">
-          <a href="#" class="nav-link">Leave Management <span class="dropdown-arrow">▼</span></a>
-          <div class="dropdown-menu">
-            {% if (current_user.role or '')|lower in ('admin', 'hr') %}
-            <a href="{{ url_for('routes.leave_settings_list') }}" class="dropdown-item">Leave Settings</a>
-            <a href="{{ url_for('routes.leave_credits_list') }}" class="dropdown-item">Leave Credits</a>
-            <hr class="dropdown-separator">
-            {% endif %}
-            <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply for Leave</a>
-            <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
-          </div>
-        </div>
-        {% include 'includes/nav_payroll_top_menu.html' %}
-        {% if (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') %}
-        <div class="nav-dropdown">
-          <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
-          <div class="dropdown-menu">
-            {% include 'includes/reports_dropdown_links.html' %}
-          </div>
-        </div>
-        {% endif %}
-        <div class="nav-dropdown">
-          <a href="#" class="nav-link">ABOUT <span class="dropdown-arrow">▼</span></a>
-          <div class="dropdown-menu">
-            <a href="{{ url_for('routes.users_manual') }}" class="dropdown-item">User's Manual</a>
-            <a href="{{ url_for('routes.hrmdo_manual') }}" class="dropdown-item">HRMDO Manual</a>
-          </div>
-        </div>
-      </nav>
-      <div class="user-dropdown">
-        <a href="#" class="user-info">
-          {% if employee %}{{ employee.full_name }} ({{ current_user.role|title }}){% else %}{{ current_user.username }} ({{ current_user.role|title }}){% endif %}
-          <span class="dropdown-arrow">▼</span>
-        </a>
-        <div class="dropdown-menu dropdown-menu-right">
-          <button type="button" class="dropdown-item btn-change-password" style="width:100%; text-align:left; background:none; border:none; cursor:pointer; font:inherit; padding:0.5rem 1rem;">Change password</button>
-          <form method="POST" action="{{ url_for('routes.logout') }}" style="margin:0;">
-            <button type="submit" class="dropdown-item" style="width:100%; text-align:left; background:none; border:none; cursor:pointer; font:inherit; padding:0.5rem 1rem;">Logout</button>
-          </form>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="dashboard-content">
-    {% with messages = get_flashed_messages(with_categories=true) %}
+{% block app_content %}
+{% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% for category, message in messages %}
           <div class="alert alert-{{ category }} alert-dismissible">
@@ -150,7 +90,9 @@
     <div class="page-header" style="flex-wrap: wrap; gap: 0.75rem;">
       <h1 class="page-title">Flexible Worktime</h1>
       <div class="flexi-actions">
+        {% if can_regenerate_dtr|default(false) %}
         <a href="{{ url_for('routes.dtr_regenerate') }}" class="btn-secondary">Regenerate DTR</a>
+        {% endif %}
         <a href="{{ url_for('routes.dashboard') }}" class="btn-secondary">Dashboard</a>
       </div>
     </div>
@@ -158,13 +100,28 @@
     <p style="color: var(--medium-gray); margin-bottom: 1rem; font-size: 0.9rem;">
       Set quincena-specific flexible schedules saved to <code>flexible_worktime</code>.
       Used during <strong>Regenerate DTR</strong>. Assign date ranges per employee — including
-      <strong>weekends</strong> for night-shift units (e.g. MDRRMO). When clock-out is earlier than
-      clock-in on the same row (e.g. 8:00 pm → 5:00 am), the shift is treated as
-      <strong>overnight</strong> with two segments (in → break-out, break-in → out).
+      <strong>weekends</strong> for night-shift units (e.g. MDRRMO).
+      <strong>Split</strong> duty uses In / Break-out / Break-in / Out.
+      <strong>Straight</strong> duty is continuous In → Out (no meal break; typically 8 hours; two DTR punches).
+      <strong>Rest</strong> marks scheduled day(s) off (0 worktime, REST DAY — no duty times).
+      When Out is earlier than In (e.g. 4:00 pm → 12:00 am, or 10:00 pm → 6:00 am), the shift is
+      <strong>overnight</strong>.
+      Date range = <strong>shift-start days only</strong> (not the morning checkout date).
+      Example night crew: <strong>Mon</strong> Rest; <strong>Tue–Thu</strong> Straight 4:00&nbsp;pm → 12:00&nbsp;am;
+      <strong>Fri–Sun</strong> Straight 10:00&nbsp;pm → 6:00&nbsp;am
+      (Date to = last start day — do not extend into the next morning).
+      Different slots must not share calendar dates.
+      Put both In and Out punches on that start-day DTR row (Out may be an early-morning clock time).
       Employees not on this list use 5-day / 4-day compressed rules
       (weekends and 4-day rest Fridays are not counted even if DTR has entries).
       {{ period_label }}
     </p>
+    {% if is_payroll_maker_scope|default(false) %}
+    <p class="muted" style="margin: -0.5rem 0 1rem;">
+      Payroll Maker view: employees and schedules are limited to your department.
+      Saving updates only your department and does not change other departments.
+    </p>
+    {% endif %}
 
     <div class="table-section" style="margin-bottom: 1rem;">
       <form method="GET" action="{{ url_for('routes.dtr_flexible_worktime') }}" class="form-section" style="padding: 1rem 1.25rem; border: 1px solid var(--brand-border, #e5e7eb); border-radius: 8px;">
@@ -190,12 +147,21 @@
           </div>
           <div class="form-group" style="margin: 0;">
             <label for="filterDepartment">Department</label>
+            {% if is_payroll_maker_scope|default(false) %}
+            <input type="hidden" name="department_id" value="{{ filters.department_id }}">
+            <select id="filterDepartment" class="form-control" disabled>
+              {% for dept in departments %}
+              <option value="{{ dept.id }}" selected>{{ dept.name }}</option>
+              {% endfor %}
+            </select>
+            {% else %}
             <select name="department_id" id="filterDepartment" class="form-control">
               <option value="">All departments</option>
               {% for dept in departments %}
               <option value="{{ dept.id }}" {% if filters.department_id|string == dept.id|string %}selected{% endif %}>{{ dept.name }}</option>
               {% endfor %}
             </select>
+            {% endif %}
           </div>
           <div class="form-group" style="margin: 0;">
             <button type="submit" class="btn-primary">Load quincena</button>
@@ -208,14 +174,22 @@
       <input type="hidden" name="year" value="{{ filters.year }}">
       <input type="hidden" name="month" value="{{ filters.month }}">
       <input type="hidden" name="quincena" value="{{ filters.quincena }}">
+      {% if filters.department_id %}
+      <input type="hidden" name="department_id" value="{{ filters.department_id }}">
+      {% endif %}
       <input type="hidden" name="entries_json" id="entriesJson" value="">
 
       <div class="table-section" style="margin-bottom: 1rem;">
         <h2 style="font-size: 1rem; margin: 0 0 0.75rem;">Add entry</h2>
-        <p style="font-size: 0.85rem; color: var(--medium-gray); margin: 0 0 0.5rem;">Quick presets (fills time fields below):</p>
+        <p style="font-size: 0.85rem; color: var(--medium-gray); margin: 0 0 0.5rem;">
+          Date from / Date to may use one day before or after the quincena
+          ({{ date_entry_min }} – {{ date_entry_max }}) for night-shift coverage.
+        </p>
+        <p style="font-size: 0.85rem; color: var(--medium-gray); margin: 0 0 0.5rem;">Quick presets (fills duty mode and time fields below):</p>
         <div class="flexi-preset-btns">
           {% for preset in flexi_shift_presets %}
           <button type="button" class="btn-secondary btn-sm flexi-preset-btn"
+            data-duty-mode="{{ preset.duty_mode }}"
             data-time-in="{{ preset.time_in }}"
             data-break-out="{{ preset.break_out }}"
             data-break-in="{{ preset.break_in }}"
@@ -230,26 +204,34 @@
             <div id="addEmpResults" class="flexi-emp-results"></div>
           </div>
           <div class="form-group" style="margin: 0;">
+            <label for="addDutyMode">Duty mode</label>
+            <select id="addDutyMode" class="form-control">
+              <option value="split">Split (with meal break)</option>
+              <option value="straight">Straight (no break)</option>
+              <option value="rest">Rest day (no duty)</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin: 0;">
             <label for="addDateStart">Date from</label>
-            <input type="date" id="addDateStart" class="form-control" min="{{ quincena_start }}" max="{{ quincena_end }}">
+            <input type="date" id="addDateStart" class="form-control" min="{{ date_entry_min }}" max="{{ date_entry_max }}" title="Quincena ±1 day allowed for night shift">
           </div>
           <div class="form-group" style="margin: 0;">
             <label for="addDateEnd">Date to</label>
-            <input type="date" id="addDateEnd" class="form-control" min="{{ quincena_start }}" max="{{ quincena_end }}">
+            <input type="date" id="addDateEnd" class="form-control" min="{{ date_entry_min }}" max="{{ date_entry_max }}" title="Quincena ±1 day allowed for night shift">
           </div>
-          <div class="form-group" style="margin: 0;">
+          <div class="form-group flexi-time-field" style="margin: 0;">
             <label for="addTimeIn">Time in</label>
             <input type="time" id="addTimeIn" class="form-control" value="08:00">
           </div>
-          <div class="form-group" style="margin: 0;">
+          <div class="form-group flexi-break-field flexi-time-field" style="margin: 0;">
             <label for="addBreakOut">Break out</label>
             <input type="time" id="addBreakOut" class="form-control" value="12:00">
           </div>
-          <div class="form-group" style="margin: 0;">
+          <div class="form-group flexi-break-field flexi-time-field" style="margin: 0;">
             <label for="addBreakIn">Break in</label>
             <input type="time" id="addBreakIn" class="form-control" value="13:00">
           </div>
-          <div class="form-group" style="margin: 0;">
+          <div class="form-group flexi-time-field" style="margin: 0;">
             <label for="addTimeOut">Time out</label>
             <input type="time" id="addTimeOut" class="form-control" value="17:00">
           </div>
@@ -274,6 +256,7 @@
               <tr>
                 <th>Employee ID</th>
                 <th>Name</th>
+                <th>Mode</th>
                 <th>Date from</th>
                 <th>Date to</th>
                 <th>In</th>
@@ -297,8 +280,8 @@
 (function () {
   var employees = {{ employees_for_js|tojson }};
   var entries = {{ entries_json|safe }};
-  var quincenaStart = {{ quincena_start|tojson }};
-  var quincenaEnd = {{ quincena_end|tojson }};
+  var dateEntryMin = {{ date_entry_min|tojson }};
+  var dateEntryMax = {{ date_entry_max|tojson }};
 
   function isOvernight(timeIn, timeOut) {
     if (!timeIn || !timeOut) return false;
@@ -309,16 +292,78 @@
     return p(timeOut) < p(timeIn);
   }
 
+  function estimateShiftMins(row) {
+    if ((row.duty_mode || 'split') === 'rest') return 0;
+    if (!row.time_in || !row.time_out) return 0;
+    var p = function (t) {
+      var parts = String(t).split(':');
+      return parseInt(parts[0], 10) * 60 + parseInt(parts[1] || '0', 10);
+    };
+    var tin = p(row.time_in);
+    var tout = p(row.time_out);
+    if ((row.duty_mode || 'split') === 'straight') {
+      return tout < tin ? (24 * 60 - tin) + tout : Math.max(0, tout - tin);
+    }
+    if (!row.break_out || !row.break_in) return row.shift_mins || 0;
+    var bo = p(row.break_out);
+    var bi = p(row.break_in);
+    if (tout < tin) {
+      var am = bo < tin ? (24 * 60 - tin) + bo : Math.max(0, bo - tin);
+      var pm = tout < bi ? (24 * 60 - bi) + tout : Math.max(0, tout - bi);
+      return am + pm;
+    }
+    return Math.max(0, bo - tin) + Math.max(0, tout - bi);
+  }
+
   function shiftLabel(row) {
-    if (row.shift_mins) {
-      var hrs = (row.shift_mins / 60).toFixed(1).replace(/\.0$/, '');
-      return hrs + 'h' + (row.is_overnight ? ' <span class="flexi-overnight-badge">Overnight</span>' : '');
+    if ((row.duty_mode || 'split') === 'rest') {
+      return '<span class="flexi-rest-badge">Rest day</span>';
+    }
+    var mins = row.shift_mins || estimateShiftMins(row);
+    if (mins) {
+      var hrs = (mins / 60).toFixed(1).replace(/\.0$/, '');
+      var badges = '';
+      if ((row.duty_mode || 'split') === 'straight') {
+        badges += ' <span class="flexi-overnight-badge">Straight</span>';
+      }
+      if (row.is_overnight) {
+        badges += ' <span class="flexi-overnight-badge">Overnight</span>';
+      }
+      return hrs + 'h' + badges;
     }
     return row.is_overnight ? '<span class="flexi-overnight-badge">Overnight</span>' : '—';
   }
 
   function refreshOvernightFlags(row) {
+    if ((row.duty_mode || 'split') === 'rest') {
+      row.is_overnight = false;
+      row.shift_mins = 0;
+      return;
+    }
     row.is_overnight = isOvernight(row.time_in, row.time_out);
+    row.shift_mins = estimateShiftMins(row);
+  }
+
+  function syncAddDutyModeUi() {
+    var mode = document.getElementById('addDutyMode').value;
+    var rest = mode === 'rest';
+    var straight = mode === 'straight';
+    document.querySelectorAll('.flexi-time-field').forEach(function (el) {
+      el.classList.toggle('is-hidden', rest);
+    });
+    document.querySelectorAll('.flexi-break-field').forEach(function (el) {
+      el.style.display = (rest || straight) ? 'none' : '';
+    });
+    var breakOut = document.getElementById('addBreakOut');
+    var breakIn = document.getElementById('addBreakIn');
+    if (rest || straight) {
+      breakOut.value = '';
+      breakIn.value = '';
+    }
+    if (rest) {
+      document.getElementById('addTimeIn').value = '';
+      document.getElementById('addTimeOut').value = '';
+    }
   }
 
   var tbody = document.getElementById('flexiTableBody');
@@ -341,18 +386,30 @@
     var q = (filter || '').toLowerCase().trim();
     tbody.innerHTML = '';
     entries.forEach(function (row, idx) {
+      if (!row.duty_mode) row.duty_mode = 'split';
+      refreshOvernightFlags(row);
       var text = (row.employee_code + ' ' + row.employee_name).toLowerCase();
       if (q && text.indexOf(q) === -1) return;
+      var mode = row.duty_mode;
+      var rest = mode === 'rest';
+      var straight = mode === 'straight';
+      var timeDisabled = rest ? ' disabled' : '';
+      var breakDisabled = (rest || straight) ? ' disabled' : '';
       var tr = document.createElement('tr');
       tr.innerHTML =
         '<td>' + esc(row.employee_code) + '</td>' +
         '<td>' + esc(row.employee_name) + '</td>' +
-        '<td><input type="date" class="form-control" data-field="date_start" data-idx="' + idx + '" min="' + quincenaStart + '" max="' + quincenaEnd + '" value="' + esc(row.date_start) + '"></td>' +
-        '<td><input type="date" class="form-control" data-field="date_end" data-idx="' + idx + '" min="' + quincenaStart + '" max="' + quincenaEnd + '" value="' + esc(row.date_end) + '"></td>' +
-        '<td><input type="time" class="form-control" data-field="time_in" data-idx="' + idx + '" value="' + esc(row.time_in) + '"></td>' +
-        '<td><input type="time" class="form-control" data-field="break_out" data-idx="' + idx + '" value="' + esc(row.break_out) + '"></td>' +
-        '<td><input type="time" class="form-control" data-field="break_in" data-idx="' + idx + '" value="' + esc(row.break_in) + '"></td>' +
-        '<td><input type="time" class="form-control" data-field="time_out" data-idx="' + idx + '" value="' + esc(row.time_out) + '"></td>' +
+        '<td><select class="form-control" data-field="duty_mode" data-idx="' + idx + '">' +
+          '<option value="split"' + (mode === 'split' ? ' selected' : '') + '>Split</option>' +
+          '<option value="straight"' + (straight ? ' selected' : '') + '>Straight</option>' +
+          '<option value="rest"' + (rest ? ' selected' : '') + '>Rest</option>' +
+        '</select></td>' +
+        '<td><input type="date" class="form-control" data-field="date_start" data-idx="' + idx + '" min="' + dateEntryMin + '" max="' + dateEntryMax + '" value="' + esc(row.date_start) + '"></td>' +
+        '<td><input type="date" class="form-control" data-field="date_end" data-idx="' + idx + '" min="' + dateEntryMin + '" max="' + dateEntryMax + '" value="' + esc(row.date_end) + '"></td>' +
+        '<td><input type="time" class="form-control" data-field="time_in" data-idx="' + idx + '" value="' + esc(row.time_in) + '"' + timeDisabled + '></td>' +
+        '<td><input type="time" class="form-control" data-field="break_out" data-idx="' + idx + '" value="' + esc(row.break_out) + '"' + breakDisabled + '></td>' +
+        '<td><input type="time" class="form-control" data-field="break_in" data-idx="' + idx + '" value="' + esc(row.break_in) + '"' + breakDisabled + '></td>' +
+        '<td><input type="time" class="form-control" data-field="time_out" data-idx="' + idx + '" value="' + esc(row.time_out) + '"' + timeDisabled + '></td>' +
         '<td class="flexi-shift-hrs" data-shift-cell="' + idx + '">' + shiftLabel(row) + '</td>' +
         '<td><button type="button" class="btn-secondary btn-sm" data-remove="' + idx + '">Remove</button></td>';
       tbody.appendChild(tr);
@@ -365,7 +422,28 @@
     if (!t.dataset.field) return;
     var idx = parseInt(t.dataset.idx, 10);
     entries[idx][t.dataset.field] = t.value;
-    if (t.dataset.field === 'time_in' || t.dataset.field === 'time_out') {
+    if (t.dataset.field === 'duty_mode') {
+      if (t.value === 'rest') {
+        entries[idx].time_in = '';
+        entries[idx].time_out = '';
+        entries[idx].break_out = '';
+        entries[idx].break_in = '';
+      } else if (t.value === 'straight') {
+        entries[idx].break_out = '';
+        entries[idx].break_in = '';
+        if (!entries[idx].time_in) entries[idx].time_in = '08:00';
+        if (!entries[idx].time_out) entries[idx].time_out = '16:00';
+      } else {
+        if (!entries[idx].time_in) entries[idx].time_in = '08:00';
+        if (!entries[idx].time_out) entries[idx].time_out = '17:00';
+        entries[idx].break_out = entries[idx].break_out || '12:00';
+        entries[idx].break_in = entries[idx].break_in || '13:00';
+      }
+      renderTable(document.getElementById('flexiSearch').value);
+      return;
+    }
+    if (t.dataset.field === 'time_in' || t.dataset.field === 'time_out' ||
+        t.dataset.field === 'break_out' || t.dataset.field === 'break_in') {
       refreshOvernightFlags(entries[idx]);
       var cell = tbody.querySelector('[data-shift-cell="' + idx + '"]');
       if (cell) cell.innerHTML = shiftLabel(entries[idx]);
@@ -427,6 +505,8 @@
     }
   });
 
+  document.getElementById('addDutyMode').addEventListener('change', syncAddDutyModeUi);
+
   document.getElementById('btnAddEntry').addEventListener('click', function () {
     if (!addEmpId.value) {
       alert('Select an employee from the search results.');
@@ -437,34 +517,63 @@
     var d0 = document.getElementById('addDateStart').value;
     var d1 = document.getElementById('addDateEnd').value;
     if (!d0 || !d1) {
-      alert('Enter date from and date to within the quincena.');
+      alert('Enter date from and date to (quincena ±1 day allowed for night shift).');
       return;
     }
-    if (d0 < quincenaStart || d1 > quincenaEnd || d0 > d1) {
-      alert('Dates must be within the quincena and start on or before end.');
+    if (d0 < dateEntryMin || d1 > dateEntryMax || d0 > d1) {
+      alert('Dates must be within the quincena ±1 day and start on or before end.');
       return;
     }
-    entries.push({
+    var dutyMode = document.getElementById('addDutyMode').value || 'split';
+    var timeIn = document.getElementById('addTimeIn').value;
+    var timeOut = document.getElementById('addTimeOut').value;
+    var breakOut = document.getElementById('addBreakOut').value;
+    var breakIn = document.getElementById('addBreakIn').value;
+    if (dutyMode === 'rest') {
+      timeIn = '';
+      timeOut = '';
+      breakOut = '';
+      breakIn = '';
+    } else {
+      if (!timeIn || !timeOut) {
+        alert('Time in and time out are required.');
+        return;
+      }
+      if (dutyMode === 'split' && (!breakOut || !breakIn)) {
+        alert('Break out and break in are required for split duty.');
+        return;
+      }
+      if (dutyMode === 'straight') {
+        breakOut = '';
+        breakIn = '';
+      }
+    }
+    var row = {
       employee_id: emp.id,
       employee_code: emp.employee_id,
-      employee_name: emp.last_name + ', ' + emp.first_name,
+      employee_name: emp.directory_name || (emp.last_name + ', ' + emp.first_name),
       date_start: d0,
       date_end: d1,
-      time_in: document.getElementById('addTimeIn').value,
-      break_out: document.getElementById('addBreakOut').value,
-      break_in: document.getElementById('addBreakIn').value,
-      time_out: document.getElementById('addTimeOut').value,
-      is_overnight: isOvernight(document.getElementById('addTimeIn').value, document.getElementById('addTimeOut').value)
-    });
+      duty_mode: dutyMode,
+      time_in: timeIn,
+      break_out: breakOut,
+      break_in: breakIn,
+      time_out: timeOut
+    };
+    refreshOvernightFlags(row);
+    entries.push(row);
     renderTable(document.getElementById('flexiSearch').value);
   });
 
   document.querySelectorAll('.flexi-preset-btn').forEach(function (btn) {
     btn.addEventListener('click', function () {
-      document.getElementById('addTimeIn').value = btn.getAttribute('data-time-in');
-      document.getElementById('addBreakOut').value = btn.getAttribute('data-break-out');
-      document.getElementById('addBreakIn').value = btn.getAttribute('data-break-in');
-      document.getElementById('addTimeOut').value = btn.getAttribute('data-time-out');
+      var mode = btn.getAttribute('data-duty-mode') || 'split';
+      document.getElementById('addDutyMode').value = mode;
+      document.getElementById('addTimeIn').value = btn.getAttribute('data-time-in') || '';
+      document.getElementById('addBreakOut').value = btn.getAttribute('data-break-out') || '';
+      document.getElementById('addBreakIn').value = btn.getAttribute('data-break-in') || '';
+      document.getElementById('addTimeOut').value = btn.getAttribute('data-time-out') || '';
+      syncAddDutyModeUi();
     });
   });
 
@@ -474,18 +583,33 @@
 
   document.getElementById('flexiSaveForm').addEventListener('submit', function () {
     entriesJson.value = JSON.stringify(entries.map(function (r) {
+      var mode = r.duty_mode || 'split';
+      if (mode === 'rest') {
+        return {
+          employee_id: r.employee_id,
+          date_start: r.date_start,
+          date_end: r.date_end,
+          duty_mode: 'rest',
+          time_in: '',
+          break_out: '',
+          break_in: '',
+          time_out: ''
+        };
+      }
       return {
         employee_id: r.employee_id,
         date_start: r.date_start,
         date_end: r.date_end,
+        duty_mode: mode,
         time_in: r.time_in,
-        break_out: r.break_out,
-        break_in: r.break_in,
+        break_out: mode === 'straight' ? '' : r.break_out,
+        break_in: mode === 'straight' ? '' : r.break_in,
         time_out: r.time_out
       };
     }));
   });
 
+  syncAddDutyModeUi();
   renderTable('');
 })();
 </script>

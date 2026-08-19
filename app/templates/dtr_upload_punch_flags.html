@@ -1,0 +1,491 @@
+{% extends "layouts/app.html" %}
+
+{% block title %}Duplicate Punch Flags - HRMS{% endblock %}
+
+{% set navbar_title = 'Duplicate Punch Review' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Time & Attendance'},
+    {'label': 'View DTR Records', 'url': url_for('routes.dtr_records')},
+    {'label': 'Batch #' ~ batch.id ~ ' flags'}
+] %}
+
+{% block extra_css %}
+<style>
+  .dtr-flag-filters {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin: 0.75rem 0 1rem;
+  }
+  .dtr-flag-filters a {
+    display: inline-block;
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    border: 1px solid #d1d5db;
+    color: #374151;
+    text-decoration: none;
+    font-size: 0.85rem;
+    background: #fff;
+  }
+  .dtr-flag-filters a.is-active {
+    background: #013a63;
+    border-color: #013a63;
+    color: #fff;
+  }
+  .dtr-flag-table .table-row { cursor: pointer; }
+  .dtr-flag-table .table-row.is-expanded { background: #eff6ff; }
+  .dtr-flag-table .flag-detail-row { display: none; background: #f8fafc; }
+  .dtr-flag-table .flag-detail-row.is-open { display: table-row; }
+  .dtr-flag-table .flag-detail-row > td {
+    padding: 0.85rem 1rem 1rem;
+    border-top: none;
+  }
+  .dtr-flag-detail-panel {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+    background: #fff;
+  }
+  .dtr-day-punches {
+    margin: 0 0 0.85rem;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 0.35rem;
+  }
+  .dtr-day-punches li {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem 0.85rem;
+    padding: 0.45rem 0.65rem;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #f9fafb;
+    font-size: 0.85rem;
+  }
+  .dtr-day-punches .punch-time {
+    font-weight: 700;
+    color: #111827;
+    min-width: 3.5rem;
+  }
+  .dtr-slot-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    gap: 0.75rem;
+  }
+  .dtr-slot-field label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 0.3rem;
+  }
+  .dtr-slot-field select {
+    width: 100%;
+    padding: 0.45rem 0.55rem;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    background: #fff;
+    font-size: 0.9rem;
+  }
+  .dtr-slot-field select.is-duplicate {
+    border-color: #dc2626;
+    box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.15);
+  }
+  .dtr-flag-actions {
+    margin-top: 0.85rem;
+    display: flex;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .dtr-assign-warning {
+    display: none;
+    margin-top: 0.65rem;
+    padding: 0.55rem 0.75rem;
+    border-radius: 8px;
+    background: #fef2f2;
+    color: #991b1b;
+    font-size: 0.85rem;
+  }
+  .dtr-assign-warning.is-visible { display: block; }
+  .status-badge-open { background: #fef3c7; color: #92400e; }
+  .status-badge-resolved { background: #dcfce7; color: #166534; }
+  .status-badge-inactive { background: #f3f4f6; color: #6b7280; }
+  .status-badge-mixed { background: #e0e7ff; color: #3730a3; }
+  .badge-multiple-entry {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    background: #fef3c7;
+    color: #92400e;
+    font-size: 0.78rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .dtr-flag-search-meta {
+    margin: 0.35rem 0 0;
+    font-size: 0.85rem;
+    color: #6b7280;
+  }
+  .dtr-readonly-slots {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+    gap: 0.45rem 1rem;
+    font-size: 0.85rem;
+    color: #4b5563;
+  }
+</style>
+{% endblock %}
+
+{% block app_content %}
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, message in messages %}
+      <div class="alert alert-{{ category }} alert-dismissible">
+        <span>{{ message }}</span>
+        <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+      </div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
+<div class="dashboard-header">
+  <h1 class="dashboard-title">
+    <span class="dashboard-icon">⚑</span>
+    Duplicate Punch Review
+  </h1>
+</div>
+
+<div class="card" style="margin-bottom: 1rem;">
+  <div class="card-body">
+    <p style="margin: 0 0 0.35rem;"><strong>Batch #{{ batch.id }}</strong> · {{ batch.filename or '—' }}</p>
+    <p class="muted" style="margin: 0;">
+      Quincena: <strong>{{ batch_label }}</strong>
+      · Uploaded {{ batch.uploaded_at.strftime('%Y-%m-%d %H:%M') if batch.uploaded_at else '—' }}
+      by {{ batch.uploaded_by_username }}
+      · Status: <strong>{{ batch.status|title }}</strong>
+      · Open flags: <strong>{{ open_count }}</strong>
+    </p>
+    {% if period_locked %}
+    <div class="alert alert-warning" style="margin-top: 0.85rem;">
+      This quincena is processed. Reopen it from Quincena Processing before applying punch corrections.
+    </div>
+    {% endif %}
+    <div class="dtr-flag-filters">
+      <a href="{{ url_for('routes.dtr_upload_punch_flags', batch_id=batch.id, status='open') }}" class="{% if status_filter == 'open' %}is-active{% endif %}">Open</a>
+      <a href="{{ url_for('routes.dtr_upload_punch_flags', batch_id=batch.id, status='resolved') }}" class="{% if status_filter == 'resolved' %}is-active{% endif %}">Resolved</a>
+      <a href="{{ url_for('routes.dtr_upload_punch_flags', batch_id=batch.id, status='inactive') }}" class="{% if status_filter == 'inactive' %}is-active{% endif %}">Inactive</a>
+      <a href="{{ url_for('routes.dtr_upload_punch_flags', batch_id=batch.id, status='all') }}" class="{% if status_filter == 'all' %}is-active{% endif %}">All</a>
+      <a href="{{ back_url|default(url_for('routes.dtr_upload')) }}" class="btn-secondary" style="margin-left: auto;">{% if back_url and 'dtr_records' in back_url %}Back to DTR Records{% else %}Back to Upload{% endif %}</a>
+    </div>
+    {% if is_payroll_maker_scope|default(false) %}
+    <p class="muted" style="margin: 0;">Showing duplicate punch flags for employees in your department only.</p>
+    {% endif %}
+    <p class="muted" style="margin: 0.5rem 0 0;">
+      Assign each retained punch to any of the four DTR slots
+      (CHECK-IN / BREAK-OUT / BREAK-IN / CHECK-OUT).
+      A punch may be used once; extra punches can stay unused. Slots may keep the current value or be cleared.
+      <strong>Resolved</strong> days can be re-assigned the same way while the quincena is not processed.
+    </p>
+  </div>
+</div>
+
+<div class="table-section dtr-flag-table-section">
+  <div class="search-bar">
+    <input type="text" id="searchPunchFlags" class="search-input"
+           placeholder="Search by employee ID, name, date, or slot..."
+           autocomplete="off">
+    <span class="search-icon">🔍</span>
+  </div>
+  <p class="dtr-flag-search-meta" id="punchFlagSearchMeta" aria-live="polite">
+    Showing <strong id="punchFlagVisibleCount">{{ day_rows|length }}</strong> employee-day(s) with multiple entry
+  </p>
+  <div class="table-container">
+    <table class="data-table dtr-flag-table" id="punchFlagsTable">
+      <thead>
+        <tr>
+          <th>Employee ID</th>
+          <th>Name</th>
+          <th>Date</th>
+          <th>Flagged slots</th>
+          <th>Multiple Entry</th>
+          <th>Current DTR</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="punchFlagsTableBody">
+        {% if day_rows %}
+          {% for row in day_rows %}
+          {% set dept_name = (row.employee.department.name if row.employee and row.employee.department else '') %}
+          {% set date_label = row.record_date.strftime('%b %d, %Y') %}
+          {% set date_iso = row.record_date.strftime('%Y-%m-%d') %}
+          <tr class="table-row punch-flag-row"
+              data-day-key="{{ row.day_key }}"
+              data-search="{{ (row.badge_id or '')|lower }} {{ row.employee_name|lower }} {{ dept_name|lower }} {{ date_iso }} {{ date_label|lower }} {{ row.flagged_slots|join(' ')|lower }} multiple entry {{ row.punch_count }} punches">
+            <td>{{ row.badge_id or '—' }}</td>
+            <td>{{ row.employee_name }}</td>
+            <td>{{ date_label }}</td>
+            <td>{{ row.flagged_slots|join(', ') if row.flagged_slots else '—' }}</td>
+            <td>
+              <span class="badge-multiple-entry" title="{{ row.punch_count }} retained punches for this day">
+                Multiple entry · {{ row.punch_count }}
+              </span>
+            </td>
+            <td>
+              {% set cs = row.current_slots %}
+              {{ cs.am_in.strftime('%H:%M') if cs.am_in else '—' }}
+              /
+              {{ cs.am_out.strftime('%H:%M') if cs.am_out else '—' }}
+              /
+              {{ cs.pm_in.strftime('%H:%M') if cs.pm_in else '—' }}
+              /
+              {{ cs.pm_out.strftime('%H:%M') if cs.pm_out else '—' }}
+            </td>
+            <td>
+              <span class="status-badge status-badge-{{ row.day_status }}">{{ row.day_status|title }}</span>
+            </td>
+            <td class="actions-cell" onclick="event.stopPropagation();">
+              <button type="button" class="btn-action punch-flag-toggle" data-day-key="{{ row.day_key }}">
+                {% if row.can_edit %}{% if row.day_status == 'resolved' %}Re-assign slots{% else %}Assign slots{% endif %}{% else %}View punches{% endif %}
+              </button>
+              <a href="{{ row.dtr_records_url }}" class="btn-action">View DTR</a>
+            </td>
+          </tr>
+          <tr class="flag-detail-row" data-flag-detail="{{ row.day_key }}">
+            <td colspan="8">
+              <div class="dtr-flag-detail-panel">
+                <p style="margin: 0 0 0.65rem; font-size: 0.9rem;">
+                  <strong>{{ row.employee_name }}</strong>
+                  {% if row.badge_id %}<span class="muted"> · ID {{ row.badge_id }}</span>{% endif %}
+                  · {{ date_label }}
+                  · <span class="badge-multiple-entry">Multiple entry · {{ row.punch_count }}</span>
+                </p>
+
+                <p style="margin: 0 0 0.35rem; font-size: 0.8rem; font-weight: 600; color: #374151;">Retained punches</p>
+                <ul class="dtr-day-punches">
+                  {% for p in row.punches %}
+                  <li>
+                    <span class="punch-time">{% if p.punch_time %}{{ p.punch_time.strftime('%H:%M') }}{% else %}—{% endif %}</span>
+                    <span class="muted">Source {{ slot_labels.get(p.slot, p.slot) }}</span>
+                    <span class="muted">{{ p.source_timestamp or '—' }}</span>
+                    <span class="muted">Line {{ p.line_no or '—' }} · Seq {{ p.sequence_no or '—' }}</span>
+                    {% if p.assigned_slot %}
+                    <span class="badge-multiple-entry" style="background:#dbeafe;color:#1e40af;">
+                      Assigned → {{ slot_labels.get(p.assigned_slot, p.assigned_slot) }}
+                    </span>
+                    {% elif p.is_selected %}
+                    <span class="muted">(used at upload)</span>
+                    {% endif %}
+                  </li>
+                  {% else %}
+                  <li class="muted">No retained punches.</li>
+                  {% endfor %}
+                </ul>
+
+                {% if row.can_edit %}
+                <form method="POST"
+                      class="dtr-day-assign-form"
+                      action="{{ url_for('routes.dtr_upload_punch_flag_day_resolve', batch_id=batch.id, employee_id=row.employee_id, record_date=date_iso) }}">
+                  <input type="hidden" name="return_status" value="{{ status_filter }}">
+                  <p style="margin: 0 0 0.55rem; font-size: 0.8rem; font-weight: 600; color: #374151;">Assign to DTR slots</p>
+                  <div class="dtr-slot-grid">
+                    {% for slot_key, slot_label in slot_labels.items() %}
+                    {% set cur = row.current_slots.get(slot_key) %}
+                    <div class="dtr-slot-field">
+                      <label for="slot_{{ row.day_key }}_{{ slot_key }}">{{ slot_label }}</label>
+                      <select id="slot_{{ row.day_key }}_{{ slot_key }}"
+                              name="slot_{{ slot_key }}"
+                              class="dtr-slot-select"
+                              data-day-key="{{ row.day_key }}">
+                        <option value="keep">
+                          Keep current
+                          {% if cur %}({{ cur.strftime('%H:%M') }}){% else %}(blank){% endif %}
+                        </option>
+                        <option value="clear">Clear slot</option>
+                        {% for p in row.punches %}
+                        <option value="{{ p.id }}"
+                          {% if p.assigned_slot == slot_key %}selected{% elif not p.assigned_slot and p.is_selected and p.slot == slot_key %}selected{% endif %}>
+                          {% if p.punch_time %}{{ p.punch_time.strftime('%H:%M') }}{% else %}—{% endif %}
+                          · src {{ slot_labels.get(p.slot, p.slot) }}
+                          {% if p.source_timestamp %} · {{ p.source_timestamp }}{% endif %}
+                        </option>
+                        {% endfor %}
+                      </select>
+                    </div>
+                    {% endfor %}
+                  </div>
+                  <div class="dtr-assign-warning" data-warning-for="{{ row.day_key }}">
+                    The same punch is selected for more than one slot. Each punch can only be used once.
+                  </div>
+                  <div class="dtr-flag-actions">
+                    <button type="submit" class="btn-primary dtr-assign-submit" data-submit-for="{{ row.day_key }}">
+                      {% if row.day_status == 'resolved' %}Apply re-assignment{% else %}Apply &amp; Resolve{% endif %}
+                    </button>
+                    <a href="{{ row.dtr_records_url }}" class="btn-secondary">View DTR day</a>
+                  </div>
+                </form>
+                {% else %}
+                <div class="dtr-readonly-slots">
+                  {% for slot_key, slot_label in slot_labels.items() %}
+                  {% set cur = row.current_slots.get(slot_key) %}
+                  <div>
+                    <strong>{{ slot_label }}:</strong>
+                    {% if cur %}{{ cur.strftime('%H:%M') }}{% else %}—{% endif %}
+                  </div>
+                  {% endfor %}
+                </div>
+                <div class="dtr-flag-actions">
+                  <a href="{{ row.dtr_records_url }}" class="btn-secondary">View DTR day</a>
+                </div>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+          <tr class="no-results" id="punchFlagsNoResults" style="display: none;">
+            <td colspan="8" class="no-data">No employees with multiple entry match your search.</td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="8" class="no-data">No {{ status_filter }} punch flags for this batch.</td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+(function () {
+  var searchInput = document.getElementById('searchPunchFlags');
+  var rows = Array.prototype.slice.call(document.querySelectorAll('#punchFlagsTableBody .punch-flag-row'));
+  var noResults = document.getElementById('punchFlagsNoResults');
+  var visibleCountEl = document.getElementById('punchFlagVisibleCount');
+
+  function setExpanded(dayKey, open) {
+    var summary = document.querySelector('.punch-flag-row[data-day-key="' + dayKey + '"]');
+    var detail = document.querySelector('.flag-detail-row[data-flag-detail="' + dayKey + '"]');
+    if (!summary || !detail) return;
+    if (open) {
+      summary.classList.add('is-expanded');
+      detail.classList.add('is-open');
+    } else {
+      summary.classList.remove('is-expanded');
+      detail.classList.remove('is-open');
+    }
+  }
+
+  function collapseAllExcept(dayKey) {
+    rows.forEach(function (row) {
+      var id = row.getAttribute('data-day-key');
+      if (id !== String(dayKey)) setExpanded(id, false);
+    });
+  }
+
+  function toggleDay(dayKey) {
+    var summary = document.querySelector('.punch-flag-row[data-day-key="' + dayKey + '"]');
+    if (!summary || summary.style.display === 'none') return;
+    var isOpen = summary.classList.contains('is-expanded');
+    collapseAllExcept(dayKey);
+    setExpanded(dayKey, !isOpen);
+  }
+
+  function applySearch() {
+    var q = (searchInput && searchInput.value || '').trim().toLowerCase();
+    var visible = 0;
+    rows.forEach(function (row) {
+      var hay = (row.getAttribute('data-search') || '').toLowerCase();
+      var match = !q || hay.indexOf(q) !== -1;
+      var dayKey = row.getAttribute('data-day-key');
+      var detail = document.querySelector('.flag-detail-row[data-flag-detail="' + dayKey + '"]');
+      row.style.display = match ? '' : 'none';
+      if (!match) {
+        row.classList.remove('is-expanded');
+        if (detail) {
+          detail.classList.remove('is-open');
+          detail.style.display = 'none';
+        }
+      } else {
+        if (detail) detail.style.display = '';
+        visible += 1;
+      }
+    });
+    if (visibleCountEl) visibleCountEl.textContent = String(visible);
+    if (noResults) noResults.style.display = (rows.length && visible === 0) ? '' : 'none';
+  }
+
+  function validateDayForm(dayKey) {
+    var selects = document.querySelectorAll('.dtr-slot-select[data-day-key="' + dayKey + '"]');
+    var used = {};
+    var duplicate = false;
+    selects.forEach(function (sel) {
+      sel.classList.remove('is-duplicate');
+      var val = (sel.value || '').trim();
+      if (!val || val === 'keep' || val === 'clear') return;
+      if (used[val]) {
+        duplicate = true;
+        sel.classList.add('is-duplicate');
+        used[val].classList.add('is-duplicate');
+      } else {
+        used[val] = sel;
+      }
+    });
+    var warn = document.querySelector('.dtr-assign-warning[data-warning-for="' + dayKey + '"]');
+    var submit = document.querySelector('.dtr-assign-submit[data-submit-for="' + dayKey + '"]');
+    if (warn) warn.classList.toggle('is-visible', duplicate);
+    if (submit) submit.disabled = duplicate;
+    return !duplicate;
+  }
+
+  rows.forEach(function (row) {
+    row.addEventListener('click', function () {
+      toggleDay(row.getAttribute('data-day-key'));
+    });
+  });
+
+  document.querySelectorAll('.punch-flag-toggle').forEach(function (btn) {
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleDay(btn.getAttribute('data-day-key'));
+    });
+  });
+
+  document.querySelectorAll('.dtr-slot-select').forEach(function (sel) {
+    sel.addEventListener('change', function () {
+      validateDayForm(sel.getAttribute('data-day-key'));
+    });
+    validateDayForm(sel.getAttribute('data-day-key'));
+  });
+
+  document.querySelectorAll('.dtr-day-assign-form').forEach(function (form) {
+    form.addEventListener('submit', function (e) {
+      var sel = form.querySelector('.dtr-slot-select');
+      var dayKey = sel ? sel.getAttribute('data-day-key') : '';
+      if (!validateDayForm(dayKey)) {
+        e.preventDefault();
+      }
+    });
+  });
+
+  if (searchInput) {
+    searchInput.addEventListener('input', applySearch);
+    var params = new URLSearchParams(window.location.search);
+    var prefill = params.get('q') || params.get('employee_id') || '';
+    if (prefill) {
+      searchInput.value = prefill;
+      applySearch();
+      var first = rows.find(function (row) {
+        return row.style.display !== 'none';
+      });
+      if (first) toggleDay(first.getAttribute('data-day-key'));
+    }
+  }
+})();
+</script>
+{% endblock %}

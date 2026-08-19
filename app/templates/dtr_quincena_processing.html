@@ -1,0 +1,155 @@
+{% extends "layouts/app.html" %}
+
+{% block title %}Quincena Processing - HRMS{% endblock %}
+
+{% set navbar_title = 'Quincena Processing' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Time & Attendance'},
+    {'label': 'Quincena Processing'}
+] %}
+
+{% block extra_css %}
+<style>
+  .qcp-pipeline {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: 1rem 0 1.25rem;
+  }
+  .qcp-step {
+    flex: 1 1 7rem;
+    min-width: 6.5rem;
+    text-align: center;
+    padding: 0.55rem 0.4rem;
+    border-radius: 8px;
+    border: 1px solid #e5e7eb;
+    background: #f9fafb;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .qcp-step.is-done { background: #ecfdf5; border-color: #a7f3d0; color: #047857; }
+  .qcp-step.is-current { background: #eff6ff; border-color: #93c5fd; color: #1d4ed8; box-shadow: 0 0 0 2px rgba(59,130,246,0.15); }
+  .qcp-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+    gap: 0.65rem;
+    margin-bottom: 1.25rem;
+  }
+  .qcp-stat {
+    background: #fff;
+    border: 1px solid rgba(1, 58, 99, 0.08);
+    border-radius: 10px;
+    padding: 0.75rem 0.85rem;
+    box-shadow: 0 2px 8px rgba(1, 58, 99, 0.04);
+  }
+  .qcp-stat-label { font-size: 0.72rem; color: #6b7280; text-transform: uppercase; letter-spacing: 0.04em; }
+  .qcp-stat-value { font-size: 1.35rem; font-weight: 700; color: #013a63; margin-top: 0.15rem; }
+  .qcp-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; }
+  .qcp-links { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+  .qcp-links a {
+    font-size: 0.85rem;
+    padding: 0.4rem 0.75rem;
+    border-radius: 6px;
+    border: 1px solid rgba(1, 58, 99, 0.15);
+    background: #fff;
+    color: #013a63;
+    text-decoration: none;
+  }
+  .qcp-links a:hover { background: #f0f6fb; }
+</style>
+{% endblock %}
+
+{% block app_content %}
+{% include 'includes/flash_messages.html' %}
+
+<div class="dashboard-header">
+  <h1 class="dashboard-title">Quincena Processing</h1>
+  <p class="muted" style="margin: 0.35rem 0 0; max-width: 42rem;">
+    Manage the DTR lifecycle for each quincena: upload → employee review → HR adjustment → process worktime → payroll.
+  </p>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <form method="GET" action="{{ url_for('routes.dtr_quincena_processing') }}" style="margin-bottom: 1rem;">
+      <div class="form-group" style="max-width: 22rem;">
+        <label for="period">Quincena</label>
+        <select id="period" name="period" class="form-control" onchange="this.form.submit()">
+          {% for opt in quincena_options %}
+          <option value="{{ opt.value }}" {% if opt.value == selected_period %}selected{% endif %}>{{ opt.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </form>
+
+    <p style="margin: 0 0 0.25rem;"><strong>{{ period_label }}</strong></p>
+    <p class="muted" style="margin: 0 0 0.5rem;">Status: <strong>{{ period_status_label }}</strong>
+      {% if period and period.review_deadline %} · Review deadline: <strong>{{ period.review_deadline.strftime('%Y-%m-%d') }}</strong>{% endif %}
+      {% if is_locked %} · <span style="color:#047857;">Locked for payroll</span>{% endif %}
+    </p>
+
+    <div class="qcp-pipeline" aria-label="Processing pipeline">
+      {% set steps = [
+        ('draft', 'Prepare'),
+        ('uploaded', 'Uploaded'),
+        ('review_open', 'Review open'),
+        ('review_closed', 'Review closed'),
+        ('processed', 'Processed')
+      ] %}
+      {% set order = ['draft','uploaded','review_open','review_closed','processed'] %}
+      {% set idx = order.index(period_status) if period_status in order else 0 %}
+      {% for key, label in steps %}
+      {% set step_idx = order.index(key) %}
+      <div class="qcp-step {% if step_idx < idx %}is-done{% elif step_idx == idx %}is-current{% endif %}">{{ label }}</div>
+      {% endfor %}
+    </div>
+
+    <div class="qcp-stats">
+      <div class="qcp-stat"><div class="qcp-stat-label">Upload batches</div><div class="qcp-stat-value">{{ stats.active_upload_batches }}</div></div>
+      <div class="qcp-stat"><div class="qcp-stat-label">Pending justifications</div><div class="qcp-stat-value">{{ stats.pending_justifications }}</div></div>
+      <div class="qcp-stat"><div class="qcp-stat-label">Approved</div><div class="qcp-stat-value">{{ stats.approved_justifications }}</div></div>
+      <div class="qcp-stat"><div class="qcp-stat-label">Flexi assignments</div><div class="qcp-stat-value">{{ stats.flexi_assignments }}</div></div>
+      <div class="qcp-stat"><div class="qcp-stat-label">OT authorizations</div><div class="qcp-stat-value">{{ stats.overtime_authorizations }}</div></div>
+      <div class="qcp-stat"><div class="qcp-stat-label">X-Service auth</div><div class="qcp-stat-value">{{ stats.x_service_authorizations }}</div></div>
+    </div>
+
+    <h2 class="section-title" style="font-size:1rem; margin-bottom:0.5rem;">Setup checklist</h2>
+    <div class="qcp-links">
+      <button type="button" class="sidebar-sublink" style="border:1px solid rgba(1,58,99,0.15); background:#fff; cursor:pointer; border-radius:6px; padding:0.4rem 0.75rem;" onclick="document.getElementById('generateDtrModal').style.display='flex'">Prepare DTR Period</button>
+      <a href="{{ url_for('routes.dtr_upload') }}">Upload DTR Log</a>
+      <a href="{{ url_for('routes.dtr_flexible_worktime') }}">Flexible Worktime</a>
+      <a href="{{ url_for('routes.dtr_overtime_authorization') }}">Overtime Authorization</a>
+      <a href="{{ url_for('routes.dtr_jo_cos_extend_service') }}">X-Service Authorization</a>
+      <a href="{{ url_for('routes.dtr_justifications') }}">Justification inbox</a>
+      <a href="{{ url_for('routes.dtr_records', mode='quincena', year=period.year, month=period.month, quincena=period.quincena_half) }}">View DTR Records</a>
+      {% if selected_employee is defined %}{% endif %}
+      <a href="{{ url_for('routes.dtr_records', mode='quincena', year=period.year, month=period.month, quincena=period.quincena_half, edit=1) }}">Edit DTR remarks</a>
+      <a href="{{ url_for('routes.dtr_regenerate') }}">Process Worktime</a>
+      <a href="{{ url_for('routes.payroll_worktime_summary', year=period.year, month=period.month, quincena=period.quincena_half) }}">Worktime Summary</a>
+    </div>
+
+    <form method="POST" action="{{ url_for('routes.dtr_quincena_processing') }}" style="margin-top: 1.25rem;">
+      <input type="hidden" name="period" value="{{ selected_period }}">
+      <div class="qcp-actions">
+        {% if can_open_review and period_status != 'review_open' %}
+        <div class="form-group" style="margin:0;">
+          <label for="review_deadline" style="font-size:0.8rem;">Review deadline (optional)</label>
+          <input type="date" id="review_deadline" name="review_deadline" class="form-control" value="{{ period.review_deadline.strftime('%Y-%m-%d') if period and period.review_deadline else '' }}">
+        </div>
+        <button type="submit" name="action" value="open_review" class="btn-secondary">Open employee review</button>
+        {% endif %}
+        {% if can_close_review %}
+        <button type="submit" name="action" value="close_review" class="btn-primary">Close employee review</button>
+        {% endif %}
+        {% if is_locked %}
+        <button type="submit" name="action" value="reopen" class="btn-secondary" onclick="return confirm('Reopen this quincena for DTR adjustments? You will need to process worktime again before payroll.');">Reopen for adjustment</button>
+        {% endif %}
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

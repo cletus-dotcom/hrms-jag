@@ -1,0 +1,47 @@
+{% set _tagline = site_branding.tagline if site_branding and site_branding.tagline else "Upholding Merit, Nurturing Growth, and Serving the Public with Excellence." %}
+<header class="app-topbar">
+    <div class="app-topbar-inner">
+        <div class="app-topbar-main">
+            {% if navbar_menu_toggle|default(false) %}
+            <button class="app-btn-menu" id="{{ navbar_menu_id|default('menuToggle') }}" type="button" aria-label="Toggle menu">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+            </button>
+            {% endif %}
+            <div class="app-brand-block">
+                <a class="app-brand-mark" href="{{ url_for('routes.index') }}">
+                    <span class="app-brand-medallion" aria-hidden="true">
+                        <span class="app-brand-medallion-inner">
+                            <span class="app-brand-medallion-ring"></span>
+                            <img src="{{ site_logo_url }}" alt="" class="app-brand-logo" width="52" height="52" decoding="async">
+                        </span>
+                    </span>
+                    <span class="app-brand-name">{{ site_branding.portal_name if site_branding and site_branding.portal_name else 'HRMDO Portal' }}</span>
+                </a>
+                <span class="app-brand-sep" aria-hidden="true">|</span>
+                <div class="app-brand-tagline" aria-label="{{ _tagline }}">
+                    <div class="app-brand-tagline-track">
+                        <span class="app-brand-tagline-item">{{ _tagline }}</span>
+                        <span class="app-brand-tagline-item" aria-hidden="true">{{ _tagline }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="app-topbar-right">
+            {% if navbar_extra is defined and navbar_extra %}
+            <div class="app-topbar-extra">{{ navbar_extra | safe }}</div>
+            {% endif %}
+            {% if navbar_show_landing_login|default(false) %}
+            <div class="app-topbar-pagehead">
+                <a href="{{ url_for('routes.login') }}" class="app-btn-login">Sign In</a>
+            </div>
+            {% elif navbar_title is defined and navbar_title %}
+            <div class="app-topbar-pagehead">
+                <span class="app-topbar-title">{{ navbar_title }}</span>
+                {% if breadcrumbs is defined and breadcrumbs %}
+                {% include 'includes/breadcrumbs.html' %}
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</header>

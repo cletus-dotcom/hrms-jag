@@ -1,97 +1,16 @@
-{% extends "base.html" %}
+{% extends "layouts/app.html" %}
 
 {% block title %}Status of Appointment - HRMS{% endblock %}
 
-{% block content %}
-<div class="dashboard-container">
-    <div class="header-bar">
-        <div class="header-content">
-            {% include 'includes/navbar_brand.html' %}
-            <nav class="main-nav">
-                <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
-                {% if (current_user.role or '')|lower in ('admin', 'hr') %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link nav-link-active">Settings <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
-                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Manage Employees</a>
-                        <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
-                        <hr class="dropdown-separator">
-                        <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
-                        <a href="{{ url_for('routes.jo_cos_designations_list') }}" class="dropdown-item">JO/COS designations</a>
-                        <a href="{{ url_for('routes.jo_cos_rates_list') }}" class="dropdown-item">JO and COS Rates</a>
-                        <a href="{{ url_for('routes.flexi_time_schedule_list') }}" class="dropdown-item">Flexi-time schedule</a>
-                        <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
-                        <hr class="dropdown-separator">
-                        <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
-                    </div>
-                </div>
-                {% endif %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
-                        {% include 'includes/nav_dtr_upload_link.html' %}
-                        <a href="{{ url_for('routes.dtr_justifications') }}" class="dropdown-item">DTR Justifications</a>
-                        {% include 'includes/nav_dtr_edit_link.html' %}
-                    </div>
-                </div>
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Leave Management <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        {% if (current_user.role or '')|lower in ('admin', 'hr') %}
-                        <a href="{{ url_for('routes.leave_settings_list') }}" class="dropdown-item">Leave Settings</a>
-                        <a href="{{ url_for('routes.leave_credits_list') }}" class="dropdown-item">Leave Credits</a>
-                        <hr class="dropdown-separator">
-                        {% endif %}
-                        <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply for Leave</a>
-                        <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
-                        {% if (current_user.role or '')|lower == 'manager' %}
-                        <hr class="dropdown-separator">
-                        <a href="{{ url_for('routes.leave_approvals') }}" class="dropdown-item">Leave Approvals</a>
-                        {% endif %}
-                    </div>
-                </div>
-                {% include 'includes/nav_payroll_top_menu.html' %}
-                {% if (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        {% include 'includes/reports_dropdown_links.html' %}
-                    </div>
-                </div>
-                {% else %}
-                <a href="#" class="nav-link">Reports</a>
-                {% endif %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">ABOUT <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.users_manual') }}" class="dropdown-item">User's Manual</a>
-                        <a href="{{ url_for('routes.hrmdo_manual') }}" class="dropdown-item">HRMDO Manual</a>
-                    </div>
-                </div>
-            </nav>
-            <div class="user-dropdown">
-                <a href="#" class="user-info">
-                    {% if employee %}
-                        {{ employee.full_name }} ({{ current_user.role|title }})
-                    {% else %}
-                        {{ current_user.username }} ({{ current_user.role|title }})
-                    {% endif %}
-                    <span class="dropdown-arrow">▼</span>
-                </a>
-                <div class="dropdown-menu dropdown-menu-right">
-                    <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
-                    <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
-                    <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
-                </form>
-                </div>
-            </div>
-        </div>
-    </div>
+{% set navbar_title = 'Status of Appointment' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Administration'},
+    {'label': 'Status of Appointment'}
+] %}
 
-    <div class="dashboard-content">
-        {% with messages = get_flashed_messages(with_categories=true) %}
+{% block app_content %}
+{% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
                     <div class="alert alert-{{ category }} alert-dismissible">
@@ -102,15 +21,33 @@
             {% endif %}
         {% endwith %}
 
-        <div class="page-header">
-            <h1 class="page-title">Status of Appointment</h1>
+        <div class="page-header" style="align-items: flex-start; gap: 1rem; flex-wrap: wrap;">
+            <div>
+                <h1 class="page-title">Status of Appointment</h1>
+                <p style="margin: 0.35rem 0 0; color: var(--medium-gray); font-size: 0.9rem;">
+                    Original appointment date stays fixed. Record later changes, step increments, or backfill history here.
+                </p>
+            </div>
+            {% if plantilla_no_history and plantilla_no_history > 0 %}
+            <form method="POST" action="{{ url_for('routes.status_of_appointment_backfill_opening') }}"
+                  onsubmit="return confirm('Seed Original Appointment history for {{ plantilla_no_history }} plantilla employee(s) with no history? This uses their CURRENT status/step/date only.');">
+                <button type="submit" class="btn-secondary">
+                    Backfill opening history ({{ plantilla_no_history }})
+                </button>
+            </form>
+            {% endif %}
         </div>
 
         <div class="stats-grid" style="margin-bottom: 1.5rem;">
             <div class="stat-card stat-card-pastel">
                 <div class="stat-label">Step Increment Due</div>
                 <div class="stat-value">{{ step_increment_due_count|default(0) }}</div>
-                <div class="stat-sublabel">within 15 days</div>
+                <div class="stat-sublabel">overdue or within 15 days</div>
+            </div>
+            <div class="stat-card stat-card-pastel">
+                <div class="stat-label">Plantilla w/ no history</div>
+                <div class="stat-value">{{ plantilla_no_history|default(0) }}</div>
+                <div class="stat-sublabel">eligible for opening backfill</div>
             </div>
         </div>
 
@@ -118,12 +55,19 @@
         <div class="status-appt-notification-card">
             <div class="status-appt-notification-icon">⚠</div>
             <div class="status-appt-notification-content">
-                <strong>{{ step_increment_due_count }} employee(s)</strong> due for step increment increase in the next 15 days.
-                <span class="status-appt-notification-detail">Step increment due date = appointment date + 3 years. Notification shown 15 days before due date.</span>
+                <strong>{{ step_increment_due_count }} employee(s)</strong> due for step increment
+                (overdue or within the next 15 days).
+                <span class="status-appt-notification-detail">
+                    Next SI due = last step-raising history effectivity (or original appointment date) + {{ step_increment_years|default(3) }} years.
+                </span>
                 {% if step_increment_due_list %}
                 <ul class="status-appt-due-list">
-                    {% for emp, due_date in step_increment_due_list %}
-                    <li>{{ emp.employee_id }} – {{ emp.last_name }}, {{ emp.first_name }} (due {{ due_date.strftime('%b %d, %Y') }})</li>
+                    {% for emp, due_date, overdue in step_increment_due_list %}
+                    <li>
+                        {{ emp.employee_id }} – {{ emp.directory_name }}
+                        (due {{ due_date.strftime('%b %d, %Y') }}{% if overdue %}, <strong>overdue</strong>{% endif %})
+                        — step {{ emp.salary_step if emp.salary_step is not none else '—' }}
+                    </li>
                     {% endfor %}
                 </ul>
                 {% endif %}
@@ -144,10 +88,11 @@
                             <th>Employee ID</th>
                             <th>Last name</th>
                             <th>First name</th>
+                            <th>Next SI due</th>
                         </tr>
                     </thead>
                     <tbody id="statusOfApptTableBody">
-                        {% for emp, current_amount, history_list in employees_with_amount %}
+                        {% for emp, current_amount, history_list, si_due, can_si, is_plantilla in employees_with_amount %}
                         <tr class="status-appt-row" data-search="{{ (emp.employee_id or '')|lower }} {{ (emp.last_name or '')|lower }} {{ (emp.first_name or '')|lower }}">
                             <td>
                                 <button type="button" class="btn-expand-status" data-emp-id="{{ emp.id }}" aria-label="Expand">▶</button>
@@ -155,24 +100,72 @@
                             <td>{{ emp.employee_id or '—' }}</td>
                             <td>{{ emp.last_name or '—' }}</td>
                             <td>{{ emp.first_name or '—' }}</td>
+                            <td>
+                                {% if si_due %}
+                                    {{ si_due.strftime('%Y-%m-%d') }}
+                                    {% if si_due.isoformat() < today %}
+                                    <span class="si-overdue-tag">overdue</span>
+                                    {% endif %}
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
                         </tr>
                         <tr class="status-appt-detail" id="detail-{{ emp.id }}" style="display: none;">
-                            <td colspan="4" style="padding: 0; background: var(--light-gray); vertical-align: top;">
+                            <td colspan="5" style="padding: 0; background: var(--light-gray); vertical-align: top;">
                                 <div class="status-appt-detail-inner">
                                     <div class="status-appt-section">
-                                        <h3 class="status-appt-section-title">Current appointment</h3>
+                                        <div class="status-appt-section-header">
+                                            <h3 class="status-appt-section-title">Current appointment</h3>
+                                            {% if is_plantilla %}
+                                            <div class="status-appt-actions">
+                                                <button type="button" class="btn-secondary btn-appt-change"
+                                                    data-emp-id="{{ emp.id }}"
+                                                    data-emp-label="{{ emp.employee_id }} — {{ emp.directory_name }}"
+                                                    data-status="{{ emp.status_of_appointment or '' }}"
+                                                    data-nature="{{ emp.nature_of_appointment or '' }}"
+                                                    data-grade="{{ emp.salary_grade if emp.salary_grade is not none else '' }}"
+                                                    data-step="{{ emp.salary_step if emp.salary_step is not none else '' }}"
+                                                    data-suggested-date="{{ today }}">
+                                                    Record appointment change
+                                                </button>
+                                                {% if can_si %}
+                                                <button type="button" class="btn-secondary btn-si-open"
+                                                    data-emp-id="{{ emp.id }}"
+                                                    data-emp-label="{{ emp.employee_id }} — {{ emp.directory_name }}"
+                                                    data-from-step="{{ emp.salary_step }}"
+                                                    data-to-step="{{ emp.salary_step + 1 }}"
+                                                    data-suggested-date="{{ si_due.isoformat() if si_due else today }}">
+                                                    Record step increment
+                                                </button>
+                                                {% endif %}
+                                                <button type="button" class="btn-secondary btn-hist-add"
+                                                    data-emp-id="{{ emp.id }}"
+                                                    data-emp-label="{{ emp.employee_id }} — {{ emp.directory_name }}"
+                                                    data-status="{{ emp.status_of_appointment or '' }}"
+                                                    data-nature="{{ emp.nature_of_appointment or '' }}"
+                                                    data-grade="{{ emp.salary_grade if emp.salary_grade is not none else '' }}"
+                                                    data-step="{{ emp.salary_step if emp.salary_step is not none else '' }}"
+                                                    data-original="{{ emp.appointment_date.isoformat() if emp.appointment_date else '' }}"
+                                                    data-suggested-date="{{ emp.appointment_date.isoformat() if emp.appointment_date else today }}">
+                                                    Add history entry
+                                                </button>
+                                            </div>
+                                            {% endif %}
+                                        </div>
                                         <table class="data-table status-appt-inner-table">
                                             <thead>
                                                 <tr>
-                                                    <th>Appointment date</th>
-                                                    <th>Status of appointment</th>
-                                                    <th>Nature of appointment</th>
+                                                    <th>Original appointment</th>
+                                                    <th>Status</th>
+                                                    <th>Nature</th>
                                                     <th>Department</th>
-                                                    <th>Current position</th>
+                                                    <th>Position</th>
                                                     <th>Agency</th>
-                                                    <th>Salary grade</th>
-                                                    <th>Salary step</th>
-                                                    <th>Salary amount</th>
+                                                    <th>SG</th>
+                                                    <th>Step</th>
+                                                    <th>Amount</th>
+                                                    <th>Next SI due</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -186,45 +179,88 @@
                                                     <td>{{ emp.salary_grade if emp.salary_grade is not none else '—' }}</td>
                                                     <td>{{ emp.salary_step if emp.salary_step is not none else '—' }}</td>
                                                     <td>{% if current_amount is not none %}{{ '{:,.2f}'.format(current_amount) }}{% else %}—{% endif %}</td>
+                                                    <td>{{ si_due.strftime('%Y-%m-%d') if si_due else '—' }}</td>
                                                 </tr>
                                             </tbody>
                                         </table>
                                     </div>
                                     <div class="status-appt-section">
-                                        <h3 class="status-appt-section-title">Appointment history</h3>
+                                        <h3 class="status-appt-section-title">Employment / appointment history</h3>
                                         {% if history_list %}
                                         <table class="data-table status-appt-inner-table">
                                             <thead>
                                                 <tr>
-                                                    <th>Appointment date</th>
-                                                    <th>Status of appointment</th>
-                                                    <th>Nature of appointment</th>
+                                                    <th>Change type</th>
+                                                    <th>Effectivity</th>
+                                                    <th>Original appt.</th>
+                                                    <th>Status</th>
+                                                    <th>Nature</th>
                                                     <th>Department</th>
                                                     <th>Position</th>
-                                                    <th>Agency</th>
-                                                    <th>Salary grade</th>
-                                                    <th>Salary step</th>
-                                                    <th>Salary amount</th>
+                                                    <th>SG</th>
+                                                    <th>Step</th>
+                                                    <th>From→To</th>
+                                                    <th>Amount</th>
+                                                    <th>Remarks</th>
+                                                    {% if can_edit_original_appointment %}
+                                                    <th style="width: 7rem;">Actions</th>
+                                                    {% endif %}
                                                 </tr>
                                             </thead>
                                             <tbody>
                                             {% for h in history_list %}
                                                 <tr>
+                                                    <td>{{ h.change_type or h.appoint_nature or '—' }}</td>
+                                                    <td>{{ h.effectivity_date.strftime('%Y-%m-%d') if h.effectivity_date else '—' }}</td>
                                                     <td>{{ h.appoint_date.strftime('%Y-%m-%d') if h.appoint_date else '—' }}</td>
                                                     <td>{{ h.appoint_status or '—' }}</td>
                                                     <td>{{ h.appoint_nature or '—' }}</td>
                                                     <td>{{ h.emp_dept or '—' }}</td>
                                                     <td>{{ h.emp_position or '—' }}</td>
-                                                    <td>{{ h.agency or '—' }}</td>
                                                     <td>{{ h.sal_grade if h.sal_grade is not none else '—' }}</td>
                                                     <td>{{ h.sal_step if h.sal_step is not none else '—' }}</td>
+                                                    <td>
+                                                        {% if h.from_sal_step is not none or h.to_sal_step is not none %}
+                                                            {{ h.from_sal_step if h.from_sal_step is not none else '—' }} → {{ h.to_sal_step if h.to_sal_step is not none else '—' }}
+                                                        {% else %}
+                                                            —
+                                                        {% endif %}
+                                                    </td>
                                                     <td>{% if h.sal_amount is not none %}{{ '{:,.2f}'.format(h.sal_amount) }}{% else %}—{% endif %}</td>
+                                                    <td>{{ h.remarks or '—' }}</td>
+                                                    {% if can_edit_original_appointment %}
+                                                    <td>
+                                                        <div class="status-appt-row-actions">
+                                                            <button type="button" class="btn-secondary btn-hist-edit"
+                                                                data-history-id="{{ h.id }}"
+                                                                data-emp-id="{{ emp.id }}"
+                                                                data-emp-label="{{ emp.employee_id }} — {{ emp.directory_name }}"
+                                                                data-effectivity="{{ h.effectivity_date.isoformat() if h.effectivity_date else '' }}"
+                                                                data-appoint-date="{{ h.appoint_date.isoformat() if h.appoint_date else '' }}"
+                                                                data-change-type="{{ h.change_type or '' }}"
+                                                                data-status="{{ h.appoint_status or '' }}"
+                                                                data-nature="{{ h.appoint_nature or '' }}"
+                                                                data-grade="{{ h.sal_grade if h.sal_grade is not none else '' }}"
+                                                                data-step="{{ h.sal_step if h.sal_step is not none else '' }}"
+                                                                data-from-step="{{ h.from_sal_step if h.from_sal_step is not none else '' }}"
+                                                                data-remarks="{{ h.remarks or '' }}">
+                                                                Edit
+                                                            </button>
+                                                            <form method="POST"
+                                                                  action="{{ url_for('routes.status_of_appointment_history_delete', history_id=h.id) }}"
+                                                                  style="display:inline;"
+                                                                  onsubmit="return confirm('Delete history row #{{ h.id }} for {{ emp.employee_id }}? This cannot be undone.');">
+                                                                <button type="submit" class="btn-secondary btn-hist-delete">Delete</button>
+                                                            </form>
+                                                        </div>
+                                                    </td>
+                                                    {% endif %}
                                                 </tr>
                                             {% endfor %}
                                             </tbody>
                                         </table>
                                         {% else %}
-                                        <p style="color: var(--medium-gray); margin: 0.5rem 0;">No appointment history recorded.</p>
+                                        <p style="color: var(--medium-gray); margin: 0.5rem 0;">No appointment history recorded. Use <strong>Add history entry</strong> or bulk opening backfill.</p>
                                         {% endif %}
                                     </div>
                                 </div>
@@ -232,13 +268,187 @@
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="4" class="no-data">No employees found.</td>
+                            <td colspan="5" class="no-data">No employees found.</td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
         </div>
+    </div>
+</div>
+
+{# —— Step increment modal —— #}
+<div id="siModal" class="si-modal" hidden>
+    <div class="si-modal-backdrop" data-modal-close="siModal"></div>
+    <div class="si-modal-card" role="dialog" aria-modal="true">
+        <h3>Record step increment</h3>
+        <p id="siModalEmp" class="si-modal-emp"></p>
+        <form id="siForm" method="POST" action="">
+            <div class="form-grid" style="grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                <div class="form-group">
+                    <label for="siEffectivity">Effectivity date</label>
+                    <input type="date" id="siEffectivity" name="effectivity_date" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label for="siToStep">New salary step</label>
+                    <select id="siToStep" name="to_sal_step" class="form-control" required></select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="siRemarks">Remarks (optional)</label>
+                <input type="text" id="siRemarks" name="remarks" class="form-control" maxlength="255">
+            </div>
+            <p class="si-modal-note">Current step: <strong id="siFromStep">—</strong>. Original appointment date is not changed.</p>
+            <div class="si-modal-actions">
+                <button type="button" class="btn-secondary" data-modal-close="siModal">Cancel</button>
+                <button type="submit" class="btn-primary">Save step increment</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{# —— Appointment change modal —— #}
+<div id="apptChangeModal" class="si-modal" hidden>
+    <div class="si-modal-backdrop" data-modal-close="apptChangeModal"></div>
+    <div class="si-modal-card" role="dialog" aria-modal="true">
+        <h3>Record appointment change</h3>
+        <p id="apptChangeEmp" class="si-modal-emp"></p>
+        <form id="apptChangeForm" method="POST" action="">
+            <div class="form-group">
+                <label for="apptChangeEffectivity">Effectivity date</label>
+                <input type="date" id="apptChangeEffectivity" name="effectivity_date" class="form-control" required>
+            </div>
+            <div class="form-grid" style="grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                <div class="form-group">
+                    <label for="apptChangeStatus">Status of appointment</label>
+                    <select id="apptChangeStatus" name="status_of_appointment" class="form-control">
+                        <option value="">—</option>
+                        {% for s in appointment_status_options %}
+                        <option value="{{ s }}">{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="apptChangeNature">Nature of appointment</label>
+                    <select id="apptChangeNature" name="nature_of_appointment" class="form-control">
+                        <option value="">—</option>
+                        {% for n in appointment_nature_options %}
+                        <option value="{{ n }}">{{ n }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="apptChangeGrade">Salary grade</label>
+                    <input type="number" id="apptChangeGrade" name="salary_grade" class="form-control" min="1" max="33">
+                </div>
+                <div class="form-group">
+                    <label for="apptChangeStep">Salary step</label>
+                    <select id="apptChangeStep" name="salary_step" class="form-control">
+                        {% for s in range(1, (max_salary_step|default(8)) + 1) %}
+                        <option value="{{ s }}">{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="apptChangeRemarks">Remarks (optional)</label>
+                <input type="text" id="apptChangeRemarks" name="remarks" class="form-control" maxlength="255">
+            </div>
+            <p class="si-modal-note">Updates the current employee record. Original appointment date stays fixed.</p>
+            <div class="si-modal-actions">
+                <button type="button" class="btn-secondary" data-modal-close="apptChangeModal">Cancel</button>
+                <button type="submit" class="btn-primary">Save appointment change</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{# —— Add / Edit history entry modal —— #}
+<div id="histModal" class="si-modal" hidden>
+    <div class="si-modal-backdrop" data-modal-close="histModal"></div>
+    <div class="si-modal-card" role="dialog" aria-modal="true" style="width: min(560px, 100%);">
+        <h3 id="histModalTitle">Add history entry</h3>
+        <p id="histEmp" class="si-modal-emp"></p>
+        <form id="histForm" method="POST" action="">
+            <div class="form-grid" style="grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                <div class="form-group">
+                    <label for="histEffectivity">Effectivity date</label>
+                    <input type="date" id="histEffectivity" name="effectivity_date" class="form-control" required>
+                </div>
+                <div class="form-group" id="histAppointDateGroup" hidden>
+                    <label for="histAppointDate">Original appt. date (on row)</label>
+                    <input type="date" id="histAppointDate" name="appoint_date" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label for="histChangeType">Change type</label>
+                    <select id="histChangeType" name="change_type" class="form-control">
+                        {% for t in appointment_change_types %}
+                        <option value="{{ t }}">{{ t }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="histStatus">Status of appointment</label>
+                    <select id="histStatus" name="status_of_appointment" class="form-control">
+                        <option value="">—</option>
+                        {% for s in appointment_status_options %}
+                        <option value="{{ s }}">{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="histNature">Nature of appointment</label>
+                    <select id="histNature" name="nature_of_appointment" class="form-control">
+                        <option value="">—</option>
+                        {% for n in appointment_nature_options %}
+                        <option value="{{ n }}">{{ n }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="histGrade">Salary grade</label>
+                    <input type="number" id="histGrade" name="salary_grade" class="form-control" min="1" max="33">
+                </div>
+                <div class="form-group">
+                    <label for="histStep">Salary step (to)</label>
+                    <select id="histStep" name="salary_step" class="form-control">
+                        <option value="">—</option>
+                        {% for s in range(1, (max_salary_step|default(8)) + 1) %}
+                        <option value="{{ s }}">{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="histFromStep">From step (optional)</label>
+                    <select id="histFromStep" name="from_sal_step" class="form-control">
+                        <option value="">—</option>
+                        {% for s in range(1, (max_salary_step|default(8)) + 1) %}
+                        <option value="{{ s }}">{{ s }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="histRemarks">Remarks (optional)</label>
+                <input type="text" id="histRemarks" name="remarks" class="form-control" maxlength="255" placeholder="e.g. Temporary period backfill">
+            </div>
+            <label class="si-check">
+                <input type="checkbox" name="apply_to_current" value="1" id="histApplyCurrent">
+                Also update current employee fields to match this entry
+            </label>
+            {% if can_edit_original_appointment %}
+            <label class="si-check">
+                <input type="checkbox" name="set_as_original_appointment_date" value="1" id="histSetOriginal">
+                Set effectivity date as original appointment date (Admin)
+            </label>
+            {% endif %}
+            <p id="histModalNote" class="si-modal-note">Use this to backfill past periods (e.g. Temporary 2022) without inventing data in bulk backfill.</p>
+            <div class="si-modal-actions">
+                <button type="button" class="btn-secondary" data-modal-close="histModal">Cancel</button>
+                <button type="submit" class="btn-primary" id="histSubmitBtn">Save history entry</button>
+            </div>
+        </form>
     </div>
 </div>
 
@@ -254,20 +464,76 @@
 .status-appt-detail-inner { padding: 1rem 1.5rem; }
 .status-appt-section { margin-bottom: 1.5rem; }
 .status-appt-section:last-child { margin-bottom: 0; }
-.status-appt-section-title { font-size: 0.95rem; margin: 0 0 0.5rem 0; color: var(--primary-black); }
+.status-appt-section-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+.status-appt-section-title { font-size: 0.95rem; margin: 0; color: var(--primary-black); }
+.status-appt-actions { display: flex; flex-wrap: wrap; gap: 0.45rem; }
 .status-appt-inner-table { font-size: 0.9rem; margin: 0; }
 .status-appt-inner-table th, .status-appt-inner-table td { padding: 0.4rem 0.6rem; }
+.si-overdue-tag { display: inline-block; margin-left: 0.35rem; padding: 0.1rem 0.4rem; font-size: 0.75rem; background: #fde8e8; color: #9b1c1c; border-radius: 4px; }
+.si-modal[hidden] { display: none !important; }
+.si-modal { position: fixed; inset: 0; z-index: 1200; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+.si-modal-backdrop { position: absolute; inset: 0; background: rgba(15, 23, 42, 0.45); }
+.si-modal-card { position: relative; width: min(480px, 100%); max-height: 90vh; overflow: auto; background: #fff; border-radius: 12px; padding: 1.25rem 1.35rem; box-shadow: 0 18px 40px rgba(0,0,0,0.2); }
+.si-modal-emp { margin: 0.25rem 0 1rem; color: var(--medium-gray); font-size: 0.92rem; }
+.si-modal-note { font-size: 0.85rem; color: var(--medium-gray); margin: 0.75rem 0 1rem; }
+.si-modal-actions { display: flex; justify-content: flex-end; gap: 0.6rem; }
+.si-check { display: flex; align-items: flex-start; gap: 0.5rem; font-size: 0.88rem; margin: 0.45rem 0; }
+.status-appt-actions .btn-secondary { font-size: 0.82rem; padding: 0.35rem 0.65rem; }
+.status-appt-row-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
+.status-appt-row-actions .btn-secondary { font-size: 0.75rem; padding: 0.25rem 0.5rem; }
+.btn-hist-delete { color: #9b1c1c !important; border-color: #f5c2c2 !important; }
 </style>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    var searchInput = document.getElementById('searchStatusOfAppt');
+    var todayStr = {{ today|tojson }};
+    var maxStep = {{ max_salary_step|default(8)|int }};
+    var siActionTemplate = {{ url_for('routes.status_of_appointment_step_increment', id=999999)|tojson }};
+    var apptActionTemplate = {{ url_for('routes.status_of_appointment_appointment_change', id=999999)|tojson }};
+    var histActionTemplate = {{ url_for('routes.status_of_appointment_history_entry', id=999999)|tojson }};
+    var histEditTemplate = {{ url_for('routes.status_of_appointment_history_edit', history_id=999999)|tojson }};
+
     var tableBody = document.getElementById('statusOfApptTableBody');
+    var searchInput = document.getElementById('searchStatusOfAppt');
+    var histAppointDateGroup = document.getElementById('histAppointDateGroup');
+    var histModalTitle = document.getElementById('histModalTitle');
+    var histSubmitBtn = document.getElementById('histSubmitBtn');
+    var histModalNote = document.getElementById('histModalNote');
+
+    function closeModal(id) {
+        var el = document.getElementById(id);
+        if (el) el.hidden = true;
+    }
+    function openModal(id) {
+        var el = document.getElementById(id);
+        if (el) el.hidden = false;
+    }
+
+    function fillHistForm(opts) {
+        document.getElementById('histEmp').textContent = opts.label || '';
+        document.getElementById('histForm').action = opts.action || '';
+        document.getElementById('histEffectivity').value = opts.effectivity || todayStr;
+        document.getElementById('histAppointDate').value = opts.appointDate || '';
+        document.getElementById('histChangeType').value = opts.changeType || 'Original Appointment';
+        document.getElementById('histStatus').value = opts.status || '';
+        document.getElementById('histNature').value = opts.nature || '';
+        document.getElementById('histGrade').value = opts.grade || '';
+        document.getElementById('histStep').value = opts.step || '';
+        document.getElementById('histFromStep').value = opts.fromStep || '';
+        document.getElementById('histRemarks').value = opts.remarks || '';
+        document.getElementById('histApplyCurrent').checked = false;
+        var setOrig = document.getElementById('histSetOriginal');
+        if (setOrig) setOrig.checked = false;
+        if (histAppointDateGroup) histAppointDateGroup.hidden = !opts.showAppointDate;
+        if (histModalTitle) histModalTitle.textContent = opts.title || 'Add history entry';
+        if (histSubmitBtn) histSubmitBtn.textContent = opts.submitLabel || 'Save history entry';
+        if (histModalNote) histModalNote.textContent = opts.note || '';
+    }
+
     if (searchInput && tableBody) {
         searchInput.addEventListener('input', function() {
             var q = this.value.toLowerCase().trim();
-            var rows = tableBody.querySelectorAll('tr.status-appt-row');
-            rows.forEach(function(row) {
+            tableBody.querySelectorAll('tr.status-appt-row').forEach(function(row) {
                 var text = (row.getAttribute('data-search') || '').toLowerCase();
                 var show = text.indexOf(q) !== -1;
                 row.style.display = show ? '' : 'none';
@@ -278,11 +544,11 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
     }
+
     tableBody.addEventListener('click', function(e) {
         var btn = e.target.closest('.btn-expand-status');
         if (!btn) return;
-        var empId = btn.getAttribute('data-emp-id');
-        var detail = document.getElementById('detail-' + empId);
+        var detail = document.getElementById('detail-' + btn.getAttribute('data-emp-id'));
         if (!detail) return;
         if (detail.style.display === 'none') {
             detail.style.display = 'table-row';
@@ -291,6 +557,100 @@ document.addEventListener('DOMContentLoaded', function() {
             detail.style.display = 'none';
             btn.classList.remove('expanded');
         }
+    });
+
+    document.querySelectorAll('[data-modal-close]').forEach(function(el) {
+        el.addEventListener('click', function() {
+            closeModal(el.getAttribute('data-modal-close'));
+        });
+    });
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            closeModal('siModal');
+            closeModal('apptChangeModal');
+            closeModal('histModal');
+        }
+    });
+
+    document.querySelectorAll('.btn-si-open').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var fromStep = parseInt(btn.getAttribute('data-from-step'), 10);
+            var toStep = parseInt(btn.getAttribute('data-to-step'), 10);
+            document.getElementById('siModalEmp').textContent = btn.getAttribute('data-emp-label') || '';
+            document.getElementById('siFromStep').textContent = String(fromStep);
+            document.getElementById('siForm').action = siActionTemplate.replace('999999', btn.getAttribute('data-emp-id'));
+            document.getElementById('siEffectivity').value = btn.getAttribute('data-suggested-date') || todayStr;
+            var sel = document.getElementById('siToStep');
+            sel.innerHTML = '';
+            for (var s = fromStep + 1; s <= maxStep; s++) {
+                var opt = document.createElement('option');
+                opt.value = String(s);
+                opt.textContent = String(s);
+                if (s === toStep) opt.selected = true;
+                sel.appendChild(opt);
+            }
+            openModal('siModal');
+        });
+    });
+
+    document.querySelectorAll('.btn-appt-change').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            document.getElementById('apptChangeEmp').textContent = btn.getAttribute('data-emp-label') || '';
+            document.getElementById('apptChangeForm').action = apptActionTemplate.replace('999999', btn.getAttribute('data-emp-id'));
+            document.getElementById('apptChangeEffectivity').value = btn.getAttribute('data-suggested-date') || todayStr;
+            document.getElementById('apptChangeStatus').value = btn.getAttribute('data-status') || '';
+            document.getElementById('apptChangeNature').value = btn.getAttribute('data-nature') || '';
+            document.getElementById('apptChangeGrade').value = btn.getAttribute('data-grade') || '';
+            document.getElementById('apptChangeStep').value = btn.getAttribute('data-step') || '1';
+            openModal('apptChangeModal');
+        });
+    });
+
+    document.querySelectorAll('.btn-hist-add').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            fillHistForm({
+                label: btn.getAttribute('data-emp-label') || '',
+                action: histActionTemplate.replace('999999', btn.getAttribute('data-emp-id')),
+                effectivity: btn.getAttribute('data-suggested-date') || todayStr,
+                appointDate: '',
+                changeType: 'Original Appointment',
+                status: btn.getAttribute('data-status') || '',
+                nature: btn.getAttribute('data-nature') || '',
+                grade: btn.getAttribute('data-grade') || '',
+                step: btn.getAttribute('data-step') || '',
+                fromStep: '',
+                remarks: '',
+                showAppointDate: false,
+                title: 'Add history entry',
+                submitLabel: 'Save history entry',
+                note: 'Use this to backfill past periods (e.g. Temporary 2022) without inventing data in bulk backfill.'
+            });
+            openModal('histModal');
+        });
+    });
+
+    document.querySelectorAll('.btn-hist-edit').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var hid = btn.getAttribute('data-history-id');
+            fillHistForm({
+                label: (btn.getAttribute('data-emp-label') || '') + ' · row #' + hid,
+                action: histEditTemplate.replace('999999', hid),
+                effectivity: btn.getAttribute('data-effectivity') || todayStr,
+                appointDate: btn.getAttribute('data-appoint-date') || '',
+                changeType: btn.getAttribute('data-change-type') || 'History Entry',
+                status: btn.getAttribute('data-status') || '',
+                nature: btn.getAttribute('data-nature') || '',
+                grade: btn.getAttribute('data-grade') || '',
+                step: btn.getAttribute('data-step') || '',
+                fromStep: btn.getAttribute('data-from-step') || '',
+                remarks: btn.getAttribute('data-remarks') || '',
+                showAppointDate: true,
+                title: 'Edit history entry',
+                submitLabel: 'Update history row',
+                note: 'Admin only. Editing this row does not automatically change SI due until you save. Optionally apply values to the current employee record.'
+            });
+            openModal('histModal');
+        });
     });
 });
 </script>

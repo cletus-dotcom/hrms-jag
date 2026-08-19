@@ -1,0 +1,310 @@
+{% set _role = (current_user.role or '')|lower %}
+{% set _is_admin_hr = _role in ('admin', 'hr') or is_portal_admin_session %}
+{% set _is_employee = _role == 'employee' %}
+{% set _dash_url = url_for('routes.employee_dashboard') if _is_employee else url_for('routes.dashboard') %}
+{% set _settings_open = request.endpoint in ('routes.users_list', 'routes.employees_list', 'routes.departments_list', 'routes.positions_list', 'routes.jo_cos_designations_list', 'routes.jo_cos_rates_list', 'routes.flexi_time_schedule_list', 'routes.salary_grades_list', 'routes.status_of_appointment_list', 'routes.leave_settings_list') %}
+{% set _dtr_open = request.endpoint in ('routes.dtr_records', 'routes.dtr_my_records', 'routes.dtr_upload', 'routes.dtr_justifications', 'routes.dtr_flexible_worktime', 'routes.dtr_regenerate', 'routes.dtr_regenerate_summary', 'routes.dtr_overnight_punch_fix', 'routes.dtr_quincena_processing', 'routes.dtr_monthly_submissions', 'routes.dtr_overtime_authorization', 'routes.dtr_jo_cos_extend_service') or (request.endpoint or '').startswith('routes.dtr_') %}
+{% set _attendance_open = request.endpoint in ('routes.event_attendance_list', 'routes.event_attendance_upload') %}
+{% set _leave_open = request.endpoint in ('routes.leave_settings_list', 'routes.leave_credits_list', 'routes.leave_apply', 'routes.leave_list', 'routes.leave_approvals', 'routes.leave_detail') or (request.endpoint or '').startswith('routes.leave_') %}
+{% set _payroll_open = (request.endpoint or '').startswith('routes.payroll_') %}
+{% set _hdmf_open = request.endpoint and request.endpoint.startswith('routes.payroll_deductions_hdmf') %}
+{% set _hdmf_scope = (request.view_args or {}).get('scope', '') %}
+{% set _reports_open = (request.endpoint or '').startswith('routes.report_') or request.endpoint in ('routes.employee_service_record', 'routes.employee_service_record_pdf', 'routes.leave_credits_card', 'routes.leave_credits_card_pdf', 'routes.employee_id_card_pdf') %}
+{% set _my_records_open = request.endpoint in ('routes.employee_pds', 'routes.my_service_record', 'routes.jo_cos_overtime_credits', 'routes.payroll_jo_cos_my_payslips', 'routes.payroll_plantilla_my_payslips') %}
+{% set _about_open = request.endpoint in ('routes.users_manual', 'routes.hrmdo_manual', 'routes.about_platform', 'routes.dtr_payroll_process', 'routes.dtr_payroll_process_download') %}
+
+<aside id="sidebar" class="app-sidebar" aria-label="Main navigation">
+    <div class="sidebar-user-chip">
+        <div class="sidebar-user-name">
+            {% if is_portal_admin_session %}{{ current_user.username }}{% elif employee %}{{ employee.full_name }}{% else %}{{ current_user.username }}{% endif %}
+        </div>
+        <div class="sidebar-user-role">{% if is_portal_admin_session %}Admin{% else %}{{ current_user.role|title }}{% endif %}</div>
+    </div>
+
+    <div class="sidebar-group">
+        <p class="sidebar-label">Overview</p>
+        <ul class="sidebar-nav">
+            <li>
+                <a href="{{ _dash_url }}" class="{% if request.endpoint in ('routes.dashboard', 'routes.employee_dashboard') %}active{% endif %}">
+                    <span class="sidebar-icon" aria-hidden="true">◫</span> Dashboard
+                </a>
+            </li>
+            <li>
+                <a href="{{ url_for('ermt.dashboard') }}" class="{% if request.endpoint and request.endpoint.startswith('ermt.') %}active{% endif %}">
+                    <span class="sidebar-icon" aria-hidden="true">🗂</span> eRMT
+                </a>
+            </li>
+        </ul>
+    </div>
+
+    {% if _is_admin_hr %}
+    <div class="sidebar-nav-divider" role="separator" aria-hidden="true"></div>
+    <div class="sidebar-group">
+        <p class="sidebar-label">Administration</p>
+        <ul class="sidebar-nav">
+            <li>
+                <button class="sidebar-link sidebar-section-toggle" type="button" data-target="sidebarSettings" aria-expanded="{{ 'true' if _settings_open else 'false' }}">
+                    <span class="sidebar-icon" aria-hidden="true">⚙</span> Settings
+                    <span class="sidebar-chevron" aria-hidden="true">{{ '▴' if _settings_open else '▾' }}</span>
+                </button>
+            </li>
+        </ul>
+        <div id="sidebarSettings" class="sidebar-submenu{% if not _settings_open %} is-collapsed{% endif %}">
+            <p class="sidebar-sublabel">Users &amp; directory</p>
+            <a href="{{ url_for('routes.users_list') }}" class="sidebar-sublink{% if request.endpoint == 'routes.users_list' %} active{% endif %}">Manage Users</a>
+            <a href="{{ url_for('routes.employees_list') }}" class="sidebar-sublink{% if request.endpoint == 'routes.employees_list' %} active{% endif %}">Manage Employees</a>
+            <a href="{{ url_for('routes.departments_list') }}" class="sidebar-sublink{% if request.endpoint == 'routes.departments_list' %} active{% endif %}">Manage Departments</a>
+            <a href="{{ url_for('routes.positions_list') }}" class="sidebar-sublink{% if request.endpoint == 'routes.positions_list' %} active{% endif %}">Positions</a>
+            <p class="sidebar-sublabel">JO/COS &amp; schedules</p>
+            <a href="{{ url_for('routes.jo_cos_designations_list') }}" class="sidebar-sublink{% if request.endpoint == 'routes.jo_cos_designations_list' %} active{% endif %}">JO/COS Designations</a>
+            <a href="{{ url_for('routes.jo_cos_rates_list') }}" class="sidebar-sublink{% if request.endpoint == 'routes.jo_cos_rates_list' %} active{% endif %}">JO and COS Rates</a>
+            <a href="{{ url_for('routes.flexi_time_schedule_list') }}" class="sidebar-sublink{% if request.endpoint == 'routes.flexi_time_schedule_list' %} active{% endif %}">Flexi-time Schedule</a>
+            <p class="sidebar-sublabel">Compensation &amp; leave</p>
+            <a href="{{ url_for('routes.salary_grades_list') }}" class="sidebar-sublink{% if request.endpoint == 'routes.salary_grades_list' %} active{% endif %}">Salary Grade</a>
+            <a href="{{ url_for('routes.status_of_appointment_list') }}" class="sidebar-sublink{% if request.endpoint == 'routes.status_of_appointment_list' %} active{% endif %}">Status of Appointment</a>
+            <a href="{{ url_for('routes.leave_settings_list') }}" class="sidebar-sublink{% if request.endpoint == 'routes.leave_settings_list' %} active{% endif %}">Leave Settings</a>
+            {% if is_portal_admin_session %}
+            <p class="sidebar-sublabel">Portal</p>
+            <a href="{{ url_for('portal_admin.console') }}" class="sidebar-sublink{% if request.endpoint and request.endpoint.startswith('portal_admin.') %} active{% endif %}">Portal Console</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="sidebar-nav-divider" role="separator" aria-hidden="true"></div>
+    <div class="sidebar-group">
+        <p class="sidebar-label">Time &amp; Attendance</p>
+        <ul class="sidebar-nav">
+            <li>
+                <button class="sidebar-link sidebar-section-toggle" type="button" data-target="sidebarDtr" aria-expanded="{{ 'true' if _dtr_open else 'false' }}">
+                    <span class="sidebar-icon" aria-hidden="true">🕐</span> Daily Time Records
+                    <span class="sidebar-chevron" aria-hidden="true">{{ '▴' if _dtr_open else '▾' }}</span>
+                </button>
+            </li>
+        </ul>
+        <div id="sidebarDtr" class="sidebar-submenu{% if not _dtr_open %} is-collapsed{% endif %}">
+            {% if _role == 'employee' and not _is_admin_hr %}
+            <a href="{{ url_for('routes.dtr_my_records') }}" class="sidebar-sublink{% if request.endpoint in ('routes.dtr_my_records',) or (request.endpoint == 'routes.dtr_records' and request.args.get('my') == '1') %} active{% endif %}">My DTR</a>
+            {% else %}
+            <a href="{{ url_for('routes.dtr_records') }}" class="sidebar-sublink{% if (request.endpoint == 'routes.dtr_records' and request.args.get('my') != '1' and not request.args.get('edit')) or request.endpoint == 'routes.dtr_upload_punch_flags' %} active{% endif %}">View DTR Records</a>
+            {% if employee %}
+            <a href="{{ url_for('routes.dtr_my_records') }}" class="sidebar-sublink{% if request.endpoint == 'routes.dtr_my_records' or (request.endpoint == 'routes.dtr_records' and request.args.get('my') == '1') %} active{% endif %}">My DTR</a>
+            {% endif %}
+            {% endif %}
+            {% if _role in ('admin', 'hr', 'dtr_uploader') %}
+            <a href="{{ url_for('routes.dtr_upload') }}" class="sidebar-sublink{% if request.endpoint == 'routes.dtr_upload' %} active{% endif %}">Upload DTR Log</a>
+            {% endif %}
+            {% if _role in ('admin', 'hr', 'payroll_maker') %}
+            <a href="{{ url_for('routes.dtr_records', edit=1) }}" class="sidebar-sublink{% if request.endpoint == 'routes.dtr_records' and request.args.get('edit') == '1' %} active{% endif %}">Edit DTR remarks</a>
+            <a href="{{ url_for('routes.dtr_justifications') }}" class="sidebar-sublink{% if request.endpoint == 'routes.dtr_justifications' %} active{% endif %}">DTR Justifications</a>
+            <a href="{{ url_for('routes.dtr_flexible_worktime') }}" class="sidebar-sublink{% if request.endpoint == 'routes.dtr_flexible_worktime' %} active{% endif %}">Flexible Worktime</a>
+            <a href="{{ url_for('routes.dtr_overnight_punch_fix') }}" class="sidebar-sublink{% if request.endpoint == 'routes.dtr_overnight_punch_fix' %} active{% endif %}">Overnight Punch Fix</a>
+            <a href="{{ url_for('routes.dtr_jo_cos_extend_service') }}" class="sidebar-sublink{% if request.endpoint == 'routes.dtr_jo_cos_extend_service' %} active{% endif %}">X-Service Authorization</a>
+            {% endif %}
+            {% if _is_admin_hr %}
+            <p class="sidebar-sublabel">Processing</p>
+            <a href="{{ url_for('routes.dtr_quincena_processing') }}" class="sidebar-sublink{% if request.endpoint == 'routes.dtr_quincena_processing' %} active{% endif %}">Quincena Processing</a>
+            <a href="{{ url_for('routes.dtr_monthly_submissions') }}" class="sidebar-sublink{% if request.endpoint == 'routes.dtr_monthly_submissions' %} active{% endif %}">Monthly DTR Submissions</a>
+            <button type="button" class="sidebar-sublink" onclick="document.getElementById('generateDtrModal').style.display='flex'">Prepare DTR Period</button>
+            <a href="{{ url_for('routes.dtr_regenerate') }}" class="sidebar-sublink{% if request.endpoint in ('routes.dtr_regenerate', 'routes.dtr_regenerate_summary', 'routes.dtr_regenerate_summary_export') %} active{% endif %}">Process Worktime</a>
+            <p class="sidebar-sublabel">Authorizations</p>
+            <a href="{{ url_for('routes.dtr_overtime_authorization') }}" class="sidebar-sublink{% if request.endpoint == 'routes.dtr_overtime_authorization' %} active{% endif %}">Overtime Authorization</a>
+            {% endif %}
+        </div>
+        {% if _is_admin_hr %}
+        <ul class="sidebar-nav" style="margin-top:0.15rem;">
+            <li>
+                <button class="sidebar-link sidebar-section-toggle" type="button" data-target="sidebarAttendance" aria-expanded="{{ 'true' if _attendance_open else 'false' }}">
+                    <span class="sidebar-icon" aria-hidden="true">⚑</span> Attendance
+                    <span class="sidebar-chevron" aria-hidden="true">{{ '▴' if _attendance_open else '▾' }}</span>
+                </button>
+            </li>
+        </ul>
+        <div id="sidebarAttendance" class="sidebar-submenu{% if not _attendance_open %} is-collapsed{% endif %}">
+            <a href="{{ url_for('routes.event_attendance_list') }}" class="sidebar-sublink{% if request.endpoint == 'routes.event_attendance_list' %} active{% endif %}">View / Upload Attendance</a>
+            <a href="{{ url_for('routes.event_attendance_list', category='flag_raising') }}" class="sidebar-sublink">Flag Raising</a>
+            <a href="{{ url_for('routes.event_attendance_list', category='flag_retreat') }}" class="sidebar-sublink">Flag Retreat</a>
+            <a href="{{ url_for('routes.event_attendance_list', category='meeting') }}" class="sidebar-sublink">Meeting</a>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="sidebar-group">
+        <p class="sidebar-label">Leave Management</p>
+        <ul class="sidebar-nav">
+            <li>
+                <button class="sidebar-link sidebar-section-toggle" type="button" data-target="sidebarLeave" aria-expanded="{{ 'true' if _leave_open else 'false' }}">
+                    <span class="sidebar-icon" aria-hidden="true">📅</span> Leave
+                    <span class="sidebar-chevron" aria-hidden="true">{{ '▴' if _leave_open else '▾' }}</span>
+                </button>
+            </li>
+        </ul>
+        <div id="sidebarLeave" class="sidebar-submenu{% if not _leave_open %} is-collapsed{% endif %}">
+            {% if _is_admin_hr %}
+            <p class="sidebar-sublabel">Administration</p>
+            <a href="{{ url_for('routes.leave_credits_list') }}" class="sidebar-sublink{% if request.endpoint == 'routes.leave_credits_list' %} active{% endif %}">Leave Credits</a>
+            {% endif %}
+            <p class="sidebar-sublabel">Self-service</p>
+            <a href="{{ url_for('routes.leave_apply') }}" class="sidebar-sublink{% if request.endpoint == 'routes.leave_apply' %} active{% endif %}">Apply for Leave</a>
+            <a href="{{ url_for('routes.leave_list') }}" class="sidebar-sublink{% if request.endpoint == 'routes.leave_list' %} active{% endif %}">View Leave</a>
+            {% if _role in ('manager', 'admin', 'hr') %}
+            <p class="sidebar-sublabel">Approvals</p>
+            {% if _role in ('manager', 'admin') %}
+            <a href="{{ url_for('routes.leave_approvals') }}" class="sidebar-sublink{% if request.endpoint == 'routes.leave_approvals' %} active{% endif %}">Leave Approvals</a>
+            {% endif %}
+            <a href="{{ url_for('routes.jo_cos_overtime_offset_approvals') }}" class="sidebar-sublink{% if request.endpoint == 'routes.jo_cos_overtime_offset_approvals' %} active{% endif %}">Overtime Offset Approvals</a>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if _is_admin_hr %}
+    <div class="sidebar-nav-divider" role="separator" aria-hidden="true"></div>
+    <div class="sidebar-group">
+        <p class="sidebar-label">Payroll</p>
+        <ul class="sidebar-nav">
+            <li>
+                <button class="sidebar-link sidebar-section-toggle" type="button" data-target="sidebarPayroll" aria-expanded="{{ 'true' if _payroll_open else 'false' }}">
+                    <span class="sidebar-icon" aria-hidden="true">💰</span> Payroll Menu
+                    <span class="sidebar-chevron" aria-hidden="true">{{ '▴' if _payroll_open else '▾' }}</span>
+                </button>
+            </li>
+        </ul>
+        <div id="sidebarPayroll" class="sidebar-submenu{% if not _payroll_open %} is-collapsed{% endif %}">
+            <p class="sidebar-sublabel">Deductions</p>
+            <a href="{{ url_for('routes.payroll_deductions_gsis') }}" class="sidebar-sublink{% if request.endpoint == 'routes.payroll_deductions_gsis' %} active{% endif %}">GSIS</a>
+            <button type="button" class="sidebar-sublink sidebar-section-toggle sidebar-sublink-parent{% if _hdmf_open %} active{% endif %}" data-target="sidebarHdmfDeductions" aria-expanded="{{ 'true' if _hdmf_open else 'false' }}">
+                HDMF
+                <span class="sidebar-chevron sidebar-chevron--nested" aria-hidden="true">{{ '▴' if _hdmf_open else '▾' }}</span>
+            </button>
+            <div id="sidebarHdmfDeductions" class="sidebar-submenu sidebar-submenu--nested{% if not _hdmf_open %} is-collapsed{% endif %}">
+                <a href="{{ url_for('routes.payroll_deductions_hdmf', scope='jo-cos') }}#contribution" class="sidebar-sublink sidebar-sublink--nested{% if _hdmf_open and _hdmf_scope == 'jo-cos' %} active{% endif %}">JO/COS</a>
+                <a href="{{ url_for('routes.payroll_deductions_hdmf', scope='plantilla') }}#contribution" class="sidebar-sublink sidebar-sublink--nested{% if _hdmf_open and _hdmf_scope == 'plantilla' %} active{% endif %}">Plantilla</a>
+            </div>
+            <a href="{{ url_for('routes.payroll_deductions_phic') }}" class="sidebar-sublink{% if request.endpoint in ('routes.payroll_deductions_phic', 'routes.payroll_deductions_phic_submit') %} active{% endif %}">PHIC</a>
+            <a href="{{ url_for('routes.payroll_deductions_lbp') }}" class="sidebar-sublink{% if request.endpoint in ('routes.payroll_deductions_lbp', 'routes.payroll_deductions_lbp_preview', 'routes.payroll_deductions_lbp_upload_submit', 'routes.payroll_deductions_lbp_deductions_submit') %} active{% endif %}">LBP</a>
+            <a href="{{ url_for('routes.payroll_deductions_jofemco') }}" class="sidebar-sublink{% if request.endpoint in ('routes.payroll_deductions_jofemco', 'routes.payroll_deductions_jofemco_preview', 'routes.payroll_deductions_jofemco_upload_submit', 'routes.payroll_deductions_jofemco_deductions_submit') %} active{% endif %}">JOFEMCO</a>
+            <a href="{{ url_for('routes.payroll_deductions_withholding_tax') }}" class="sidebar-sublink{% if request.endpoint in ('routes.payroll_deductions_withholding_tax', 'routes.payroll_deductions_withholding_tax_preview', 'routes.payroll_deductions_withholding_tax_upload_submit', 'routes.payroll_deductions_withholding_tax_deductions_submit') %} active{% endif %}">Withholding Tax</a>
+            <p class="sidebar-sublabel">Processing</p>
+            <a href="{{ url_for('routes.payroll_worktime_summary') }}" class="sidebar-sublink{% if request.endpoint == 'routes.payroll_worktime_summary' %} active{% endif %}">Worktime Summary</a>
+            <a href="{{ url_for('routes.payroll_jo_cos') }}" class="sidebar-sublink{% if request.endpoint == 'routes.payroll_jo_cos' %} active{% endif %}">JO/COS</a>
+            <a href="{{ url_for('routes.payroll_plantilla') }}" class="sidebar-sublink{% if request.endpoint == 'routes.payroll_plantilla' %} active{% endif %}">Plantilla</a>
+        </div>
+    </div>
+    {% endif %}
+
+    {% if _role in ('admin', 'hr', 'payroll_maker') %}
+    <div class="sidebar-group">
+        <p class="sidebar-label">Reports</p>
+        <ul class="sidebar-nav">
+            <li>
+                <button class="sidebar-link sidebar-section-toggle" type="button" data-target="sidebarReports" aria-expanded="{{ 'true' if _reports_open else 'false' }}">
+                    <span class="sidebar-icon" aria-hidden="true">📋</span> Reports
+                    <span class="sidebar-chevron" aria-hidden="true">{{ '▴' if _reports_open else '▾' }}</span>
+                </button>
+            </li>
+        </ul>
+        <div id="sidebarReports" class="sidebar-submenu{% if not _reports_open %} is-collapsed{% endif %}">
+            <a href="{{ url_for('routes.report_employees_list') }}" class="sidebar-sublink{% if request.endpoint in ('routes.report_employees_list', 'routes.report_employees_list_export') %} active{% endif %}">Employees List</a>
+            {% if _is_admin_hr %}
+            <a href="{{ url_for('routes.report_service_records') }}" class="sidebar-sublink{% if request.endpoint in ('routes.report_service_records', 'routes.employee_service_record', 'routes.employee_service_record_pdf') %} active{% endif %}">Service Records</a>
+            <a href="{{ url_for('routes.report_leave_credits') }}" class="sidebar-sublink{% if request.endpoint in ('routes.report_leave_credits', 'routes.leave_credits_card', 'routes.leave_credits_card_pdf') %} active{% endif %}">Leave Credits</a>
+            <a href="{{ url_for('routes.report_employee_id_cards') }}" class="sidebar-sublink{% if request.endpoint in ('routes.report_employee_id_cards', 'routes.report_employee_id_cards_batch_pdf', 'routes.employee_id_card_pdf') %} active{% endif %}">Employee ID Cards</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% if employee %}
+    {% set _soa = ((employee.status_of_appointment or '') + ' ' + (employee.nature_of_appointment or ''))|lower %}
+    <div class="sidebar-nav-divider" role="separator" aria-hidden="true"></div>
+    <div class="sidebar-group">
+        <p class="sidebar-label">My Records</p>
+        <ul class="sidebar-nav">
+            <li>
+                <button class="sidebar-link sidebar-section-toggle" type="button" data-target="sidebarMyRecords" aria-expanded="{{ 'true' if _my_records_open else 'false' }}">
+                    <span class="sidebar-icon" aria-hidden="true">📁</span> Records
+                    <span class="sidebar-chevron" aria-hidden="true">{{ '▴' if _my_records_open else '▾' }}</span>
+                </button>
+            </li>
+        </ul>
+        <div id="sidebarMyRecords" class="sidebar-submenu{% if not _my_records_open %} is-collapsed{% endif %}">
+            <a href="{{ url_for('routes.employee_pds', id=employee.id) }}" class="sidebar-sublink{% if request.endpoint == 'routes.employee_pds' %} active{% endif %}">PDS</a>
+            <a href="{{ url_for('routes.my_service_record') }}" class="sidebar-sublink{% if request.endpoint == 'routes.my_service_record' %} active{% endif %}">Service Record</a>
+            {% if 'job order' in _soa or 'contract of service' in _soa or 'cos' in _soa or _soa == 'jo' %}
+            <a href="{{ url_for('routes.jo_cos_overtime_credits') }}" class="sidebar-sublink{% if request.endpoint == 'routes.jo_cos_overtime_credits' %} active{% endif %}">Overtime Credits</a>
+            <a href="{{ url_for('routes.payroll_jo_cos_my_payslips') }}" class="sidebar-sublink{% if request.endpoint == 'routes.payroll_jo_cos_my_payslips' %} active{% endif %}">Payslips</a>
+            {% else %}
+            <a href="{{ url_for('routes.payroll_plantilla_my_payslips') }}" class="sidebar-sublink{% if request.endpoint == 'routes.payroll_plantilla_my_payslips' %} active{% endif %}">Payslips</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="sidebar-nav-divider" role="separator" aria-hidden="true"></div>
+    <div class="sidebar-group">
+        <p class="sidebar-label">Alerts</p>
+        <ul class="sidebar-nav">
+            <li>
+                <a href="{{ url_for('routes.notifications_list') }}" class="sidebar-nav-notifications{% if request.endpoint == 'routes.notifications_list' %} active{% endif %}{% if unread_notification_count %} has-unread{% endif %}">
+                    <span class="sidebar-icon sidebar-icon--notify" aria-hidden="true">🔔</span>
+                    <span class="sidebar-nav-text">Notifications</span>
+                    {% if unread_notification_count %}
+                    <span class="sidebar-badge" aria-label="{{ unread_notification_count }} unread notification{% if unread_notification_count != 1 %}s{% endif %}">{{ unread_notification_count }}</span>
+                    {% endif %}
+                </a>
+            </li>
+        </ul>
+    </div>
+
+    <div class="sidebar-nav-divider" role="separator" aria-hidden="true"></div>
+    <div class="sidebar-group">
+        <p class="sidebar-label">Help &amp; Resources</p>
+        <ul class="sidebar-nav">
+            <li>
+                <button class="sidebar-link sidebar-section-toggle" type="button" data-target="sidebarAbout" aria-expanded="{{ 'true' if _about_open else 'false' }}">
+                    <span class="sidebar-icon" aria-hidden="true">ℹ</span> About
+                    <span class="sidebar-chevron" aria-hidden="true">{{ '▴' if _about_open else '▾' }}</span>
+                </button>
+            </li>
+        </ul>
+        <div id="sidebarAbout" class="sidebar-submenu{% if not _about_open %} is-collapsed{% endif %}">
+            <a href="{{ url_for('routes.about_platform') }}" class="sidebar-sublink{% if request.endpoint == 'routes.about_platform' %} active{% endif %}">About the Platform</a>
+            <a href="{{ url_for('routes.users_manual') }}" class="sidebar-sublink{% if request.endpoint == 'routes.users_manual' %} active{% endif %}">User's Manual</a>
+            <a href="{{ url_for('routes.hrmdo_manual') }}" class="sidebar-sublink{% if request.endpoint == 'routes.hrmdo_manual' %} active{% endif %}">HRMDO Manual</a>
+            {% if _role in ('admin', 'hr', 'payroll_maker') or is_portal_admin_session %}
+            <a href="{{ url_for('routes.dtr_payroll_process') }}" class="sidebar-sublink{% if request.endpoint in ('routes.dtr_payroll_process', 'routes.dtr_payroll_process_download') %} active{% endif %}">DTR to Payroll Process Flow</a>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="sidebar-nav-divider" role="separator" aria-hidden="true"></div>
+    <div class="sidebar-group sidebar-group--account">
+        <p class="sidebar-label">Account</p>
+        <ul class="sidebar-nav">
+            {% if not is_portal_admin_session %}
+            <li>
+                <button type="button" class="sidebar-link btn-change-password">
+                    <span class="sidebar-icon" aria-hidden="true">🔑</span> Change Password
+                </button>
+            </li>
+            {% endif %}
+            <li>
+                <a href="{{ url_for('routes.index') }}">
+                    <span class="sidebar-icon" aria-hidden="true">🏠</span> Home
+                </a>
+            </li>
+            <li>
+                <form method="POST" action="{{ url_for('routes.logout') }}" style="margin:0;">
+                    <button type="submit" class="sidebar-link" style="width:100%;">
+                        <span class="sidebar-icon" aria-hidden="true">⎋</span> Logout
+                    </button>
+                </form>
+            </li>
+        </ul>
+    </div>
+
+    <div class="sidebar-footer">
+        <img src="{{ url_for('static', filename='jagna_logo.png') }}" alt="" class="sidebar-footer-logo" width="72" height="72" decoding="async">
+        <div class="sidebar-footer-text">Municipality of Jagna, Bohol</div>
+    </div>
+</aside>

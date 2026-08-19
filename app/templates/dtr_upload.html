@@ -1,10 +1,17 @@
-{% extends "base.html" %}
+{% extends "layouts/app.html" %}
 
 {% block title %}Upload DTR Log - HRMS{% endblock %}
 
+{% set navbar_title = 'Upload DTR Log' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Time & Attendance'},
+    {'label': 'Upload DTR Log'}
+] %}
+
 {% block extra_css %}
 <style>
-  .dtr-save-status-overlay {
+  .dtr-process-overlay {
     display: none;
     position: fixed;
     inset: 0;
@@ -16,11 +23,11 @@
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
   }
-  .dtr-save-status-overlay.is-visible {
+  .dtr-process-overlay.is-visible {
     display: flex;
   }
-  .dtr-save-status-card {
-    max-width: 22rem;
+  .dtr-process-card {
+    max-width: 26rem;
     width: 100%;
     background: #fff;
     border-radius: 12px;
@@ -28,7 +35,7 @@
     padding: 1.75rem 1.5rem 1.5rem;
     text-align: center;
   }
-  .dtr-save-status-spinner {
+  .dtr-process-spinner {
     width: 2.5rem;
     height: 2.5rem;
     margin: 0 auto 1.1rem;
@@ -40,85 +47,138 @@
   @keyframes dtr-save-spin {
     to { transform: rotate(360deg); }
   }
-  .dtr-save-status-title {
+  .dtr-process-title {
     margin: 0 0 0.35rem;
     font-size: 1.05rem;
     font-weight: 600;
     color: #111827;
-    letter-spacing: -0.02em;
   }
-  .dtr-save-status-sub {
+  .dtr-process-sub {
     margin: 0;
     font-size: 0.9rem;
     color: #6b7280;
     line-height: 1.45;
   }
+  .dtr-upload-summary { margin-top: 1.5rem; }
+  .dtr-upload-summary-stats {
+    margin: 1rem 0 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 0.5rem;
+    font-size: 0.95rem;
+    color: #374151;
+  }
+  .dtr-upload-summary-actions {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-top: 1.25rem;
+  }
+  .dtr-batch-list {
+    display: grid;
+    gap: 0.65rem;
+    margin-top: 0.75rem;
+  }
+  .dtr-batch-item {
+    background: #fff;
+    border: 1px solid rgba(1, 58, 99, 0.08);
+    border-radius: 12px;
+    padding: 0.9rem 1.1rem;
+    box-shadow: 0 2px 10px rgba(1, 58, 99, 0.04);
+  }
+  .dtr-batch-item-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.65rem;
+    padding-bottom: 0.65rem;
+    border-bottom: 1px solid #eef2f7;
+  }
+  .dtr-batch-item-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    font-size: 0.9rem;
+    color: #1d2d44;
+  }
+  .dtr-batch-item-title strong {
+    font-weight: 600;
+    color: #013a63;
+  }
+  .dtr-batch-item-actions {
+    flex-shrink: 0;
+  }
+  .dtr-batch-item-meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+    gap: 0.4rem 1.25rem;
+    margin: 0;
+    font-size: 0.8125rem;
+    color: #4b5563;
+  }
+  .dtr-batch-item-meta dt {
+    display: inline;
+    font-weight: 600;
+    color: #374151;
+    margin: 0;
+  }
+  .dtr-batch-item-meta dt::after { content: ': '; }
+  .dtr-batch-item-meta dd {
+    display: inline;
+    margin: 0;
+    word-break: break-word;
+  }
+  .dtr-batch-status {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+  .dtr-batch-status--active { background: #e8f5ec; color: #1b6b3a; }
+  .dtr-batch-status--undone { background: #f3f4f6; color: #6b7280; }
+  .dtr-undo-form { display: inline; margin: 0; }
+  .dtr-batch-undo-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: #fff;
+    color: #9f1239;
+    border: 1px solid rgba(159, 18, 57, 0.28);
+    border-radius: 6px;
+    padding: 0.38rem 0.75rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: 1.2;
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  }
+  .dtr-batch-undo-btn svg {
+    width: 0.9rem;
+    height: 0.9rem;
+    flex-shrink: 0;
+    opacity: 0.85;
+  }
+  .dtr-batch-undo-btn:hover {
+    background: rgba(159, 18, 57, 0.06);
+    border-color: rgba(159, 18, 57, 0.45);
+    color: #881337;
+  }
+  .dtr-batch-undo-btn:focus-visible {
+    outline: 2px solid rgba(159, 18, 57, 0.35);
+    outline-offset: 2px;
+  }
 </style>
 {% endblock %}
 
-{% block content %}
-<div class="dashboard-container">
-    <div class="header-bar">
-        <div class="header-content">
-            {% include 'includes/navbar_brand.html' %}
-            <nav class="main-nav">
-                <a href="{{ url_for('routes.employee_dashboard') }}" class="nav-link">Dashboard</a>
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
-                        {% include 'includes/nav_dtr_upload_link.html' %}
-                        <a href="{{ url_for('routes.dtr_justifications') }}" class="dropdown-item">DTR Justifications</a>
-                        {% include 'includes/nav_dtr_edit_link.html' %}
-                        {% include 'includes/nav_dtr_regenerate_link.html' %}
-                    </div>
-                </div>
-                {% include 'includes/nav_payroll_top_menu.html' %}
-                {% if (current_user.role or '')|lower in ('payroll_maker', 'admin', 'hr') %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        {% include 'includes/reports_dropdown_links.html' %}
-                    </div>
-                </div>
-                {% endif %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Leave <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply Leave</a>
-                        <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
-                    </div>
-                </div>
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">ABOUT <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.users_manual') }}" class="dropdown-item">User's Manual</a>
-                        <a href="{{ url_for('routes.hrmdo_manual') }}" class="dropdown-item">HRMDO Manual</a>
-                    </div>
-                </div>
-                <a href="{{ url_for('routes.dtr_upload') }}" class="nav-link active">Upload DTR Log</a>
-            </nav>
-            <div class="user-dropdown">
-                <a href="#" class="user-info">
-                    {% if employee %}
-                        {{ employee.full_name }} ({{ current_user.role|title }})
-                    {% else %}
-                        {{ current_user.username }} ({{ current_user.role|title }})
-                    {% endif %}
-                    <span class="dropdown-arrow">▼</span>
-                </a>
-                <div class="dropdown-menu dropdown-menu-right">
-                    <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
-                    <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
-                        <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="dashboard-content">
-        {% with messages = get_flashed_messages(with_categories=true) %}
+{% block app_content %}
+{% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
                     <div class="alert alert-{{ category }} alert-dismissible">
@@ -138,7 +198,8 @@
 
         <div class="card">
             <div class="card-body">
-                <form method="POST" action="{{ url_for('routes.dtr_upload') }}" enctype="multipart/form-data">
+                <p class="muted" style="margin-top: 0;">Select the quincena to save. Dates within that quincena <strong>plus one day before and after</strong> are accepted (for night shift and flexitime). Other dates in the file are skipped and listed in the summary. Re-uploads update existing employee days: by default only blank punches are filled.</p>
+                <form id="dtr-upload-form" method="POST" action="{{ url_for('routes.dtr_upload') }}" enctype="multipart/form-data">
                     <div class="form-group">
                         <label for="upload_quincena">Upload For Quincena</label>
                         <select id="upload_quincena" name="upload_quincena" class="form-control" required>
@@ -146,131 +207,175 @@
                                 <option value="{{ opt.value }}" {% if selected_quincena == opt.value %}selected{% endif %}>{{ opt.label }}</option>
                             {% endfor %}
                         </select>
+                        {% if selected_period_locked %}
+                        <p class="muted" style="margin: 0.4rem 0 0; color: #9f1239;">This quincena is <strong>processed</strong>. Upload is blocked unless an Admin forces it below (or reopen from Quincena Processing).</p>
+                        {% endif %}
                     </div>
                     <div class="form-group">
                         <label for="dtr_file">Select DTR log file (.dat)</label>
                         <input type="file" id="dtr_file" name="dtr_file" class="form-control" accept=".dat,.txt" required>
                     </div>
+                    <div class="form-group">
+                        <label for="merge_strategy">When a day already has punches</label>
+                        <select id="merge_strategy" name="merge_strategy" class="form-control">
+                            <option value="fill_blanks" {% if selected_merge_strategy == 'fill_blanks' %}selected{% endif %}>Fill blanks only (keep existing times)</option>
+                            <option value="merge_minmax" {% if selected_merge_strategy == 'merge_minmax' %}selected{% endif %}>Merge min/max (earlier in / later out)</option>
+                        </select>
+                        <p class="muted" style="margin: 0.4rem 0 0; font-size: 0.85rem;">Fill blanks: e.g. time-in present and break-out blank → re-upload fills break-out only. Min/max can still change punches that already exist.</p>
+                    </div>
+                    {% if can_force_processed %}
+                    <div class="form-group">
+                        <label style="display: flex; align-items: flex-start; gap: 0.5rem; font-weight: 500;">
+                            <input type="checkbox" name="force_processed" value="1" style="margin-top: 0.2rem;">
+                            <span>Force upload into a processed quincena (Admin). Reopens review for that period.</span>
+                        </label>
+                    </div>
+                    {% endif %}
                     <div class="form-actions">
-                        <button type="submit" class="btn-primary">Upload</button>
+                        <button type="submit" class="btn-primary">Upload and Save</button>
                     </div>
                 </form>
             </div>
         </div>
 
-        {% if parsed_rows %}
-        <div class="card" style="margin-top: 1.5rem;">
+        <div id="dtr-process-status" class="dtr-process-overlay" role="status" aria-live="polite" aria-hidden="true">
+            <div class="dtr-process-card">
+                <div class="dtr-process-spinner" aria-hidden="true"></div>
+                <p class="dtr-process-title" id="dtr-process-title">Processing</p>
+                <p class="dtr-process-sub" id="dtr-process-sub">Please wait a moment.</p>
+            </div>
+        </div>
+
+        {% if save_result %}
+        <div class="card dtr-upload-summary">
             <div class="card-body">
-                <h2 class="section-title" style="margin-bottom: 1rem;">DTR records – review</h2>
-                <script id="dtr-save-bootstrap" type="application/json">{{ {'save_url': url_for('routes.dtr_upload_save'), 'after_url': url_for('routes.dtr_upload'), 'quincena': selected_quincena, 'rows': dtr_rows_save_payload } | tojson }}</script>
-                <noscript>
-                    <p class="alert alert-error">Saving DTR batches requires JavaScript (JSON request).</p>
-                </noscript>
-                    {% if quincena_missing_dates_text %}
-                    <div class="alert alert-info" style="margin-bottom: 0.75rem;">
-                        <span>Calendar day(s) in the selected quincena not present in this upload: {{ quincena_missing_dates_text|join(', ') }}. You can still save.</span>
-                    </div>
+                <h2 class="section-title" style="margin-bottom: 0.5rem;">Upload complete</h2>
+                <p class="muted" style="margin: 0 0 0.25rem;">Batch #{{ save_result.batch_id }} · File: <strong>{{ save_result.filename }}</strong></p>
+                <p class="muted" style="margin: 0;">Quincena: <strong>{{ save_result.quincena_label }}</strong></p>
+                <ul class="dtr-upload-summary-stats">
+                    <li><strong>{{ save_result.record_count }}</strong> record(s) in file</li>
+                    <li><strong>{{ save_result.records_accepted|default(save_result.records_in_quincena) }}</strong> record(s) accepted{% if save_result.accept_range_label %} ({{ save_result.accept_range_label }}){% endif %}</li>
+                    <li><strong>{{ save_result.records_in_quincena }}</strong> record(s) on core quincena days</li>
+                    {% if save_result.buffer_records|default(0) > 0 %}
+                    <li><strong>{{ save_result.buffer_records }}</strong> record(s) on buffer day(s) (±1 day for night shift / flexitime)</li>
                     {% endif %}
-                    <div class="table-container" style="overflow-x: auto;">
-                        <table class="dtr-grid-table" style="width: 100%; font-size: 0.9rem; border-collapse: collapse; border: 1px solid #ccc;">
-                            <thead>
-                                <tr>
-                                    <th style="border: 1px solid #ccc; padding: 0.5rem; text-align: left; background: #f0f0f0;">Employee ID</th>
-                                    <th style="border: 1px solid #ccc; padding: 0.5rem; text-align: left; background: #f0f0f0;">Date</th>
-                                    <th style="border: 1px solid #ccc; padding: 0.5rem; text-align: left; background: #f0f0f0;">Check-In (AM-IN)</th>
-                                    <th style="border: 1px solid #ccc; padding: 0.5rem; text-align: left; background: #f0f0f0;">Break-out (AM-OUT)</th>
-                                    <th style="border: 1px solid #ccc; padding: 0.5rem; text-align: left; background: #f0f0f0;">Break-in (PM-IN)</th>
-                                    <th style="border: 1px solid #ccc; padding: 0.5rem; text-align: left; background: #f0f0f0;">Check-out (PM-OUT)</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for row in parsed_rows %}
-                                <tr>
-                                    <td style="border: 1px solid #ccc; padding: 0.5rem;">
-                                        {{ row.employee_id }}
-                                    </td>
-                                    <td style="border: 1px solid #ccc; padding: 0.5rem;">{{ row.date[8:10] }}/{{ row.date[5:7] }}/{{ row.date[0:4] }}</td>
-                                    <td style="border: 1px solid #ccc; padding: 0.5rem;">{{ row.check_in_12h|default(row.check_in) }}</td>
-                                    <td style="border: 1px solid #ccc; padding: 0.5rem;">{{ row.break_out_12h|default(row.break_out) }}</td>
-                                    <td style="border: 1px solid #ccc; padding: 0.5rem;">{{ row.break_in_12h|default(row.break_in) }}</td>
-                                    <td style="border: 1px solid #ccc; padding: 0.5rem;">{{ row.check_out_12h|default(row.check_out) }}</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
-                    <div class="form-actions" style="margin-top: 1rem;">
-                        <button type="button" class="btn-primary" id="dtr-save-btn">Save to DTR</button>
-                    </div>
-                    <div id="dtr-save-status" class="dtr-save-status-overlay" role="status" aria-live="polite" aria-hidden="true">
-                        <div class="dtr-save-status-card">
-                            <div class="dtr-save-status-spinner" aria-hidden="true"></div>
-                            <p class="dtr-save-status-title">Saving DTR Records</p>
-                            <p class="dtr-save-status-sub">Please wait a moment.</p>
-                        </div>
-                    </div>
+                    <li><strong>{{ save_result.employee_count }}</strong> employee ID(s) in file</li>
+                    <li><strong>{{ save_result.saved }}</strong> record(s) processed ({{ save_result.created_count }} new, {{ save_result.merged_count }} updated, {{ save_result.unchanged_count|default(0) }} unchanged)</li>
+                    {% if save_result.merge_strategy %}
+                    <li>Merge mode: <strong>{% if save_result.merge_strategy == 'merge_minmax' %}min/max{% else %}fill blanks only{% endif %}</strong></li>
+                    {% endif %}
+                    {% if save_result.skipped_outside_rows %}
+                    <li><strong>{{ save_result.skipped_outside_rows }}</strong> record(s) skipped (outside accept window)</li>
+                    {% endif %}
+                    {% if save_result.error_count %}
+                    <li><strong>{{ save_result.error_count }}</strong> row(s) had errors (see alerts above)</li>
+                    {% endif %}
+                    {% if save_result.punch_flag_count|default(0) > 0 %}
+                    <li><strong>{{ save_result.punch_flag_count }}</strong> duplicate punch flag(s) need Admin/HR/Payroll Maker review</li>
+                    {% endif %}
+                    {% if save_result.date_min and save_result.date_max %}
+                    <li>Date range: <strong>{{ save_result.date_min }}</strong> – <strong>{{ save_result.date_max }}</strong></li>
+                    {% endif %}
+                </ul>
+                {% if save_result.outside_dates %}
+                <div class="alert alert-warning" style="margin-top: 1rem;">
+                    <span>Date(s) outside the accept window (quincena ±1 day) were <strong>not saved</strong>: {{ save_result.outside_dates|join(', ') }}.</span>
+                </div>
+                {% endif %}
+                {% if save_result.missing_dates %}
+                <div class="alert alert-info" style="margin-top: 1rem;">
+                    <span>Some calendar day(s) in the quincena were not in this file: {{ save_result.missing_dates|join(', ') }}.</span>
+                </div>
+                {% endif %}
+                {% if save_result.punch_flag_count|default(0) > 0 %}
+                <div class="alert alert-warning" style="margin-top: 1rem;">
+                    <span>Some employees have <strong>multiple punches</strong> for the same time slot. Review and choose the correct timestamp.</span>
+                </div>
+                {% endif %}
+                <div class="dtr-upload-summary-actions">
+                    {% if save_result.punch_flag_count|default(0) > 0 and can_review_punch_flags|default(is_admin_hr) %}
+                    <a href="{{ save_result.punch_flags_url }}" class="btn-primary">Review duplicate punches</a>
+                    {% endif %}
+                    <a href="{{ save_result.dtr_records_url }}" class="{% if save_result.punch_flag_count|default(0) > 0 and can_review_punch_flags|default(is_admin_hr) %}btn-secondary{% else %}btn-primary{% endif %}">View DTR Records</a>
+                    {% if save_result.show_undo|default(save_result.can_undo) %}
+                    <form method="POST" action="{{ url_for('routes.dtr_upload_batch_undo', batch_id=save_result.batch_id) }}" class="dtr-undo-form" onsubmit="return confirm('Undo this upload? Created rows will be deleted and merged rows restored to their previous times.');">
+                        <button type="submit" class="dtr-batch-undo-btn">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 10h10a4 4 0 0 1 4 4v0a4 4 0 0 1-4 4H5"/><path d="M7 6 3 10l4 4"/></svg>
+                            Undo this upload
+                        </button>
+                    </form>
+                    {% endif %}
+                    <a href="{{ url_for('routes.dtr_upload') }}" class="btn-secondary">Upload another file</a>
+                </div>
             </div>
         </div>
         {% endif %}
-    </div>
-</div>
+
+        {% if recent_batches %}
+        <div class="card" style="margin-top: 1.5rem;">
+            <div class="card-body">
+                <h2 class="section-title" style="margin-bottom: 0.75rem;">Recent uploads</h2>
+                <p class="muted" style="margin-top: 0;">Undo a batch to remove its changes, then upload again with the correct quincena or file. Admin/HR can undo any batch; uploaders can undo their own.</p>
+                <div class="dtr-batch-list">
+                    {% for b in recent_batches %}
+                    <article class="dtr-batch-item">
+                        <div class="dtr-batch-item-head">
+                            <div class="dtr-batch-item-title">
+                                <strong>Batch #{{ b.id }}</strong>
+                                <span class="dtr-batch-status dtr-batch-status--{{ b.status }}">{{ b.status|title }}</span>
+                            </div>
+                            <div class="dtr-batch-item-actions">
+                                {% if b.punch_flag_count|default(0) > 0 and can_review_punch_flags|default(is_admin_hr) and b.status == 'active' %}
+                                <a href="{{ url_for('routes.dtr_upload_punch_flags', batch_id=b.id) }}" class="btn-secondary" style="font-size: 0.8125rem; padding: 0.38rem 0.75rem; text-decoration: none;">
+                                    {{ b.punch_flag_count }} flag{{ 's' if b.punch_flag_count != 1 else '' }}
+                                </a>
+                                {% endif %}
+                                {% if b.status == 'active' and b.show_undo %}
+                                <form method="POST" action="{{ url_for('routes.dtr_upload_batch_undo', batch_id=b.id) }}" class="dtr-undo-form" onsubmit="return confirm('Undo batch #{{ b.id }}? Created rows will be removed and merged rows restored.');">
+                                    <button type="submit" class="dtr-batch-undo-btn">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 10h10a4 4 0 0 1 4 4v0a4 4 0 0 1-4 4H5"/><path d="M7 6 3 10l4 4"/></svg>
+                                        Undo
+                                    </button>
+                                </form>
+                                {% elif b.status == 'active' and is_admin_hr and b.item_count == 0 %}
+                                <span class="muted" title="No row-level audit for this batch">No audit</span>
+                                {% elif b.status == 'undone' %}
+                                <span class="muted">Undone</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <dl class="dtr-batch-item-meta">
+                            <div><dt>When</dt><dd>{{ b.uploaded_at.strftime('%Y-%m-%d %H:%M') if b.uploaded_at else '—' }}</dd></div>
+                            <div><dt>Uploader</dt><dd>{{ b.uploaded_by }}</dd></div>
+                            <div><dt>File</dt><dd>{{ b.filename }}</dd></div>
+                            <div><dt>Quincena</dt><dd>{{ b.quincena_label }}</dd></div>
+                            <div><dt>Saved</dt><dd>{{ b.saved_count }} ({{ b.created_count }} new + {{ b.merged_count }} merged)</dd></div>
+                            {% if b.punch_flag_count|default(0) > 0 %}
+                            <div><dt>Dup. punches</dt><dd>{{ b.punch_flag_count }} open flag(s)</dd></div>
+                            {% endif %}
+                        </dl>
+                    </article>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
 {% endblock %}
 
 {% block extra_js %}
 <script>
 (function () {
-    var el = document.getElementById('dtr-save-bootstrap');
-    if (!el) return;
-    var cfg;
-    try { cfg = JSON.parse(el.textContent); } catch (e) { return; }
-    var btn = document.getElementById('dtr-save-btn');
-    var statusOverlay = document.getElementById('dtr-save-status');
-    if (!btn) return;
-
-    function showSavingOverlay() {
-        if (!statusOverlay) return;
-        statusOverlay.classList.add('is-visible');
-        statusOverlay.setAttribute('aria-hidden', 'false');
-    }
-    function hideSavingOverlay() {
-        if (!statusOverlay) return;
-        statusOverlay.classList.remove('is-visible');
-        statusOverlay.setAttribute('aria-hidden', 'true');
-    }
-
-    btn.addEventListener('click', function () {
-        btn.disabled = true;
-        showSavingOverlay();
-        fetch(cfg.save_url, {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            },
-            body: JSON.stringify({ upload_quincena: cfg.quincena, rows: cfg.rows })
-        })
-            .then(function (res) {
-                return res.json().then(function (data) {
-                    return { res: res, data: data };
-                });
-            })
-            .then(function (o) {
-                hideSavingOverlay();
-                if (!o.res.ok || !o.data.ok) {
-                    alert(o.data.error || ('Save failed (' + o.res.status + ')'));
-                    btn.disabled = false;
-                    return;
-                }
-                window.location.href = o.data.redirect || cfg.after_url;
-            })
-            .catch(function (e) {
-                hideSavingOverlay();
-                alert('Save failed: ' + e);
-                btn.disabled = false;
-            });
+    var uploadForm = document.getElementById('dtr-upload-form');
+    var processOverlay = document.getElementById('dtr-process-status');
+    var processTitle = document.getElementById('dtr-process-title');
+    var processSub = document.getElementById('dtr-process-sub');
+    if (!uploadForm || !processOverlay) return;
+    uploadForm.addEventListener('submit', function () {
+        if (processTitle) processTitle.textContent = 'Uploading and Saving';
+        if (processSub) processSub.textContent = 'Reading the log file, saving in-quincena dates, and writing to the database. Please wait…';
+        processOverlay.classList.add('is-visible');
+        processOverlay.setAttribute('aria-hidden', 'false');
     });
 })();
 </script>
 {% endblock %}
-

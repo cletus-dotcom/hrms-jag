@@ -1,77 +1,86 @@
-{% extends "base.html" %}
+{% extends "layouts/app.html" %}
 
 {% block title %}DTR Records - HRMS{% endblock %}
+
+{% set navbar_title = 'My DTR' if my_dtr_mode|default(false) else ('Edit remarks' if dtr_edit_mode else 'DTR Records') %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Time & Attendance'},
+    {'label': 'My DTR' if my_dtr_mode|default(false) else ('Edit remarks' if dtr_edit_mode else 'DTR Records')}
+] %}
 
 {% block extra_css %}
 <style>
   .dtr-records-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.9rem;
+    font-size: 0.875rem;
     table-layout: fixed;
   }
   .dtr-records-table th,
   .dtr-records-table td {
-    border: 1px solid #111827;
-    padding: 0.45rem 0.5rem;
+    border: 1px solid #d1d5db;
+    padding: 0.5rem 0.55rem;
     vertical-align: middle;
   }
-  .dtr-records-table thead th { background: #f3f4f6; font-weight: 600; text-align: center; }
+  .dtr-records-table thead th {
+    background: #f3f4f6;
+    font-weight: 600;
+    text-align: center;
+    font-size: 0.78rem;
+    line-height: 1.25;
+    color: #374151;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .dtr-records-table tbody td { text-align: center; }
-  .dtr-records-table tbody td:first-child,
-  .dtr-records-table thead th:first-child { font-weight: 600; width: 2.75rem; }
-  /* AM In / AM Out / PM In / PM Out */
-  .dtr-records-table th:nth-child(2),
-  .dtr-records-table td:nth-child(2),
-  .dtr-records-table th:nth-child(3),
-  .dtr-records-table td:nth-child(3),
-  .dtr-records-table th:nth-child(4),
-  .dtr-records-table td:nth-child(4),
-  .dtr-records-table th:nth-child(5),
-  .dtr-records-table td:nth-child(5) {
-    width: 5.25rem;
+  .dtr-records-table .dtr-col-day { width: 3.25rem; }
+  .dtr-records-table .dtr-col-time { width: 6.25rem; }
+  .dtr-records-table .dtr-col-lateut { width: 5.5rem; }
+  .dtr-records-table .dtr-col-remarks { width: auto; min-width: 9rem; }
+  .dtr-records-table .dtr-col-flags { width: 8.5rem; }
+  .dtr-records-table .dtr-col-accomplishment { width: 14rem; min-width: 12rem; }
+  .dtr-accomplishment-input {
+    width: 100%;
+    min-height: 3.5rem;
+    resize: vertical;
+    font-size: 0.8rem;
+    line-height: 1.35;
+    box-sizing: border-box;
   }
-  /* Late/Undertime (H/M) — compact */
-  .dtr-records-table th:nth-child(6),
-  .dtr-records-table td:nth-child(6) {
-    width: 4.75rem;
-    max-width: 5rem;
-    padding-left: 0.3rem;
-    padding-right: 0.3rem;
-    font-size: 0.82rem;
-    font-variant-numeric: tabular-nums;
-  }
-  .dtr-records-table thead th:nth-child(6) {
-    white-space: normal;
-    line-height: 1.2;
-    font-size: 0.75rem;
-    font-weight: 600;
-    vertical-align: bottom;
-    padding-top: 0.35rem;
-    padding-bottom: 0.35rem;
-  }
-  .dtr-records-table thead th:nth-child(6) .dtr-th-sub {
-    display: inline-block;
-    font-weight: 600;
+  .dtr-accomplishment-readonly {
+    font-size: 0.8rem;
+    text-align: left;
     color: #4b5563;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
-  .dtr-records-table tbody td:nth-child(6) {
-    white-space: nowrap;
+  .dtr-jo-cos-accomplishment-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 0.75rem;
   }
-  /* Remarks — wider for REST DAY / notes */
-  .dtr-records-table th:nth-child(7),
-  .dtr-records-table td:nth-child(7) {
-    width: 36%;
-    min-width: 12rem;
+  .dtr-records-table tbody td:first-child { font-weight: 600; }
+  .dtr-records-table tbody td.dtr-col-remarks,
+  .dtr-records-table tbody td:nth-child(7) {
     text-align: left;
     word-wrap: break-word;
-    overflow-wrap: break-word;
   }
-  .dtr-records-table thead th:nth-child(7) { text-align: left; }
-  /* Flags */
-  .dtr-records-table th:nth-child(8),
-  .dtr-records-table td:nth-child(8) {
-    width: 8.5rem;
+  .dtr-records-table thead th.dtr-col-remarks { text-align: left; }
+  .dtr-th-lateut .dtr-th-main { display: block; font-weight: 600; }
+  .dtr-th-lateut .dtr-th-sub {
+    display: block;
+    font-size: 0.68rem;
+    font-weight: 500;
+    color: #6b7280;
+    margin-top: 0.1rem;
+  }
+  .dtr-records-table tbody td.dtr-col-lateut {
+    font-size: 0.82rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 
   .dtr-mini-stats {
@@ -106,31 +115,40 @@
   .dtr-mini-stat--neutral { border-left: 3px solid #9ca3af; }
 
   .dtr-filter-top {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .dtr-filter-grid {
     display: grid;
-    grid-template-columns: minmax(220px, 1fr) minmax(480px, 3fr);
-    gap: 4rem;
-    align-items: start;
+    grid-template-columns: minmax(220px, 300px) minmax(0, 1fr);
+    gap: 1.25rem 1.5rem;
+    align-items: end;
   }
   .dtr-filter-left {
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
-    max-width: 280px;
+    min-width: 0;
   }
   .dtr-filter-right {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: 0.75rem;
+    min-width: 0;
   }
   .dtr-filter-search label,
   .dtr-filter-employee-row label,
   .dtr-filter-strip label {
     margin-bottom: 0.35rem;
     display: block;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: #374151;
   }
   .dtr-filter-strip {
     display: grid;
-    grid-template-columns: repeat(4, minmax(100px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
     gap: 0.65rem;
     align-items: end;
   }
@@ -138,20 +156,49 @@
     display: flex;
     flex-direction: column;
     align-items: stretch;
+    min-width: 0;
   }
+  .dtr-filter-hint {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-left: 3px solid #013a63;
+    border-radius: 8px;
+    padding: 0.7rem 0.9rem;
+    font-size: 0.8125rem;
+    color: #475569;
+    line-height: 1.5;
+    margin: 0;
+  }
+  .dtr-filter-hint strong { color: #1e3a5f; }
   .dtr-filter-employee-row { margin-top: 0; }
-  .dtr-filter-actions {
+  .dtr-filter-footer {
     display: flex;
     flex-wrap: wrap;
     align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-top: 0.85rem;
+    border-top: 1px solid #e5e7eb;
+  }
+  .dtr-filter-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
     gap: 0.85rem;
   }
   @media (max-width: 900px) {
-    .dtr-filter-top {
+    .dtr-filter-grid {
       grid-template-columns: 1fr;
     }
     .dtr-filter-strip {
-      grid-template-columns: repeat(2, minmax(100px, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .dtr-filter-footer {
+      flex-direction: column;
+      align-items: stretch;
+    }
+    .dtr-mini-stats {
+      justify-content: center;
     }
   }
 
@@ -198,51 +245,29 @@
     line-height: 1.25;
   }
   .dtr-edit-del input { margin-right: 0.25rem; vertical-align: middle; }
+  .dtr-justify-link {
+    display: inline-block;
+    margin-top: 0.2rem;
+    font-size: 0.72rem;
+    color: #1d4ed8;
+    text-decoration: none;
+    font-weight: 600;
+  }
+  .dtr-justify-link:hover { text-decoration: underline; }
+  .dtr-period-banner {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 10px;
+    padding: 0.65rem 0.9rem;
+    margin-bottom: 1rem;
+    font-size: 0.85rem;
+    color: #1e3a5f;
+  }
 </style>
 {% endblock %}
 
-{% block content %}
-<div class="dashboard-container">
-  <div class="header-bar">
-    <div class="header-content">
-      {% include 'includes/navbar_brand.html' %}
-      <nav class="main-nav">
-        <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
-        <div class="nav-dropdown">
-          <a href="#" class="nav-link nav-link-active">Daily Time Records <span class="dropdown-arrow">▼</span></a>
-          <div class="dropdown-menu">
-            <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
-            {% include 'includes/nav_dtr_upload_link.html' %}
-            <a href="{{ url_for('routes.dtr_justifications') }}" class="dropdown-item">DTR Justifications</a>
-            {% include 'includes/nav_dtr_edit_link.html' %}
-            {% include 'includes/nav_dtr_regenerate_link.html' %}
-          </div>
-        </div>
-        <div class="nav-dropdown">
-          <a href="#" class="nav-link">ABOUT <span class="dropdown-arrow">▼</span></a>
-          <div class="dropdown-menu">
-            <a href="{{ url_for('routes.users_manual') }}" class="dropdown-item">User's Manual</a>
-            <a href="{{ url_for('routes.hrmdo_manual') }}" class="dropdown-item">HRMDO Manual</a>
-          </div>
-        </div>
-      </nav>
-      <div class="user-dropdown">
-        <a href="#" class="user-info">
-          {% if employee %}{{ employee.full_name }}{% else %}{{ current_user.username }}{% endif %} ({{ current_user.role|title }})
-          <span class="dropdown-arrow">▼</span>
-        </a>
-        <div class="dropdown-menu dropdown-menu-right">
-          <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
-          <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
-            <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
-          </form>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="dashboard-content">
-    {% with messages = get_flashed_messages(with_categories=true) %}
+{% block app_content %}
+{% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% for category, message in messages %}
           <div class="alert alert-{{ category }} alert-dismissible">
@@ -255,40 +280,130 @@
 
     <div class="page-header" style="display:flex; justify-content: space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap;">
       <div>
-        <h1 class="page-title" style="margin:0;">{% if dtr_edit_mode %}Edit DTR{% else %}Daily Time Records{% endif %}</h1>
+        <h1 class="page-title" style="margin:0;">{% if my_dtr_mode|default(false) %}My DTR{% elif dtr_edit_mode %}Edit remarks{% else %}Daily Time Records{% endif %}</h1>
         <p style="margin:0.25rem 0 0; color: var(--medium-gray, #666); font-size: 0.9rem;">
           Period: {{ start_d.strftime('%b %d, %Y') }} to {{ end_d.strftime('%b %d, %Y') }}
-          {% if dtr_edit_mode %}<span style="display:block;margin-top:0.35rem;color:#4338ca;font-weight:600;">HR/Admin edit mode — clear times and remarks and save to remove that day’s saved row, or tick “Remove saved row” to delete even if remarks remain.</span>{% endif %}
+          {% if dtr_edit_mode %}<span style="display:block;margin-top:0.35rem;color:#4338ca;font-weight:600;">Remarks only — punch times cannot be typed here. Use <strong>Multiple punches</strong> / <strong>Re-assign punches</strong> flags to assign or clear biometric timestamps.</span>{% endif %}
         </p>
       </div>
+      <div style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:flex-start;">
+        {% if selected_employee %}
+        <a href="{{ url_for('routes.dtr_records_print', employee_id=selected_employee.id, mode=mode, year=year, month=month, quincena=quincena, my=1 if my_dtr_mode|default(false) else 0) }}" class="btn-secondary" style="text-decoration:none;">{% if mode == 'month' %}Print monthly DTR{% else %}Print DTR{% endif %}</a>
+        {% if my_dtr_mode|default(false) and is_jo_cos_viewer|default(false) and accomplishment_export_allowed|default(false) %}
+        <a href="{{ url_for('routes.dtr_accomplishment_pdf', employee_id=selected_employee.id, mode=mode, year=year, month=month, quincena=quincena, my=1, inline=1) }}" class="btn-secondary" style="text-decoration:none;" target="_blank" rel="noopener">Print accomplishment report</a>
+        <a href="{{ url_for('routes.dtr_accomplishment_pdf', employee_id=selected_employee.id, mode=mode, year=year, month=month, quincena=quincena, my=1) }}" class="btn-secondary" style="text-decoration:none;">Export accomplishment PDF</a>
+        {% endif %}
+        {% endif %}
+        {% if my_dtr_mode|default(false) %}
+        <a href="{{ url_for('routes.dtr_justifications') }}" class="btn-secondary" style="text-decoration:none;">My justifications</a>
+        {% elif (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') and selected_employee and not dtr_edit_mode and not period_locked|default(false) %}
+        <a href="{{ url_for('routes.dtr_records', employee_id=selected_employee.id, month=month, year=year, mode=mode, quincena=quincena, edit=1) }}" class="btn-secondary" style="text-decoration:none;">Edit remarks</a>
+        {% endif %}
+      </div>
     </div>
+
+    {% if can_review_punch_flags|default(false) and selected_employee and not my_dtr_mode|default(false) %}
+    <div class="dtr-period-banner">
+      Punch times come from biometric upload and cannot be typed manually.
+      When a day shows <strong>Multiple punches</strong>, open that flag and assign the correct retained timestamp.
+      {% if summary.duplicate_punches|default(0) > 0 %}
+      · <strong>{{ summary.duplicate_punches }}</strong> day(s) need punch review in this period.
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if mode == 'quincena' and quincena_period %}
+    <div class="dtr-period-banner">
+      Quincena status: <strong>{{ period_status_label }}</strong>
+      {% if quincena_period.review_deadline %} · Review deadline: <strong>{{ quincena_period.review_deadline.strftime('%Y-%m-%d') }}</strong>{% endif %}
+      {% if period_locked|default(false) %} · <strong>Processed</strong> — contact HR to reopen before adjustments.{% elif my_dtr_mode|default(false) and can_submit_justification|default(true) %} · You may submit justifications for flagged days below.{% elif my_dtr_mode|default(false) %} · Review period closed for new justifications.{% endif %}
+    </div>
+    {% endif %}
+
+    {% if my_dtr_mode|default(false) and is_plantilla_viewer|default(false) and mode == 'month' and monthly_checklist %}
+    <div class="dtr-period-banner dtr-monthly-banner">
+      <strong>Monthly DTR submission</strong> — {{ monthly_checklist.submission_status_label }}
+      · Deadline: <strong>{{ monthly_checklist.deadline.strftime('%Y-%m-%d') }}</strong>
+      · 1st quincena: {{ monthly_checklist.q1_status }} · 2nd quincena: {{ monthly_checklist.q2_status }}
+      {% if monthly_checklist.unjustified_count > 0 %}
+      · <strong>{{ monthly_checklist.unjustified_count }} flagged day(s) need justification</strong>
+      {% else %}
+      · All flagged days have justifications
+      {% endif %}
+    </div>
+    {% if monthly_checklist.blockers and not monthly_checklist.can_submit %}
+    <div class="card" style="padding:0.85rem 1rem; margin-bottom:1rem; border-left:4px solid #f59e0b;">
+      <p style="margin:0; font-size:0.9rem;"><strong>Before you can submit monthly DTR:</strong></p>
+      <ul style="margin:0.35rem 0 0 1.1rem; font-size:0.88rem;">
+        {% for b in monthly_checklist.blockers %}
+        <li>{{ b }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  {% if monthly_checklist.can_submit %}
+    <form method="POST" action="{{ url_for('routes.dtr_monthly_submission_submit') }}" style="margin-bottom:1rem;">
+      <input type="hidden" name="year" value="{{ year }}">
+      <input type="hidden" name="month" value="{{ month }}">
+      <button type="submit" class="btn-primary" onclick="return confirm('Submit your monthly DTR for {{ start_d.strftime('%B %Y') }}? Make sure you have printed a copy for your records.');">Submit monthly DTR</button>
+      <span class="muted" style="margin-left:0.5rem; font-size:0.85rem;">Print your monthly DTR first, then submit to HR.</span>
+    </form>
+    {% endif %}
+    {% endif %}
 
     <div class="card" style="padding: 1rem 1.25rem; margin-bottom: 1rem;">
       <form method="GET" action="{{ url_for('routes.dtr_records') }}" id="dtrRecordsFilterForm">
         <div class="dtr-filter-top">
-          <div class="dtr-filter-left">
-            <div class="dtr-filter-search">
-              <label for="dtrEmployeeSearch">Search employees</label>
-              <input type="search" id="dtrEmployeeSearch" class="form-control" placeholder="Name or employee ID..." autocomplete="off" enterkeyhint="search">
+          <div class="dtr-filter-grid">
+            <div class="dtr-filter-left">
+              {% if not my_dtr_mode|default(false) %}
+              <div class="dtr-filter-search">
+                <label for="dtrEmployeeSearch">Search employees</label>
+                <input type="search" id="dtrEmployeeSearch" class="form-control" placeholder="Name or employee ID..." autocomplete="off" enterkeyhint="search">
+              </div>
+              <div class="dtr-filter-employee-row">
+                <label for="dtrEmployeeSelect">Employee</label>
+                <select name="employee_id" id="dtrEmployeeSelect" class="form-control">
+                  {% for emp in employees %}
+                    <option value="{{ emp.id }}" {% if selected_employee and selected_employee.id == emp.id %}selected{% endif %}>
+                      {{ emp.directory_name }} ({{ emp.employee_id }})
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+              {% else %}
+              <input type="hidden" name="my" value="1">
+              <input type="hidden" name="employee_id" value="{{ selected_employee.id if selected_employee else '' }}">
+              {% endif %}
             </div>
-            <div class="dtr-filter-employee-row">
-              <label for="dtrEmployeeSelect">Employee</label>
-              <select name="employee_id" id="dtrEmployeeSelect" class="form-control">
-                {% for emp in employees %}
-                  <option value="{{ emp.id }}" {% if selected_employee and selected_employee.id == emp.id %}selected{% endif %}>
-                    {{ emp.last_name }}, {{ emp.first_name }} ({{ emp.employee_id }})
-                  </option>
-                {% endfor %}
-              </select>
-            </div>
-          </div>
-          <div class="dtr-filter-right">
-            <div class="dtr-filter-strip">
+            <div class="dtr-filter-right">
+              <div class="dtr-filter-strip">
+              {% if my_dtr_mode|default(false) %}
               <div>
-                <label for="dtrModeSelect">Mode</label>
+                <label for="dtrModeSelect">View by</label>
                 <select name="mode" id="dtrModeSelect" class="form-control">
-                  <option value="month" {% if mode == 'month' %}selected{% endif %}>Month</option>
+                  <option value="quincena" {% if mode == 'quincena' %}selected{% endif %}>Quincena (half-month review)</option>
+                  {% if is_plantilla_viewer|default(false) %}
+                  <option value="month" {% if mode == 'month' %}selected{% endif %}>Month (monthly submission)</option>
+                  {% else %}
+                  <option value="month" {% if mode == 'month' %}selected{% endif %}>Month (full month)</option>
+                  {% endif %}
+                </select>
+              </div>
+              {% elif not my_dtr_mode|default(false) %}
+              <div>
+                <label for="dtrModeSelect">View by</label>
+                <select name="mode" id="dtrModeSelect" class="form-control">
+                  <option value="month" {% if mode == 'month' %}selected{% endif %}>Month (plantilla monthly printout)</option>
                   <option value="quincena" {% if mode == 'quincena' %}selected{% endif %}>Quincena</option>
+                </select>
+              </div>
+              {% endif %}
+              <div id="dtrQuincenaFilterWrap" {% if mode == 'month' %}style="display:none;"{% endif %}>
+                <label>Quincena</label>
+                <select name="quincena" id="dtrQuincenaSelect" class="form-control">
+                  <option value="1" {% if quincena == '1' %}selected{% endif %}>1st (1-15)</option>
+                  <option value="2" {% if quincena == '2' %}selected{% endif %}>2nd (16-end)</option>
                 </select>
               </div>
               <div>
@@ -309,21 +424,34 @@
                 </select>
               </div>
               <div>
-                <label>Quincena</label>
-                <select name="quincena" class="form-control">
-                  <option value="1" {% if quincena == '1' %}selected{% endif %}>1st (1-15)</option>
-                  <option value="2" {% if quincena == '2' %}selected{% endif %}>2nd (16-end)</option>
-                </select>
-              </div>
-              <div>
                 <label>Year</label>
                 <input type="number" min="2000" max="2100" name="year" value="{{ year }}" class="form-control">
               </div>
             </div>
+          </div>
+          </div>
+          {% if my_dtr_mode|default(false) and is_plantilla_viewer|default(false) and mode == 'month' %}
+          <p class="dtr-filter-hint">
+            Use <strong>Month</strong> to review the full calendar month, justify flagged days, print your monthly DTR, and submit to HR.
+            Use <strong>Quincena</strong> for half-month review after each biometric upload.
+          </p>
+          {% elif my_dtr_mode|default(false) and is_jo_cos_viewer|default(false) and mode == 'month' %}
+          <p class="dtr-filter-hint">
+            Use <strong>Month</strong> to review the full calendar month, enter accomplishment reports, and print your DTR.
+            Use <strong>Quincena</strong> for half-month review after each biometric upload.
+          </p>
+          {% elif not my_dtr_mode|default(false) %}
+          <p class="dtr-filter-hint">
+            <strong>Month</strong> — full-month DTR for plantilla monthly printouts and submission tracking.
+            <strong>Quincena</strong> — payroll-cycle review and duplicate-punch assignment. Punch times are not freely editable.
+          </p>
+          {% endif %}
+          <div class="dtr-filter-footer">
             <div class="dtr-filter-actions">
               {% if dtr_edit_mode %}<input type="hidden" name="edit" value="1">{% endif %}
               <button type="submit" class="btn-primary">Load DTR</button>
-              <div class="dtr-mini-stats">
+            </div>
+            <div class="dtr-mini-stats">
                 <div class="dtr-mini-stat dtr-mini-stat--warning">
                   <div class="dtr-mini-stat-label">Lates</div>
                   <div class="dtr-mini-stat-value">{{ summary.lates }}</div>
@@ -336,12 +464,33 @@
                   <div class="dtr-mini-stat-label">Absences</div>
                   <div class="dtr-mini-stat-value">{{ summary.absences }}</div>
                 </div>
+                {% if summary.duplicate_punches|default(0) > 0 %}
+                <div class="dtr-mini-stat dtr-mini-stat--warning">
+                  <div class="dtr-mini-stat-label">Multi punches</div>
+                  <div class="dtr-mini-stat-value">{{ summary.duplicate_punches }}</div>
+                </div>
+                {% endif %}
               </div>
-            </div>
           </div>
         </div>
       </form>
     </div>
+
+    {% if selected_employee and not dtr_edit_mode %}
+    <div class="dtr-print-bar" style="display:flex; justify-content:flex-end; align-items:center; gap:0.5rem; margin:0 0 0.75rem;">
+      <a href="{{ url_for('routes.dtr_records_print', employee_id=selected_employee.id, mode=mode, year=year, month=month, quincena=quincena, my=1 if my_dtr_mode|default(false) else 0) }}"
+         class="btn-primary"
+         style="text-decoration:none;">
+        {% if mode == 'month' %}Print monthly DTR{% else %}Print DTR{% endif %}
+      </a>
+    </div>
+    {% endif %}
+
+    {% if my_dtr_mode|default(false) and is_jo_cos_viewer|default(false) and not dtr_edit_mode %}
+    <p class="muted" style="margin:0 0 0.75rem; font-size:0.88rem;">
+      Enter your <strong>Accomplishment Report</strong> per day below. Print or export the accomplishment PDF after HR approves your DTR justification(s).
+    </p>
+    {% endif %}
 
     {% if dtr_edit_mode and selected_employee %}
     <form method="POST" action="{{ url_for('routes.dtr_records_save') }}" id="dtrSaveForm">
@@ -350,26 +499,51 @@
       <input type="hidden" name="year" value="{{ year }}">
       <input type="hidden" name="mode" value="{{ mode }}">
       <input type="hidden" name="quincena" value="{{ quincena }}">
+    {% elif my_dtr_mode|default(false) and is_jo_cos_viewer|default(false) and not dtr_edit_mode %}
+    <form method="POST" action="{{ url_for('routes.dtr_accomplishment_reports_save') }}" id="dtrAccomplishmentForm">
+      <input type="hidden" name="month" value="{{ month }}">
+      <input type="hidden" name="year" value="{{ year }}">
+      <input type="hidden" name="mode" value="{{ mode }}">
+      <input type="hidden" name="quincena" value="{{ quincena }}">
     {% endif %}
     <div class="card" style="padding: 1rem 1.25rem;">
       {% if dtr_edit_mode and selected_employee %}
       <div class="dtr-edit-actions">
-        <button type="submit" class="btn-primary">Save DTR changes</button>
-        <a href="{{ url_for('routes.dtr_records', employee_id=selected_employee.id, month=month, year=year, mode=mode, quincena=quincena) }}" class="btn-secondary" style="text-decoration:none;display:inline-block;padding:0.45rem 1rem;border:1px solid #d1d5db;border-radius:6px;color:#374151;background:#fff;">Exit edit mode</a>
+        <button type="submit" class="btn-primary">Save remarks</button>
+        <a href="{{ url_for('routes.dtr_records', employee_id=selected_employee.id, month=month, year=year, mode=mode, quincena=quincena) }}" class="btn-secondary" style="text-decoration:none;display:inline-block;padding:0.45rem 1rem;border:1px solid #d1d5db;border-radius:6px;color:#374151;background:#fff;">Exit remarks edit</a>
       </div>
       {% endif %}
       <div class="table-container">
         <table class="dtr-records-table">
+          <colgroup>
+            <col class="dtr-col-day">
+            <col class="dtr-col-time">
+            <col class="dtr-col-time">
+            <col class="dtr-col-time">
+            <col class="dtr-col-time">
+            <col class="dtr-col-lateut">
+            <col class="dtr-col-remarks">
+            <col class="dtr-col-flags">
+            {% if my_dtr_mode|default(false) and is_jo_cos_viewer|default(false) and not dtr_edit_mode %}
+            <col class="dtr-col-accomplishment">
+            {% endif %}
+          </colgroup>
           <thead>
             <tr>
-              <th>Day</th>
-              <th>AM In</th>
-              <th>AM Out</th>
-              <th>PM In</th>
-              <th>PM Out</th>
-              <th>Late/Undertime<br><span class="dtr-th-sub">(H/M)</span></th>
-              <th>Remarks</th>
-              <th>Flags</th>
+              <th scope="col" class="dtr-col-day">Day</th>
+              <th scope="col" class="dtr-col-time">CHECK-IN</th>
+              <th scope="col" class="dtr-col-time">BREAK-OUT</th>
+              <th scope="col" class="dtr-col-time">BREAK-IN</th>
+              <th scope="col" class="dtr-col-time">CHECK-OUT</th>
+              <th scope="col" class="dtr-col-lateut dtr-th-lateut" title="Late and undertime (hours : minutes)">
+                <span class="dtr-th-main">Late / UT</span>
+                <span class="dtr-th-sub">H : M</span>
+              </th>
+              <th scope="col" class="dtr-col-remarks">Remarks</th>
+              <th scope="col" class="dtr-col-flags">Flags</th>
+              {% if my_dtr_mode|default(false) and is_jo_cos_viewer|default(false) and not dtr_edit_mode %}
+              <th scope="col" class="dtr-col-accomplishment">Accomplishment Report</th>
+              {% endif %}
             </tr>
           </thead>
           <tbody>
@@ -377,82 +551,120 @@
             <tr>
               <td class="dtr-stamp-cell">
                 <strong>{{ r.date.day }}</strong>
-                {% if dtr_edit_mode and selected_employee and r.has_saved_row %}
-                <label class="dtr-edit-del"><input type="checkbox" name="del_{{ r.date.isoformat() }}" value="1"> Remove saved row</label>
-                {% endif %}
               </td>
-              {% if dtr_edit_mode and selected_employee %}
               <td class="dtr-stamp-cell">
-                <input class="form-control dtr-edit-time" type="time" step="60" name="t_{{ r.date.isoformat() }}_am_in" value="{% if r.am_in %}{{ r.am_in.strftime('%H:%M') }}{% endif %}">
+                {% if r.am_in %}{{ r.am_in|dtr_punch_time }}{% endif %}
                 {% if r.show_flexi_slots and r.sched_am_in %}<span class="dtr-flexi-slot" title="Expected (flexi)">{{ r.sched_am_in }}</span>{% endif %}
               </td>
               <td class="dtr-stamp-cell">
-                <input class="form-control dtr-edit-time" type="time" step="60" name="t_{{ r.date.isoformat() }}_am_out" value="{% if r.am_out %}{{ r.am_out.strftime('%H:%M') }}{% endif %}">
+                {% if r.am_out %}{{ r.am_out|dtr_punch_time }}{% endif %}
                 {% if r.show_flexi_slots and r.sched_am_out %}<span class="dtr-flexi-slot" title="Expected (flexi)">{{ r.sched_am_out }}</span>{% endif %}
               </td>
               <td class="dtr-stamp-cell">
-                <input class="form-control dtr-edit-time" type="time" step="60" name="t_{{ r.date.isoformat() }}_pm_in" value="{% if r.pm_in %}{{ r.pm_in.strftime('%H:%M') }}{% endif %}">
+                {% if r.pm_in %}{{ r.pm_in|dtr_punch_time }}{% endif %}
                 {% if r.show_flexi_slots and r.sched_pm_in %}<span class="dtr-flexi-slot" title="Expected (flexi)">{{ r.sched_pm_in }}</span>{% endif %}
               </td>
               <td class="dtr-stamp-cell">
-                <input class="form-control dtr-edit-time" type="time" step="60" name="t_{{ r.date.isoformat() }}_pm_out" value="{% if r.pm_out %}{{ r.pm_out.strftime('%H:%M') }}{% endif %}">
+                {% if r.pm_out %}{{ r.pm_out|dtr_punch_time }}{% endif %}
                 {% if r.show_flexi_slots and r.sched_pm_out %}<span class="dtr-flexi-slot" title="Expected (flexi)">{{ r.sched_pm_out }}</span>{% endif %}
               </td>
               <td>{{ r.undertime }}</td>
+              {% if dtr_edit_mode and selected_employee %}
               <td style="text-align:left;">
                 <input type="text" class="form-control dtr-edit-remarks" name="rem_{{ r.date.isoformat() }}" value="{{ r.stored_remarks }}" maxlength="100" placeholder="DB remarks (e.g. HOLIDAY, REST DAY)" title="Stored remarks on the DTR row">
               </td>
-              <td>
-                {% if r.show_flexi_slots %}
-                <span class="status-badge dtr-flexi-flag" title="{% if r.flexi_assigned and r.flexi_shift_code %}Shift {{ r.flexi_shift_code }} — late/undertime use this day’s flexi schedule{% elif r.flexi_assigned %}Flexi shift assigned — late/undertime use this day’s flexi schedule{% else %}Flexible worktime — expected times from employee defaults or calendar shift{% endif %}">Flexi{% if r.flexi_shift_code %} · {{ r.flexi_shift_code }}{% endif %}</span>
-                {% endif %}
-                {% if r.late %}<span class="status-badge status-pending">Late</span>{% endif %}
-                {% if r.undertime_flag %}<span class="status-badge status-pending">Undertime</span>{% endif %}
-                {% if r.absent %}<span class="status-badge status-rejected">Absent</span>{% endif %}
-                {% if r.has_justification %}<span class="status-badge status-approved">With Justification</span>{% endif %}
-              </td>
               {% else %}
-              <td class="dtr-stamp-cell">
-                {% if r.am_in %}{{ r.am_in.strftime('%I:%M %p') }}{% endif %}
-                {% if r.show_flexi_slots and r.sched_am_in %}<span class="dtr-flexi-slot" title="Expected (flexi)">{{ r.sched_am_in }}</span>{% endif %}
-              </td>
-              <td class="dtr-stamp-cell">
-                {% if r.am_out %}{{ r.am_out.strftime('%I:%M %p') }}{% endif %}
-                {% if r.show_flexi_slots and r.sched_am_out %}<span class="dtr-flexi-slot" title="Expected (flexi)">{{ r.sched_am_out }}</span>{% endif %}
-              </td>
-              <td class="dtr-stamp-cell">
-                {% if r.pm_in %}{{ r.pm_in.strftime('%I:%M %p') }}{% endif %}
-                {% if r.show_flexi_slots and r.sched_pm_in %}<span class="dtr-flexi-slot" title="Expected (flexi)">{{ r.sched_pm_in }}</span>{% endif %}
-              </td>
-              <td class="dtr-stamp-cell">
-                {% if r.pm_out %}{{ r.pm_out.strftime('%I:%M %p') }}{% endif %}
-                {% if r.show_flexi_slots and r.sched_pm_out %}<span class="dtr-flexi-slot" title="Expected (flexi)">{{ r.sched_pm_out }}</span>{% endif %}
-              </td>
-              <td>{{ r.undertime }}</td>
               <td>{{ r.remarks }}</td>
+              {% endif %}
               <td>
-                {% if r.show_flexi_slots %}
+                {% if r.flexi_rest_day|default(false) %}
+                <span class="status-badge dtr-flexi-flag" title="Flexible worktime — scheduled rest day">Rest</span>
+                {% elif r.show_flexi_slots %}
                 <span class="status-badge dtr-flexi-flag" title="{% if r.flexi_assigned and r.flexi_shift_code %}Shift {{ r.flexi_shift_code }} — late/undertime use this day’s flexi schedule{% elif r.flexi_assigned %}Flexi shift assigned — late/undertime use this day’s flexi schedule{% else %}Flexible worktime — expected times from employee defaults or calendar shift{% endif %}">Flexi{% if r.flexi_shift_code %} · {{ r.flexi_shift_code }}{% endif %}</span>
                 {% endif %}
                 {% if r.late %}<span class="status-badge status-pending">Late</span>{% endif %}
                 {% if r.undertime_flag %}<span class="status-badge status-pending">Undertime</span>{% endif %}
                 {% if r.absent %}<span class="status-badge status-rejected">Absent</span>{% endif %}
-                {% if r.has_justification %}<span class="status-badge status-approved">With Justification</span>{% endif %}
+                {% if r.has_duplicate_punches|default(false) %}
+                {% if r.duplicate_punch_batch_id and can_review_punch_flags|default(false) %}
+                <a class="status-badge status-pending" style="text-decoration:none;" href="{{ url_for('routes.dtr_upload_punch_flags', batch_id=r.duplicate_punch_batch_id, status=r.duplicate_punch_review_status|default('open'), employee_id=selected_employee.employee_id if selected_employee else None) }}" title="{{ r.duplicate_punch_slots|join(', ') }}">{% if r.duplicate_punch_review_status|default('open') == 'resolved' %}Re-assign punches{% else %}Multiple punches{% endif %}</a>
+                {% else %}
+                <span class="status-badge status-pending" title="{{ r.duplicate_punch_slots|join(', ') }}">Multiple punches</span>
+                {% endif %}
+                {% endif %}
+                {% if r.has_justification %}
+                <span class="status-badge status-approved">Justified{% if r.justification_status %} ({{ r.justification_status|title }}){% endif %}</span>
+                {% elif r.is_flagged and my_dtr_mode|default(false) and r.can_justify|default(false) %}
+                <a class="dtr-justify-link" href="{{ url_for('routes.dtr_my_records', year=year, month=month, mode=mode, quincena=quincena, justify_date=r.date.isoformat()) }}">Justify this day</a>
+                {% endif %}
+              </td>
+              {% if my_dtr_mode|default(false) and is_jo_cos_viewer|default(false) and not dtr_edit_mode %}
+              <td class="dtr-col-accomplishment">
+                <textarea class="form-control dtr-accomplishment-input" name="accomplishment_{{ r.date.isoformat() }}" rows="2" maxlength="2000" placeholder="Describe work accomplished">{{ r.accomplishment_text|default('') }}</textarea>
               </td>
               {% endif %}
             </tr>
             {% else %}
-            <tr><td colspan="8" class="no-data">No DTR records for selected period.</td></tr>
+            <tr><td colspan="{% if my_dtr_mode|default(false) and is_jo_cos_viewer|default(false) and not dtr_edit_mode %}9{% else %}8{% endif %}" class="no-data">No DTR records for selected period.</td></tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
+      {% if my_dtr_mode|default(false) and is_jo_cos_viewer|default(false) and not dtr_edit_mode %}
+      <div class="dtr-jo-cos-accomplishment-actions">
+        <button type="submit" class="btn-primary" form="dtrAccomplishmentForm">Save accomplishment reports</button>
+        {% if accomplishment_export_allowed|default(false) %}
+        <span class="muted" style="font-size:0.85rem;">Approved justification(s) found — use Print or Export PDF above.</span>
+        {% else %}
+        <span class="muted" style="font-size:0.85rem;">Print/export unlocks after HR approves your justification(s).</span>
+        {% endif %}
+      </div>
+      {% endif %}
     </div>
     {% if dtr_edit_mode and selected_employee %}
     </form>
+    {% elif my_dtr_mode|default(false) and is_jo_cos_viewer|default(false) and not dtr_edit_mode %}
+    </form>
     {% endif %}
-  </div>
-</div>
+
+    {% if my_dtr_mode|default(false) and justify_date and justify_date_allowed|default(false) %}
+    <div id="dtrJustifyModal" class="change-password-modal-overlay" style="display:flex;">
+      <div class="change-password-modal-dialog" style="max-width: 28rem;">
+        <div class="change-password-modal-header">
+          <h2 class="change-password-modal-title">Justify DTR — {{ justify_date }}</h2>
+          <a href="{{ url_for('routes.dtr_my_records', year=year, month=month, mode=mode, quincena=quincena) }}" class="change-password-modal-close" style="text-decoration:none;">&times;</a>
+        </div>
+        <form method="POST" action="{{ url_for('routes.dtr_justifications') }}" enctype="multipart/form-data" id="dtrJustifyForm">
+          <div class="change-password-modal-body">
+            <input type="hidden" name="record_date" value="{{ justify_date }}">
+            <input type="hidden" name="justify_mode" value="{{ mode }}">
+            <input type="hidden" name="justify_quincena" value="{{ quincena }}">
+            <div class="form-group">
+              <label for="justify_reason_category">Reason</label>
+              <select id="justify_reason_category" name="reason_category" class="form-control" required>
+                <option value="">Select reason…</option>
+                {% for opt in dtr_justification_reasons %}
+                <option value="{{ opt }}">{{ opt }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="form-group" id="justifyReasonOtherWrap" hidden>
+              <label for="justify_reason_other">Please specify (Others)</label>
+              <textarea id="justify_reason_other" name="reason_other" class="form-control" rows="3" maxlength="500" placeholder="Describe the reason for this justification"></textarea>
+            </div>
+            <div class="form-group">
+              <label for="justify_attachment">Attachment (optional)</label>
+              <input type="file" id="justify_attachment" name="attachment" class="form-control" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx">
+            </div>
+          </div>
+          <div class="change-password-modal-footer" style="display:flex; gap:0.5rem; justify-content:flex-end; padding:0 1rem 1rem;">
+            <a href="{{ url_for('routes.dtr_my_records', year=year, month=month, mode=mode, quincena=quincena) }}" class="btn-secondary" style="text-decoration:none;">Cancel</a>
+            <button type="submit" class="btn-primary">Submit justification</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    {% endif %}
 {% endblock %}
 
 {% block extra_js %}
@@ -484,6 +696,51 @@
 
     search.addEventListener('input', applyEmployeeFilter);
     search.addEventListener('search', applyEmployeeFilter);
+
+    var modeSelect = document.getElementById('dtrModeSelect');
+    var quincenaWrap = document.getElementById('dtrQuincenaFilterWrap');
+    function syncDtrViewModeFields() {
+      if (!modeSelect || !quincenaWrap) return;
+      quincenaWrap.style.display = modeSelect.value === 'quincena' ? '' : 'none';
+    }
+    if (modeSelect) {
+      modeSelect.addEventListener('change', syncDtrViewModeFields);
+      syncDtrViewModeFields();
+    }
+
+    var reasonSelect = document.getElementById('justify_reason_category');
+    var reasonOtherWrap = document.getElementById('justifyReasonOtherWrap');
+    var reasonOther = document.getElementById('justify_reason_other');
+    var justifyForm = document.getElementById('dtrJustifyForm');
+    var othersValue = {{ (dtr_justification_reason_others or 'Others')|tojson }};
+
+    function syncJustifyReasonOther() {
+      if (!reasonSelect || !reasonOtherWrap || !reasonOther) return;
+      var isOthers = reasonSelect.value === othersValue;
+      reasonOtherWrap.hidden = !isOthers;
+      reasonOther.required = isOthers;
+      if (!isOthers) {
+        reasonOther.value = '';
+      }
+    }
+
+    if (reasonSelect) {
+      reasonSelect.addEventListener('change', syncJustifyReasonOther);
+      syncJustifyReasonOther();
+    }
+
+    if (justifyForm) {
+      justifyForm.addEventListener('submit', function (e) {
+        if (reasonSelect && reasonSelect.value === othersValue) {
+          if (!reasonOther || !(reasonOther.value || '').trim()) {
+            e.preventDefault();
+            reasonOtherWrap.hidden = false;
+            reasonOther.required = true;
+            reasonOther.focus();
+          }
+        }
+      });
+    }
   });
 })();
 </script>

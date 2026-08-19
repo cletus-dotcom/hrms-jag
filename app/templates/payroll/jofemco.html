@@ -1,0 +1,525 @@
+{% extends "layouts/app.html" %}
+
+{% block title %}JOFEMCO - HRMS{% endblock %}
+
+{% set navbar_title = 'JOFEMCO' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Payroll'},
+    {'label': 'Deductions'},
+    {'label': 'JOFEMCO'}
+] %}
+
+{% block extra_css %}
+<style>
+  .jofemco-filters {
+    display: grid;
+    gap: 0.75rem;
+    column-gap: 1.25rem;
+    align-items: end;
+    margin-top: 1rem;
+  }
+  @media (min-width: 900px) {
+    .jofemco-filters {
+      grid-template-columns: 6rem 9rem auto minmax(16rem, 1fr);
+    }
+  }
+  .jofemco-note {
+    color: var(--medium-gray, #6b7280);
+    font-size: 0.95rem;
+    margin-top: 0.75rem;
+  }
+  .jofemco-submit-bar {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    justify-content: flex-end;
+    margin-top: 1rem;
+    flex-wrap: wrap;
+  }
+  .jofemco-table th, .jofemco-table td { white-space: nowrap; }
+  .jofemco-table-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+    margin-bottom: 0.75rem;
+  }
+  .jofemco-table-toolbar .search-bar {
+    flex: 1 1 220px;
+    max-width: 360px;
+    margin: 0;
+  }
+  .jofemco-upload-zone {
+    border: 2px dashed #cbd5e1;
+    border-radius: 10px;
+    padding: 1.25rem;
+    text-align: center;
+    background: #fafafa;
+  }
+  .jofemco-loading-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10500;
+    background: rgba(15, 23, 42, 0.45);
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+  }
+  .jofemco-loading-overlay.is-visible { display: flex; }
+  .jofemco-loading-card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 1.5rem 1.75rem;
+    text-align: center;
+    max-width: 22rem;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+  }
+  .jofemco-loading-spinner {
+    width: 2.25rem;
+    height: 2.25rem;
+    margin: 0 auto 0.85rem;
+    border: 3px solid #e5e7eb;
+    border-top-color: #1e40af;
+    border-radius: 50%;
+    animation: jofemco-spin 0.75s linear infinite;
+  }
+  @keyframes jofemco-spin { to { transform: rotate(360deg); } }
+  .jofemco-q-cell { min-width: 9.5rem; }
+  .jofemco-q-cell label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; margin-bottom: 0.35rem; }
+  #jofemcoDeductionTable td.num .jofemco-month-amount {
+    width: 7rem;
+    min-width: 7rem;
+    text-align: right;
+  }
+  #jofemcoDeductionTable .jofemco-amount {
+    text-align: right;
+  }
+  .jofemco-remove {
+    background: none;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #b91c1c;
+    padding: 0.3rem 0.55rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.8rem;
+  }
+  .jofemco-unmatched { color: #b45309; }
+  .jofemco-row-clickable { cursor: pointer; }
+  .jofemco-row-clickable:hover { background-color: rgba(18, 64, 114, 0.04); }
+  .jofemco-deduction-row.is-expanded { background-color: rgba(18, 64, 114, 0.06); }
+  .jofemco-billing-label { font-weight: 600; color: var(--brand-blue-ink, #1e3a5f); }
+  .jofemco-details-row td.jofemco-details-cell {
+    background: #f8fafc;
+    padding: 0.65rem 1rem 0.85rem 2.25rem;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .jofemco-details-panel {
+    display: inline-block;
+    min-width: 14rem;
+  }
+  .jofemco-details-panel-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--medium-gray, #6b7280);
+    margin: 0 0 0.4rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .jofemco-details-table {
+    width: auto;
+    border-collapse: collapse;
+  }
+  .jofemco-details-table td {
+    padding: 0.25rem 0.75rem 0.25rem 0;
+    font-size: 0.9rem;
+    border: none;
+  }
+  .jofemco-details-table td.num {
+    text-align: right;
+    padding-right: 0;
+    font-variant-numeric: tabular-nums;
+  }
+</style>
+{% endblock %}
+
+{% block app_content %}
+<div class="page-header" style="align-items: center;">
+      <div>
+        <h1 class="page-title">JOFEMCO</h1>
+      </div>
+      <a href="{{ url_for('routes.dashboard') }}" class="btn-secondary">Dashboard</a>
+    </div>
+
+    <section class="card" style="padding: 1rem 1.25rem; border: 1px solid var(--brand-border, #e5e7eb); border-radius: 12px;">
+      <h2 style="margin: 0 0 0.35rem; font-size: 1.05rem;">Billing</h2>
+
+      {% if show_upload %}
+      <p class="jofemco-note" style="margin-top: 0;">
+        <a href="{{ url_for('routes.payroll_deductions_jofemco', loan_view='load') }}">← Back to load deductions</a>
+      </p>
+      <div class="jofemco-upload-zone" style="margin-top: 0.75rem;">
+        <p class="jofemco-note" style="margin-top: 0;">Upload the monthly JOFEMCO schedule file (.xls/.xlsx). <strong>Employee No./ID</strong> is matched to employee <strong>Emp ID</strong>; period is read from <strong>PERCOV</strong>. Parses <strong>LOAN Q1</strong>, <strong>LOAN Q2</strong>, <strong>CANTEEN Q1</strong>, and <strong>CANTEEN Q2</strong>.</p>
+        <input type="file" id="jofemcoFileInput" accept=".xls,.xlsx" style="display:none;">
+        <button type="button" class="btn-primary" id="jofemcoUploadBtn">Upload</button>
+      </div>
+
+      <div id="jofemcoPreviewWrap" style="display:none; margin-top: 1rem;">
+        <p class="jofemco-note" id="jofemcoPreviewMeta"></p>
+        <div class="table-container" style="overflow-x:auto; margin-top: 0.75rem;">
+          <table class="data-table jofemco-table" id="jofemcoPreviewTable">
+            <thead>
+              <tr>
+                <th>Employee No.</th>
+                <th>Emp ID</th>
+                <th>Employee</th>
+                <th>Department</th>
+                <th>PERCOV</th>
+                <th class="num">LOAN Q1</th>
+                <th class="num">LOAN Q2</th>
+                <th class="num">CANTEEN Q1</th>
+                <th class="num">CANTEEN Q2</th>
+                <th class="num">Total</th>
+              </tr>
+            </thead>
+            <tbody id="jofemcoPreviewBody"></tbody>
+          </table>
+        </div>
+        <form method="POST" action="{{ url_for('routes.payroll_deductions_jofemco_upload_submit') }}" id="jofemcoUploadSubmitForm" style="margin-top: 1rem;">
+          <input type="hidden" name="year" id="jofemcoUploadYear" value="">
+          <input type="hidden" name="month" id="jofemcoUploadMonth" value="">
+          <input type="hidden" name="rows_json" id="jofemcoUploadRowsJson" value="[]">
+          <button type="submit" class="btn-primary" id="jofemcoUploadSubmitBtn" disabled>Submit</button>
+        </form>
+      </div>
+      {% else %}
+
+      <div id="jofemcoLoadCard" style="margin-top: 1rem;">
+        <p class="jofemco-note" style="margin-top: 0;">
+          {% if has_billing_data %}
+          Billing data is on file. Load deductions by period below, or
+          <a href="{{ url_for('routes.payroll_deductions_jofemco', loan_view='upload') }}">upload a new file</a>.
+          {% else %}
+          Load deductions by period below, or
+          <a href="{{ url_for('routes.payroll_deductions_jofemco', loan_view='upload') }}">upload a JOFEMCO billing file</a> first.
+          {% endif %}
+        </p>
+        <form method="GET" action="{{ url_for('routes.payroll_deductions_jofemco') }}" class="jofemco-filters" id="jofemcoLoadForm">
+          <input type="hidden" name="loan_view" value="load">
+          <div>
+            <label class="form-label" for="jofemcoYear">Year</label>
+            <input id="jofemcoYear" name="year" class="form-control" value="{{ year }}" />
+          </div>
+          <div>
+            <label class="form-label" for="jofemcoMonth">Month</label>
+            <select id="jofemcoMonth" name="month" class="form-control">
+              {% for m in range(1, 13) %}
+                <option value="{{ m }}" {% if m == month %}selected{% endif %}>{{ ['January','February','March','April','May','June','July','August','September','October','November','December'][m-1] }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <input type="hidden" name="loan_load" value="1" />
+            <button class="btn-primary" type="submit">Load</button>
+          </div>
+          <div>
+            <label class="form-label" for="jofemcoDept">Department (optional)</label>
+            <select id="jofemcoDept" name="department_id" class="form-control">
+              <option value="">All departments</option>
+              {% for d in departments %}
+                <option value="{{ d.id }}" {% if selected_department and d.id == selected_department.id %}selected{% endif %}>{{ d.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </form>
+
+        {% if billing_loaded %}
+        {% if not billing_rows %}
+          <p class="jofemco-note" style="margin-top: 0.75rem;">No plantilla employees with JOFEMCO billing data found for the selected scope.</p>
+        {% else %}
+        <form method="POST" action="{{ url_for('routes.payroll_deductions_jofemco_deductions_submit') }}" id="jofemcoDeductionForm" style="margin-top: 1rem;">
+          <input type="hidden" name="year" value="{{ year }}">
+          <input type="hidden" name="month" value="{{ month }}">
+          <input type="hidden" name="department_id" value="{{ selected_department.id if selected_department else '' }}">
+          <input type="hidden" name="rows_json" id="jofemcoDeductionRowsJson" value="[]">
+
+          <div class="jofemco-table-toolbar">
+            <div class="search-bar">
+              <input type="text" id="jofemcoEmployeeSearch" class="search-input" placeholder="Search employees…" autocomplete="off">
+              <span class="search-icon">🔍</span>
+            </div>
+            <span style="font-size: 0.85rem; color: var(--medium-gray);"><strong id="jofemcoRowCount">{{ billing_rows|length }}</strong> employee(s)</span>
+          </div>
+
+          <div class="table-container" style="overflow-x:auto;">
+            <table class="data-table jofemco-table" id="jofemcoDeductionTable">
+              <thead>
+                <tr>
+                  <th>Emp ID</th>
+                  <th>Employee</th>
+                  <th>Department</th>
+                  <th>Billing</th>
+                  <th class="num">Month Amount</th>
+                  <th>Deductible on</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="jofemcoDeductionBody">
+                {% for r in billing_rows %}
+                <tr class="jofemco-deduction-row jofemco-row-clickable"
+                    data-employee-pk="{{ r.employee_pk }}"
+                    data-search="{{ r.search_text }}"
+                    title="Click row to expand billing details">
+                  <td>{{ r.employee_id }}</td>
+                  <td>{{ r.employee_name }}</td>
+                  <td>{{ r.department_name }}</td>
+                  <td><span class="jofemco-billing-label">{{ r.billing_label }}</span></td>
+                  <td class="num">
+                    <input type="text" inputmode="decimal" autocomplete="off" class="form-control jofemco-amount jofemco-month-amount" value="{{ r.month_amount }}">
+                  </td>
+                  <td class="jofemco-q-cell">
+                    <label><input type="checkbox" class="jofemco-q1-enabled" {% if r.q1_enabled %}checked{% endif %}> 1st quincena</label>
+                    <input type="text" inputmode="decimal" autocomplete="off" class="form-control jofemco-amount jofemco-q1-amount" value="{{ r.q1_amount }}">
+                    <label style="margin-top:0.45rem;"><input type="checkbox" class="jofemco-q2-enabled" {% if r.q2_enabled %}checked{% endif %}> 2nd quincena</label>
+                    <input type="text" inputmode="decimal" autocomplete="off" class="form-control jofemco-amount jofemco-q2-amount" value="{{ r.q2_amount }}">
+                  </td>
+                  <td><button type="button" class="jofemco-remove">Remove</button></td>
+                </tr>
+                <tr class="jofemco-details-row" style="display:none;" data-parent-pk="{{ r.employee_pk }}">
+                  <td colspan="7" class="jofemco-details-cell">
+                    <div class="jofemco-details-panel">
+                      <p class="jofemco-details-panel-title">Billing breakdown{% if r.percov %} (PERCOV {{ r.percov }}){% endif %}</p>
+                      <table class="jofemco-details-table">
+                        <tbody>
+                          {% for d in r.billing_details %}
+                          <tr>
+                            <td>{{ d.label }}</td>
+                            <td class="num">{{ d.amount_display }}</td>
+                          </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                    </div>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <p id="jofemcoSearchNoMatch" style="display:none; margin-top:0.75rem; color:var(--medium-gray); font-size:0.9rem;">No rows match your search.</p>
+          <div class="jofemco-submit-bar">
+            <button type="submit" class="btn-primary">Submit</button>
+          </div>
+        </form>
+        {% endif %}
+        {% elif has_billing_data %}
+        <p class="jofemco-note" style="margin-top: 0.75rem;">Select year and month, then click <strong>Load</strong>.</p>
+        {% endif %}
+      </div>
+      {% endif %}
+    </section>
+
+    <div id="jofemcoLoadingOverlay" class="jofemco-loading-overlay" aria-live="polite" aria-busy="true">
+      <div class="jofemco-loading-card">
+        <div class="jofemco-loading-spinner" aria-hidden="true"></div>
+        <p style="margin:0; font-weight:600;">Reading file in progress. Please wait a moment.</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  function parseMoney(str) {
+    var n = parseFloat(String(str || '0').replace(/,/g, ''));
+    return isNaN(n) ? 0 : n;
+  }
+  function formatMoney(n) {
+    return parseMoney(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  function moneyRaw(n) {
+    return parseMoney(n).toFixed(2);
+  }
+
+  function splitQuincena(monthAmount) {
+    var m = parseMoney(monthAmount);
+    if (m <= 0) return { q1: '0.00', q2: '0.00' };
+    var q2 = Math.floor((m / 2) * 100) / 100;
+    var q1 = Math.round((m - q2) * 100) / 100;
+    return { q1: formatMoney(q1), q2: formatMoney(q2) };
+  }
+
+  function applySplitToRow(tr) {
+    var monthInp = tr.querySelector('.jofemco-month-amount');
+    var q1Inp = tr.querySelector('.jofemco-q1-amount');
+    var q2Inp = tr.querySelector('.jofemco-q2-amount');
+    if (!monthInp || !q1Inp || !q2Inp) return;
+    var parts = splitQuincena(monthInp.value);
+    q1Inp.value = parts.q1;
+    q2Inp.value = parts.q2;
+  }
+
+  var overlay = document.getElementById('jofemcoLoadingOverlay');
+  var uploadBtn = document.getElementById('jofemcoUploadBtn');
+  var fileInput = document.getElementById('jofemcoFileInput');
+  var previewWrap = document.getElementById('jofemcoPreviewWrap');
+  var previewBody = document.getElementById('jofemcoPreviewBody');
+  var previewMeta = document.getElementById('jofemcoPreviewMeta');
+  var uploadSubmitBtn = document.getElementById('jofemcoUploadSubmitBtn');
+  var uploadRowsJson = document.getElementById('jofemcoUploadRowsJson');
+  var uploadYear = document.getElementById('jofemcoUploadYear');
+  var uploadMonth = document.getElementById('jofemcoUploadMonth');
+  var previewData = [];
+
+  if (uploadBtn && fileInput) {
+    uploadBtn.addEventListener('click', function () { fileInput.click(); });
+    fileInput.addEventListener('change', function () {
+      if (!fileInput.files || !fileInput.files[0]) return;
+      var fd = new FormData();
+      fd.append('jofemco_billing_file', fileInput.files[0]);
+      if (overlay) overlay.classList.add('is-visible');
+      fetch('{{ url_for("routes.payroll_deductions_jofemco_preview") }}', {
+        method: 'POST',
+        body: fd,
+        credentials: 'same-origin'
+      }).then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (overlay) overlay.classList.remove('is-visible');
+          if (!data.ok) {
+            alert(data.error || 'Failed to read file.');
+            return;
+          }
+          previewData = data.rows || [];
+          if (uploadYear) uploadYear.value = data.year;
+          if (uploadMonth) uploadMonth.value = data.month;
+          if (previewMeta) {
+            previewMeta.textContent = 'PERCOV period: ' + data.month + '/' + data.year
+              + ' — matched ' + data.matched_count + ' of ' + data.total_count
+              + ' row(s). Unmatched employee numbers are shown but not submitted.';
+          }
+          if (previewBody) {
+            previewBody.innerHTML = '';
+            previewData.forEach(function (r) {
+              var tr = document.createElement('tr');
+              if (!r.matched) tr.className = 'jofemco-unmatched';
+              var cols = ['employee_no','employee_id','employee_name','department_name','percov','loan_q1_display','loan_q2_display','canteen_q1_display','canteen_q2_display','total_display'];
+              cols.forEach(function (c) {
+                var td = document.createElement('td');
+                td.textContent = r[c] || (c === 'employee_name' && !r.matched ? '(unmatched)' : '');
+                if (c.indexOf('_display') > 0 || c === 'employee_no' || c === 'percov') td.className = 'num';
+                tr.appendChild(td);
+              });
+              previewBody.appendChild(tr);
+            });
+          }
+          if (previewWrap) previewWrap.style.display = '';
+          if (uploadSubmitBtn) uploadSubmitBtn.disabled = !(data.matched_count > 0);
+        })
+        .catch(function () {
+          if (overlay) overlay.classList.remove('is-visible');
+          alert('Failed to read file.');
+        });
+    });
+  }
+
+  var uploadForm = document.getElementById('jofemcoUploadSubmitForm');
+  if (uploadForm && uploadRowsJson) {
+    uploadForm.addEventListener('submit', function () {
+      var matched = previewData.filter(function (r) { return r.matched && r.employee_pk; });
+      uploadRowsJson.value = JSON.stringify(matched);
+    });
+  }
+
+  var body = document.getElementById('jofemcoDeductionBody');
+  if (body) {
+    function detailsRow(tr) {
+      var next = tr.nextElementSibling;
+      return (next && next.classList.contains('jofemco-details-row')) ? next : null;
+    }
+
+    function toggleDetails(tr) {
+      var detailRow = detailsRow(tr);
+      if (!detailRow) return;
+      var expanded = !tr.classList.contains('is-expanded');
+      tr.classList.toggle('is-expanded', expanded);
+      detailRow.style.display = expanded ? '' : 'none';
+    }
+
+    body.addEventListener('click', function (e) {
+      if (e.target.classList.contains('jofemco-remove')) {
+        var tr = e.target.closest('tr.jofemco-deduction-row');
+        if (!tr) return;
+        var detailRow = detailsRow(tr);
+        if (detailRow) detailRow.remove();
+        tr.remove();
+        filterRows();
+        return;
+      }
+      if (e.target.closest('input, button, label, select, a')) return;
+      var tr = e.target.closest('tr.jofemco-deduction-row');
+      if (tr) toggleDetails(tr);
+    });
+    body.addEventListener('input', function (e) {
+      var tr = e.target.closest('tr.jofemco-deduction-row');
+      if (!tr) return;
+      if (e.target.classList.contains('jofemco-month-amount')) {
+        applySplitToRow(tr);
+      }
+    });
+    body.addEventListener('blur', function (e) {
+      if (!e.target.classList.contains('jofemco-amount')) return;
+      e.target.value = formatMoney(e.target.value);
+    }, true);
+  }
+
+  function filterRows() {
+    var inp = document.getElementById('jofemcoEmployeeSearch');
+    var tbody = document.getElementById('jofemcoDeductionBody');
+    if (!inp || !tbody) return;
+    var q = (inp.value || '').trim().toLowerCase();
+    var shown = 0;
+    tbody.querySelectorAll('tr.jofemco-deduction-row').forEach(function (tr) {
+      var hay = tr.getAttribute('data-search') || '';
+      var ok = !q || hay.indexOf(q) !== -1;
+      tr.style.display = ok ? '' : 'none';
+      var detailRow = tr.nextElementSibling;
+      if (detailRow && detailRow.classList.contains('jofemco-details-row')) {
+        detailRow.style.display = (ok && tr.classList.contains('is-expanded')) ? '' : 'none';
+      }
+      if (ok) shown++;
+    });
+    var countEl = document.getElementById('jofemcoRowCount');
+    if (countEl) countEl.textContent = String(shown);
+    var noMatch = document.getElementById('jofemcoSearchNoMatch');
+    if (noMatch) noMatch.style.display = (q && shown === 0) ? 'block' : 'none';
+  }
+  var searchInp = document.getElementById('jofemcoEmployeeSearch');
+  if (searchInp) searchInp.addEventListener('input', filterRows);
+
+  var dedForm = document.getElementById('jofemcoDeductionForm');
+  var dedOut = document.getElementById('jofemcoDeductionRowsJson');
+  if (dedForm && dedOut) {
+    dedForm.addEventListener('submit', function () {
+      var rows = [];
+      document.querySelectorAll('#jofemcoDeductionBody tr.jofemco-deduction-row').forEach(function (tr) {
+        var monthInp = tr.querySelector('.jofemco-month-amount');
+        if (!monthInp) return;
+        rows.push({
+          employee_pk: tr.getAttribute('data-employee-pk'),
+          month_amount: moneyRaw(monthInp.value),
+          q1_amount: moneyRaw((tr.querySelector('.jofemco-q1-amount') || {}).value),
+          q2_amount: moneyRaw((tr.querySelector('.jofemco-q2-amount') || {}).value),
+          q1_enabled: (tr.querySelector('.jofemco-q1-enabled') || {}).checked ? '1' : '0',
+          q2_enabled: (tr.querySelector('.jofemco-q2-enabled') || {}).checked ? '1' : '0'
+        });
+      });
+      dedOut.value = JSON.stringify(rows);
+    });
+  }
+})();
+</script>
+{% endblock %}

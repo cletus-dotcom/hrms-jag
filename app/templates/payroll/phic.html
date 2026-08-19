@@ -1,6 +1,14 @@
-{% extends "base.html" %}
+{% extends "layouts/app.html" %}
 
 {% block title %}PHIC - HRMS{% endblock %}
+
+{% set navbar_title = 'PhilHealth' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Payroll'},
+    {'label': 'Deductions'},
+    {'label': 'PhilHealth'}
+] %}
 
 {% block extra_css %}
 <style>
@@ -56,31 +64,8 @@
 </style>
 {% endblock %}
 
-{% block content %}
-<div class="dashboard-container">
-  <div class="header-bar">
-    <div class="header-content">
-      {% include 'includes/navbar_brand.html' %}
-      <nav class="main-nav">
-        <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
-        {% include 'includes/nav_payroll_top_menu.html' %}
-      </nav>
-      <div class="user-dropdown">
-        <a href="#" class="user-info">
-          {% if employee %}{{ employee.full_name }} ({{ current_user.role|title }}){% else %}{{ current_user.username }} ({{ current_user.role|title }}){% endif %}
-          <span class="dropdown-arrow">▼</span>
-        </a>
-        <div class="dropdown-menu dropdown-menu-right">
-          <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
-            <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
-          </form>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="dashboard-content">
-    <div class="page-header" style="align-items: center;">
+{% block app_content %}
+<div class="page-header" style="align-items: center;">
       <div>
         <h1 class="page-title">PHIC</h1>
       </div>
@@ -90,9 +75,12 @@
     <section class="card" style="padding: 1rem 1.25rem; border: 1px solid var(--brand-border, #e5e7eb); border-radius: 12px;">
       <h2 style="margin: 0 0 0.35rem; font-size: 1.05rem;">Contribution</h2>
       <div class="phic-note">
-        Computes PS and GS from plantilla basic salary: salary below ₱10,000 = <strong>₱250.00</strong>;
-        salary from ₱10,000 to ₱100,000 = <strong>2.5%</strong>; salary above ₱100,000 = <strong>₱2,500.00</strong> fixed.
-        GS is shown for reference only; the <strong>month amount</strong> deducted on the <strong>2nd quincena</strong> is <strong>PS</strong> (employee share) only.
+        Computes PS and GS from plantilla basic salary using the 5% PhilHealth premium
+        (salary below ₱10,000 = <strong>₱500.00</strong> total; ₱10,000–₱100,000 = <strong>5%</strong>;
+        above ₱100,000 = <strong>₱5,000.00</strong> total), then splits EE/ER equally.
+        If the premium does not divide evenly to the centavo, <strong>GS gets the extra centavo</strong>
+        (e.g. PS 854.42 / GS 854.43). GS is for reporting; the <strong>month amount</strong>
+        deducted on the <strong>2nd quincena</strong> is <strong>PS</strong> only.
       </div>
 
       <form method="GET" action="{{ url_for('routes.payroll_deductions_phic') }}" class="phic-filters">

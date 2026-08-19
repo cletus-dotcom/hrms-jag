@@ -1,38 +1,352 @@
-{% extends "base.html" %}
+{% extends "layouts/app.html" %}
 
 {% block title %}Plantilla Payroll - HRMS{% endblock %}
 
-{% block content %}
-<div class="dashboard-container">
-    <div class="header-bar">
-        <div class="header-content">
-            {% include 'includes/navbar_brand.html' %}
-            <nav class="main-nav">
-                <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
-                {% include 'includes/nav_payroll_top_menu.html' %}
-            </nav>
-            <div class="user-dropdown">
-                <a href="#" class="user-info">
-                    {% if employee %}{{ employee.full_name }} ({{ current_user.role|title }}){% else %}{{ current_user.username }} ({{ current_user.role|title }}){% endif %}
-                    <span class="dropdown-arrow">▼</span>
-                </a>
-                <div class="dropdown-menu dropdown-menu-right">
-                    <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
-                        <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
-                    </form>
-                </div>
+{% set navbar_title = 'Plantilla Payroll' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Payroll'},
+    {'label': 'Plantilla Payroll'}
+] %}
+
+{% block extra_css %}
+<style>
+  .plantilla-payroll-wrap { overflow-x: auto; }
+  .plantilla-payroll-table {
+    font-size: 0.72rem;
+    min-width: 1740px;
+    border-collapse: collapse;
+    border: 1px solid rgba(1, 58, 99, 0.14);
+  }
+
+  /* Dark header band — override app-pages .data-table th (must beat light-theme rules) */
+  .app-main-content .data-table.plantilla-payroll-table thead {
+    background: linear-gradient(135deg, var(--brand-blue-dark, #012d4d) 0%, var(--primary-blue, #013a63) 100%);
+    color: #fff;
+  }
+  .app-main-content .data-table.plantilla-payroll-table thead th {
+    background: linear-gradient(135deg, var(--brand-blue-dark, #012d4d) 0%, var(--primary-blue, #013a63) 100%);
+    color: #fff;
+    vertical-align: middle;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-align: center;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    padding: 0.4rem 0.35rem;
+    white-space: nowrap;
+  }
+  .app-main-content .data-table.plantilla-payroll-table thead th.plantilla-head-fixed.num {
+    text-align: right;
+  }
+  .app-main-content .data-table.plantilla-payroll-table thead th.deductions-top {
+    font-weight: 800;
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+  }
+  .app-main-content .data-table.plantilla-payroll-table thead th.deductions-section,
+  .app-main-content .data-table.plantilla-payroll-table thead th.deductions-section-first,
+  .app-main-content .data-table.plantilla-payroll-table thead th.gov-share-section,
+  .app-main-content .data-table.plantilla-payroll-table thead th.deductions-field,
+  .app-main-content .data-table.plantilla-payroll-table thead th.deductions-loan-group,
+  .app-main-content .data-table.plantilla-payroll-table thead th.deductions-loan-col {
+    background: linear-gradient(135deg, var(--brand-blue-dark, #012d4d) 0%, var(--primary-blue, #013a63) 100%);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.22);
+  }
+  .app-main-content .data-table.plantilla-payroll-table thead th.deductions-loan-group {
+    font-size: 0.64rem;
+    font-weight: 700;
+  }
+  .app-main-content .data-table.plantilla-payroll-table thead th.deductions-loan-col {
+    font-size: 0.62rem;
+    font-weight: 600;
+    line-height: 1.2;
+    text-transform: none;
+    letter-spacing: 0.02em;
+  }
+  .app-main-content .plantilla-payroll-table th,
+  .app-main-content .plantilla-payroll-table td {
+    white-space: nowrap;
+    padding: 0.35rem 0.4rem;
+  }
+  .app-main-content .plantilla-payroll-table tbody td {
+    border: 1px solid #eef2f7;
+    color: var(--text-dark, #1d2d44);
+  }
+  .app-main-content .plantilla-payroll-table th.num { text-align: right; }
+  .app-main-content .plantilla-payroll-table td.num { text-align: right; }
+  .app-main-content .plantilla-payroll-table td.num-center { text-align: center; }
+  .app-main-content .plantilla-payroll-table td.name-col {
+    min-width: 9rem;
+    max-width: 12rem;
+    white-space: normal;
+  }
+  .app-main-content .plantilla-payroll-table tbody tr:hover {
+    background: rgba(42, 111, 151, 0.04);
+  }
+  .plantilla-payroll-filters {
+    display: grid;
+    gap: 0.75rem;
+    align-items: end;
+  }
+  @media (min-width: 900px) {
+    .plantilla-payroll-filters {
+      grid-template-columns: 5.25rem minmax(6.5rem, 7.5rem) minmax(8.5rem, 9.5rem) minmax(12rem, 1fr) auto;
+    }
+  }
+  @media (max-width: 899px) {
+    .plantilla-payroll-filters {
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    }
+  }
+  .plantilla-payroll-header {
+    text-align: center;
+    margin-bottom: 1rem;
+    padding: 1rem;
+    border: 1px solid var(--brand-border, rgba(1, 58, 99, 0.14));
+    border-radius: 8px;
+    background: linear-gradient(180deg, #fafcfe 0%, #f4f8fc 100%);
+  }
+  .plantilla-payroll-header h2 {
+    margin: 0 0 0.35rem;
+    font-size: 1.2rem;
+    letter-spacing: 0.04em;
+    color: var(--primary-blue, #013a63);
+  }
+  .plantilla-payroll-header p { margin: 0.2rem 0; font-size: 0.85rem; color: var(--medium-gray, #6b7280); }
+  .plantilla-payroll-totals td { font-weight: 600; border-top: 2px solid var(--brand-border, #e5e7eb); }
+  .plantilla-payroll-toolbar {
+    display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-left: auto;
+  }
+</style>
+{% endblock %}
+
+{% block app_content %}
+{% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible">
+                        <span>{{ message }}</span>
+                        <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="page-header" style="flex-wrap: wrap; gap: 0.75rem;">
+            <h1 class="page-title">Plantilla Payroll</h1>
+            <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                <a href="{{ url_for('routes.payroll_worktime_summary', employee_type='plantilla') }}" class="btn-secondary">Worktime Summary</a>
+                <a href="{{ url_for('routes.payroll_jo_cos') }}" class="btn-secondary">JO/COS Payroll</a>
+                <a href="{{ url_for('routes.dashboard') }}" class="btn-secondary">Dashboard</a>
             </div>
         </div>
-    </div>
 
-    <div class="dashboard-content">
-        <div class="page-header">
-            <h1 class="page-title">Plantilla Payroll</h1>
-            <a href="{{ url_for('routes.dashboard') }}" class="btn-secondary">Dashboard</a>
-        </div>
-        <p style="color: var(--medium-gray); font-size: 0.95rem;">
-            Plantilla payroll view is not yet available. Use <a href="{{ url_for('routes.payroll_worktime_summary', employee_type='plantilla') }}">Worktime Summary</a> for plantilla worktime totals, or <a href="{{ url_for('routes.payroll_jo_cos') }}">JO/COS Payroll</a> for daily wage employees.
+        <p style="color: var(--medium-gray); margin-bottom: 1rem; font-size: 0.9rem;">
+            Municipal payroll for plantilla employees. Monthly rate comes from <strong>Salary Grade</strong> (step on employee record). Deduction columns shown match the selected quincena — only items scheduled or uploaded for that period (1st or 2nd) appear.
         </p>
+
+        <div class="table-section" style="margin-bottom: 1rem;">
+            <form method="GET" action="{{ url_for('routes.payroll_plantilla') }}" class="form-section" style="padding: 1rem 1.25rem; border: 1px solid var(--brand-border, #e5e7eb); border-radius: 8px;">
+                <input type="hidden" name="load" value="1">
+                <div class="plantilla-payroll-filters">
+                    <div class="form-group" style="margin: 0;">
+                        <label for="year">Year</label>
+                        <input type="number" name="year" id="year" class="form-control" min="2000" max="2100" value="{{ filters.year }}" required>
+                    </div>
+                    <div class="form-group" style="margin: 0;">
+                        <label for="month">Month</label>
+                        <select name="month" id="month" class="form-control" required>
+                            {% set month_names = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] %}
+                            {% for m in range(1, 13) %}
+                            <option value="{{ m }}" {% if filters.month == m %}selected{% endif %}>{{ '%02d'|format(m) }} {{ month_names[m] }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin: 0;">
+                        <label for="quincena">Quincena</label>
+                        <select name="quincena" id="quincena" class="form-control" required>
+                            <option value="1" {% if filters.quincena == '1' %}selected{% endif %}>1st (1–15)</option>
+                            <option value="2" {% if filters.quincena == '2' %}selected{% endif %}>2nd (16–end)</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin: 0;">
+                        <label for="department_id">Department</label>
+                        <select name="department_id" id="department_id" class="form-control" required>
+                            <option value="" disabled {% if not filters.department_id %}selected{% endif %}>Select department…</option>
+                            {% for d in departments %}
+                            <option value="{{ d.id }}" {% if filters.department_id|string == d.id|string %}selected{% endif %}>{{ d.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin: 0; display: flex; align-items: flex-end;">
+                        <button type="submit" class="btn-primary" style="white-space: nowrap; width: 100%;">Load Payroll</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        {% if dept_selected %}
+        <div class="table-section">
+            <div class="search-bar" style="flex-wrap: wrap; margin-bottom: 0.75rem;">
+                <input type="text" id="plantillaPayrollSearch" class="search-input" placeholder="Search employees…" style="min-width: 220px;" autocomplete="off">
+                <span class="search-icon">🔍</span>
+                <div class="plantilla-payroll-toolbar">
+                    <span style="font-size: 0.85rem; color: var(--medium-gray);"><strong>{{ row_count }}</strong> employee(s)</span>
+                    {% if rows %}
+                    <form method="POST" action="{{ url_for('routes.payroll_plantilla_payslips_generate') }}" style="margin: 0;">
+                        <input type="hidden" name="year" value="{{ filters.year }}">
+                        <input type="hidden" name="month" value="{{ filters.month }}">
+                        <input type="hidden" name="quincena" value="{{ filters.quincena }}">
+                        <input type="hidden" name="department_id" value="{{ filters.department_id }}">
+                        <button type="submit" class="btn-primary">Generate Payslip</button>
+                    </form>
+                    <a class="btn-secondary" href="{{ url_for('routes.payroll_plantilla_export', format='pdf', year=filters.year, month=filters.month, quincena=filters.quincena, department_id=filters.department_id, load=1) }}">Export PDF</a>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="plantilla-payroll-header">
+                <h2>MUNICIPAL PAYROLL</h2>
+                <p>Republic of the Philippines · Province of Bohol · Municipality of Jagna</p>
+                <p><strong>{{ department_name }}</strong></p>
+                <p>Period of service: <strong>{{ service_period }}</strong></p>
+                <p>Payroll period: <strong>{{ period_label }}</strong></p>
+            </div>
+
+            <div class="table-container plantilla-payroll-wrap">
+                <table class="data-table plantilla-payroll-table" id="plantillaPayrollTable">
+                    <thead>
+                        <tr>
+                            <th rowspan="4" class="plantilla-head-fixed">No.</th>
+                            <th rowspan="4" class="plantilla-head-fixed">Name of Employee</th>
+                            <th rowspan="4" class="plantilla-head-fixed num">Monthly<br>Rate</th>
+                            <th rowspan="4" class="plantilla-head-fixed num">Amount<br>Accrued</th>
+                            {% if deduction_col_count > 0 %}
+                            <th colspan="{{ deduction_col_count }}" class="deductions-top">Deductions</th>
+                            {% else %}
+                            <th rowspan="4" class="deductions-top">Deductions</th>
+                            {% endif %}
+                            <th rowspan="4" class="plantilla-head-fixed num">Amount Paid<br>in Cash</th>
+                            {% if gov_share_col_count > 0 %}
+                            <th colspan="{{ gov_share_col_count }}" class="deductions-top gov-share-section">Gov't Share</th>
+                            {% else %}
+                            <th rowspan="4" class="deductions-top gov-share-section">Gov't Share</th>
+                            {% endif %}
+                        </tr>
+                        {% if deduction_col_count > 0 or gov_share_col_count > 0 %}
+                        <tr>
+                            {% for sec in deduction_sections %}
+                            {% if sec.standalone_header %}
+                            <th rowspan="3" class="deductions-section deductions-field{% if loop.first %} deductions-section-first{% endif %}">{{ sec.label }}</th>
+                            {% else %}
+                            <th colspan="{{ sec.colspan }}" class="deductions-section{% if loop.first %} deductions-section-first{% endif %}">{{ sec.label }}</th>
+                            {% endif %}
+                            {% endfor %}
+                            {% for sec in gov_share_sections %}
+                            <th colspan="{{ sec.colspan }}" class="deductions-section gov-share-section{% if deduction_col_count == 0 and loop.first %} deductions-section-first{% endif %}">{{ sec.label }}</th>
+                            {% endfor %}
+                        </tr>
+                        <tr>
+                            {% for sec in deduction_sections %}
+                            {% if not sec.standalone_header %}
+                                {% for part in sec.parts %}
+                                    {% if part.type == 'column' %}
+                                    <th rowspan="2" class="deductions-field">{% if part.label %}{{ part.label }}{% else %}&nbsp;{% endif %}</th>
+                                    {% elif part.type == 'loan_group' %}
+                                    <th colspan="{{ part.columns|length }}" class="deductions-loan-group">{{ part.group_label }}</th>
+                                    {% endif %}
+                                {% endfor %}
+                            {% endif %}
+                            {% endfor %}
+                            {% for sec in gov_share_sections %}
+                                {% for part in sec.parts %}
+                                    {% if part.type == 'column' %}
+                                    <th rowspan="2" class="deductions-field">{{ part.label }}</th>
+                                    {% endif %}
+                                {% endfor %}
+                            {% endfor %}
+                        </tr>
+                        <tr>
+                            {% for sec in deduction_sections %}
+                            {% if not sec.standalone_header %}
+                                {% for part in sec.parts %}
+                                    {% if part.type == 'loan_group' %}
+                                        {% for key, label in part.columns %}
+                                        <th class="deductions-loan-col">{{ label }}</th>
+                                        {% endfor %}
+                                    {% endif %}
+                                {% endfor %}
+                            {% endif %}
+                            {% endfor %}
+                        </tr>
+                        {% endif %}
+                    </thead>
+                    <tbody id="plantillaPayrollBody">
+                        {% for r in rows %}
+                        <tr class="table-row" data-search="{{ r.search_text }}">
+                            <td class="num-center">{{ r.row_no }}</td>
+                            <td class="name-col">{{ r.employee_name }}</td>
+                            <td class="num">{{ r.monthly_rate_display }}</td>
+                            <td class="num">{{ r.accrued_display }}</td>
+                            {% for key in display_deduction_keys %}
+                            <td class="num">{{ r['ded_' ~ key ~ '_display'] }}</td>
+                            {% endfor %}
+                            <td class="num">{{ r.net_amount_display }}</td>
+                            {% for key in display_gov_share_keys %}
+                            <td class="num">{{ r['gov_' ~ key ~ '_display'] }}</td>
+                            {% endfor %}
+                        </tr>
+                        {% else %}
+                        <tr id="plantillaPayrollEmpty">
+                            <td colspan="{{ 5 + (deduction_col_count if deduction_col_count > 0 else 1) + (gov_share_col_count if gov_share_col_count > 0 else 1) }}" class="no-data">No active plantilla employees in this department. Ensure salary grade/step is set on employee records and deduction schedules are saved.</td>
+                        </tr>
+                        {% endfor %}
+                        {% if rows %}
+                        <tr class="plantilla-payroll-totals">
+                            <td colspan="2"><strong>TOTAL</strong></td>
+                            <td class="num">{{ totals.monthly_rate }}</td>
+                            <td class="num">{{ totals.accrued }}</td>
+                            {% for key in display_deduction_keys %}
+                            <td class="num">{{ totals['ded_' ~ key] }}</td>
+                            {% endfor %}
+                            <td class="num">{{ totals.net_amount }}</td>
+                            {% for key in display_gov_share_keys %}
+                            <td class="num">{{ totals['gov_' ~ key] }}</td>
+                            {% endfor %}
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+            <p id="plantillaPayrollNoMatch" style="display: none; margin-top: 0.75rem; color: var(--medium-gray); font-size: 0.9rem;">No rows match your search.</p>
+        </div>
+        {% endif %}
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var inp = document.getElementById('plantillaPayrollSearch');
+    var body = document.getElementById('plantillaPayrollBody');
+    if (!inp || !body) return;
+    inp.addEventListener('input', function () {
+        var q = (inp.value || '').trim().toLowerCase();
+        var rows = body.querySelectorAll('tr.table-row');
+        var shown = 0;
+        rows.forEach(function (tr) {
+            var hay = tr.getAttribute('data-search') || '';
+            var ok = !q || hay.indexOf(q) !== -1;
+            tr.style.display = ok ? '' : 'none';
+            if (ok) shown++;
+        });
+        var noMatch = document.getElementById('plantillaPayrollNoMatch');
+        if (noMatch) noMatch.style.display = (q && shown === 0) ? 'block' : 'none';
+    });
+})();
+</script>
 {% endblock %}

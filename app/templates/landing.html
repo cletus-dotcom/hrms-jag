@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
-{% block title %}HRMDO System — Human Resource Management and Development Office{% endblock %}
+{% block title %}{{ site_branding.portal_name if site_branding and site_branding.portal_name else 'HRMDO Portal' }} — {{ site_branding.org_name if site_branding and site_branding.org_name else 'Human Resource Management and Development Office' }}{% endblock %}
+{% block body_class %}has-app-navbar{% endblock %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/landing.css') }}">
@@ -9,7 +10,21 @@
 {% block content %}
 <div class="landing-page">
     <a class="landing-skip-link" href="#main-content">Skip to content</a>
-    {% include 'includes/public_nav.html' %}
+
+    <!-- Growth Pulse startup splash -->
+    {% if landing_cms.splash.enabled %}
+    <div id="growth-pulse-splash" class="growth-pulse-splash" aria-hidden="true" data-duration="{{ landing_cms.splash.duration_ms }}">
+        <div class="growth-pulse-splash-inner">
+            <img src="{{ site_logo_url }}" alt="" class="growth-pulse-logo" width="220" height="220" decoding="async">
+            {% if landing_cms.splash.show_tagline and landing_cms.splash.tagline %}
+            <p class="growth-pulse-tagline">{{ landing_cms.splash.tagline }}</p>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    {% set navbar_show_landing_login = true %}
+    {% include 'includes/app_navbar.html' %}
 
     {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
@@ -28,33 +43,91 @@
         <section class="landing-hero" aria-labelledby="landing-hero-title">
             <div class="landing-hero-inner">
                 <div class="landing-hero-copy">
-                    <h1 id="landing-hero-title" class="landing-hero-title">HRMDO System</h1>
-                    <p class="landing-hero-sub">Human resource management and development office</p>
-                    <div class="landing-hero-progs" aria-label="Related programs">
-                        <a class="landing-prog-btn" href="{{ url_for('routes.login') }}" title="Sign in to Human Resource Management System">
-                            <span class="landing-prog-btn-title">HRMS</span>
-                            <span class="landing-prog-btn-sub">Human Resource Management System</span>
-                        </a>
-                        <a class="landing-prog-btn" href="http://192.168.20.20:8040/" target="_blank" rel="noopener noreferrer" title="Open Computer Based Assessment Tool">
-                            <span class="landing-prog-btn-title">CBAT</span>
-                            <span class="landing-prog-btn-sub">Computer Based Assessment Tool</span>
-                        </a>
-                        <a class="landing-prog-btn" href="https://jagna.hrisbohol.com/" target="_blank" rel="noopener noreferrer" title="Open Human Resource Information System">
-                            <span class="landing-prog-btn-title">HRIS</span>
-                            <span class="landing-prog-btn-sub">Human Resource Information System</span>
-                        </a>
+                    <h1 id="landing-hero-title" class="landing-hero-title">
+                        <span class="landing-hero-title-primary">{{ landing_cms.hero.title_primary }}</span>
+                        <span class="landing-hero-title-secondary">{{ landing_cms.hero.title_secondary }}</span>
+                    </h1>
+                    <p class="landing-hero-sub">{{ landing_cms.hero.subtitle }}</p>
+                    <div class="landing-hero-cta">
+                        <a href="{{ url_for('routes.login') }}" class="landing-btn-primary">{{ landing_cms.hero.cta_label }}</a>
                     </div>
+                    <nav class="landing-hero-related" aria-label="Related systems">
+                        {% for link in landing_cms.hero.related_links %}
+                        {% if not loop.first %}<span aria-hidden="true">·</span>{% endif %}
+                        {% if link.external %}
+                        <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer">{{ link.label }}</a>
+                        {% elif link.url.startswith('/') %}
+                        <a href="{{ link.url }}">{{ link.label }}</a>
+                        {% else %}
+                        <a href="{{ link.url }}">{{ link.label }}</a>
+                        {% endif %}
+                        {% endfor %}
+                    </nav>
                 </div>
-                <div class="landing-hero-visual">
-                    <div class="landing-hero-badge" aria-hidden="true">
-                        <img src="{{ url_for('static', filename='hrmdo_logo_transparent.png') }}" alt="HRMDO Jagna seal" class="landing-hero-seal" width="420" height="420" decoding="async">
+                <div class="landing-hero-visual" aria-hidden="true">
+                    <div class="landing-hero-medallion">
+                        <img src="{{ site_logo_url }}?v=seal4" alt="" class="landing-hero-logo" width="280" height="280" decoding="async">
                     </div>
                 </div>
             </div>
         </section>
 
+        {% if landing_cms.carousel.enabled and landing_cms.carousel.slides %}
+        <section class="landing-notice-carousel" aria-label="{{ landing_cms.carousel.section_label }}" data-interval="{{ landing_cms.carousel.interval_ms }}">
+            <div class="landing-section-inner">
+                <div class="landing-carousel-viewport">
+                    {% for slide in landing_cms.carousel.slides %}
+                    <article class="landing-carousel-slide{% if loop.first %} is-active{% endif %}" data-index="{{ loop.index0 }}"{% if not loop.first %} hidden{% endif %}>
+                        <h2 class="landing-carousel-title">{{ slide.title }}</h2>
+                        <p class="landing-carousel-text">{{ slide.text }}</p>
+                        {% if slide.link_url and slide.link_label %}
+                        <a href="{{ slide.link_url }}" class="landing-carousel-link">{{ slide.link_label }}</a>
+                        {% endif %}
+                    </article>
+                    {% endfor %}
+                </div>
+                {% if landing_cms.carousel.slides|length > 1 %}
+                <div class="landing-carousel-controls" role="tablist" aria-label="Carousel slides">
+                    {% for slide in landing_cms.carousel.slides %}
+                    <button type="button" class="landing-carousel-dot{% if loop.first %} is-active{% endif %}" role="tab" aria-selected="{{ 'true' if loop.first else 'false' }}" aria-label="Slide {{ loop.index }}: {{ slide.title }}" data-index="{{ loop.index0 }}"></button>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+        </section>
+        {% endif %}
+
+        <section id="services" class="landing-services" aria-labelledby="landing-services-heading">
+            <div class="landing-section-inner">
+                <h2 id="landing-services-heading" class="landing-section-title">{{ landing_cms.services.section_title }}</h2>
+                <p class="landing-section-lead">{{ landing_cms.services.section_lead }}</p>
+                <div class="landing-services-grid">
+                    {% for card in landing_cms.services.cards %}
+                    <article class="service-card">
+                        <div class="service-card-icon" aria-hidden="true">
+                            {% from 'includes/service_icons.html' import service_icon %}
+                            {{ service_icon(card.icon) }}
+                        </div>
+                        <h3 class="service-card-title">{{ card.title }}</h3>
+                        <p class="service-card-text">{{ card.text }}</p>
+                    </article>
+                    {% endfor %}
+                </div>
+            </div>
+        </section>
+
+        <section id="mission" class="landing-mission" aria-labelledby="landing-mission-heading">
+            <div class="landing-section-inner landing-mission-inner">
+                <h2 id="landing-mission-heading" class="landing-mission-title">{{ landing_cms.mission.title }}</h2>
+                <p class="landing-mission-text">{{ landing_cms.mission.text }}</p>
+            </div>
+        </section>
+
         <section class="landing-stats" aria-labelledby="landing-stats-heading">
-            <h2 id="landing-stats-heading" class="visually-hidden">Key figures</h2>
+            <div class="landing-section-inner">
+                <h2 id="landing-stats-heading" class="landing-section-title">{{ landing_cms.stats.section_title }}</h2>
+                <p class="landing-section-lead">{{ landing_cms.stats.section_lead }}</p>
+            </div>
             <div class="landing-stats-grid">
                 <article class="landing-stat-card landing-stat-card--span2">
                     <div class="landing-stat-value">{{ stats.employees }}</div>
@@ -69,7 +142,7 @@
                     <p class="landing-stat-label">
                         APPROVED LEAVE FOR THIS MONTH
                         {% if on_leave and ('week_start' in on_leave) and ('week_end' in on_leave) and on_leave['week_start'] and on_leave['week_end'] %}
-                        <br><span style="font-weight: 600; font-size: 0.92em; opacity: 0.9;">
+                        <br><span class="landing-stat-sublabel">
                           {{ on_leave['week_start'].strftime('%b %d') }}–{{ on_leave['week_end'].strftime('%b %d') }}
                         </span>
                         {% endif %}
@@ -172,28 +245,29 @@
     <footer class="landing-footer" role="contentinfo">
         <div class="landing-footer-inner">
             <div>
-                <h2>Republic of the Philippines</h2>
-                <p>All content is in the public domain unless otherwise stated.</p>
-                <p>Official Philippine government information and services may be accessed through the national portal.</p>
+                <h2>{{ landing_cms.footer.column1_title }}</h2>
+                {% for line in landing_cms.footer.column1_lines %}
+                <p>{{ line }}</p>
+                {% endfor %}
                 <ul class="landing-footer-links">
-                    <li><a href="https://www.gov.ph/" target="_blank" rel="noopener noreferrer">Gov.ph</a></li>
-                    <li><a href="https://data.gov.ph/" target="_blank" rel="noopener noreferrer">Open Data</a></li>
-                    <li><a href="https://www.foi.gov.ph/" target="_blank" rel="noopener noreferrer">Freedom of Information</a></li>
-                    <li><a href="https://www.officialgazette.gov.ph/" target="_blank" rel="noopener noreferrer">Official Gazette</a></li>
+                    {% for link in landing_cms.footer.gov_links %}
+                    <li><a href="{{ link.url }}" target="_blank" rel="noopener noreferrer">{{ link.label }}</a></li>
+                    {% endfor %}
                 </ul>
             </div>
             <div>
-                <h2>Transparency</h2>
-                <p>This portal supports internal human resource processes of the local government unit. Published figures are aggregate system indicators and may be updated without prior notice.</p>
-                <p>For concerns on data privacy, refer to the <a href="https://privacy.gov.ph/" target="_blank" rel="noopener noreferrer">National Privacy Commission (NPC)</a> and applicable issuances of the <a href="https://www.dilg.gov.ph/" target="_blank" rel="noopener noreferrer">Department of the Interior and Local Government (DILG)</a>.</p>
+                <h2>{{ landing_cms.footer.column2_title }}</h2>
+                {% for para in landing_cms.footer.column2_paragraphs %}
+                <p>{{ para }}</p>
+                {% endfor %}
             </div>
-            <div class="landing-footer-seal-col" aria-label="Municipality of Jagna, Bohol">
-                <img src="{{ url_for('static', filename='jagna_logo.png') }}" alt="Jagna, Bohol seal" class="landing-footer-seal" width="120" height="120" decoding="async">
-                <p class="landing-footer-seal-text">Municipality of Jagna, Bohol</p>
-                <p class="landing-footer-seal-subtext">© 2026 All rights reserved.</p>
+            <div class="landing-footer-seal-col" aria-label="{{ landing_cms.footer.seal_caption }}">
+                <img src="{{ site_seal_url }}" alt="{{ landing_cms.footer.seal_caption }} seal" class="landing-footer-seal" width="120" height="120" decoding="async">
+                <p class="landing-footer-seal-text">{{ landing_cms.footer.seal_caption }}</p>
+                <p class="landing-footer-seal-subtext">{{ landing_cms.footer.copyright }}</p>
             </div>
             <p class="landing-footer-disclaimer">
-                This application is operated for official LGU business. Unauthorized access or misuse is subject to administrative and criminal penalties under applicable laws. Some features require authentication; contact your HRMDO for access.
+                {{ landing_cms.footer.disclaimer }}
             </p>
         </div>
     </footer>

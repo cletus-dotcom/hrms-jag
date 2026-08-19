@@ -58,7 +58,13 @@ class Employee(db.Model):
     residential_province = db.Column(db.String(100))
     residential_zip_code = db.Column(db.String(10))
     address = db.Column(db.Text)  # Keep for backward compatibility
-    status = db.Column(db.String(20), default='active')  # active, on_leave, terminated
+    # Employment status (matches TBGP-style canonical states)
+    # active: currently employed/serving
+    # inactive: temporarily not active (e.g., on extended leave; not separated)
+    # separated: no longer connected to the organization (requires separation fields)
+    status = db.Column(db.String(20), default='active')  # active, inactive, separated
+    separation_date = db.Column(db.Date, nullable=True)
+    separation_type = db.Column(db.String(60), nullable=True)  # EMPLOYEE_SEPARATION_TYPES
     # Salary / LGU fields (Agency is derived from department but can be stored)
     agency = db.Column(db.String(50), nullable=True)  # Local / National (set from department)
     lgu_class_level = db.Column(db.String(20), nullable=True)  # 1st, 2nd, 3rd, 4th, 5th, 6th
@@ -68,21 +74,100 @@ class Employee(db.Model):
     flexible_worktime = db.Column(db.Boolean, default=False, nullable=False)
     flexible_start_time = db.Column(db.Time, nullable=True)
     flexible_end_time = db.Column(db.Time, nullable=True)
+    # Active ID photo: eRMT record whose pdf_link points to a NAS/local image
+    id_photo_ermt_record_id = db.Column(
+        db.Integer, db.ForeignKey('ermt_records.id', ondelete='SET NULL'), nullable=True
+    )
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
     jo_cos_designation = db.relationship('JoCosDesignation', backref='employees')
     department = db.relationship('Department', foreign_keys=[department_id], backref='employees')
+    id_photo_ermt_record = db.relationship(
+        'ErmtRecord', foreign_keys=[id_photo_ermt_record_id], post_update=True
+    )
     attendance_records = db.relationship('Attendance', backref='employee', lazy='dynamic')
     leave_requests = db.relationship('LeaveRequest', backref='employee', lazy='dynamic')
-    
+
+    @staticmethod
+    def normalize_name_extension(raw) -> str:
+        """Return a clean name extension, ignoring empty / placeholder values."""
+        ext = (raw or '').strip()
+        if not ext:
+            return ''
+        if ext.lower() in ('none', 'n/a', 'na', '-', '.', 'null'):
+            return ''
+        return ext
+
+    @property
+    def name_extension(self) -> str:
+        """PDS name extension (JR., SR., III, etc.), if any."""
+        pds = getattr(self, 'pds', None)
+        return self.normalize_name_extension(
+            getattr(pds, 'name_extension', None) if pds is not None else None
+        )
+
     @property
     def full_name(self):
-        if self.middle_name:
-            return f"{self.first_name} {self.middle_name} {self.last_name}"
-        return f"{self.first_name} {self.last_name}"
-    
+        """Given-name order: First [Middle] Last [Extension]."""
+        parts = []
+        first = (self.first_name or '').strip()
+        middle = (self.middle_name or '').strip()
+        last = (self.last_name or '').strip()
+        ext = self.name_extension
+        if first:
+            parts.append(first)
+        if middle:
+            parts.append(middle)
+        if last:
+            parts.append(last)
+        if ext:
+            parts.append(ext)
+        return ' '.join(parts)
+
+    @property
+    def directory_name(self):
+        """
+        Directory / list order: Last, First [Extension] [Middle].
+
+        Extension sits after the first name (not after the surname).
+        """
+        last = (self.last_name or '').strip()
+        first = (self.first_name or '').strip()
+        middle = (self.middle_name or '').strip()
+        ext = self.name_extension
+        given_parts = []
+        if first:
+            given_parts.append(first)
+        if ext:
+            given_parts.append(ext)
+        if middle:
+            given_parts.append(middle)
+        given = ' '.join(given_parts)
+        if last and given:
+            return f'{last}, {given}'
+        return last or given
+
+    @property
+    def directory_name_mi(self):
+        """Directory order with middle initial: Last, First [Extension] M."""
+        last = (self.last_name or '').strip()
+        first = (self.first_name or '').strip()
+        middle = (self.middle_name or '').strip()
+        ext = self.name_extension
+        given_parts = []
+        if first:
+            given_parts.append(first)
+        if ext:
+            given_parts.append(ext)
+        if middle:
+            given_parts.append(f'{middle[0].upper()}.')
+        given = ' '.join(given_parts)
+        if last and given:
+            return f'{last}, {given}'
+        return last or given
+
     def __repr__(self):
         return f'<Employee {self.employee_id}: {self.full_name}>'
 
@@ -112,6 +197,12 @@ class EmployeeAppointmentHistory(db.Model):
     sal_grade = db.Column(db.Integer, nullable=True)
     sal_step = db.Column(db.Integer, nullable=True)
     sal_amount = db.Column(db.Numeric(12, 2), nullable=True)
+    # Step increment / employment-change metadata
+    change_type = db.Column(db.String(40), nullable=True)  # Appointment Update | Step Increment
+    effectivity_date = db.Column(db.Date, nullable=True)
+    from_sal_step = db.Column(db.Integer, nullable=True)
+    to_sal_step = db.Column(db.Integer, nullable=True)
+    remarks = db.Column(db.String(255), nullable=True)
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
     location = db.Column(db.String(45), nullable=True)   # IP address (IPv6 max ~45 chars)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
@@ -241,7 +332,7 @@ class EmployeeFlexiDay(db.Model):
 
 class Attendance(db.Model):
     __tablename__ = 'attendance'
-    
+
     id = db.Column(db.Integer, primary_key=True)
     employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
     date = db.Column(db.Date, nullable=False)
@@ -250,9 +341,96 @@ class Attendance(db.Model):
     status = db.Column(db.String(20), default='present')  # present, absent, late, on_leave
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    
+
     def __repr__(self):
         return f'<Attendance {self.employee_id} - {self.date}>'
+
+
+# Ceremony / meeting attendance (Flag Raising, Flag Retreat, Meeting) from Excel uploads.
+EVENT_ATTENDANCE_CATEGORIES = (
+    'flag_raising',
+    'flag_retreat',
+    'meeting',
+)
+EVENT_ATTENDANCE_CATEGORY_LABELS = {
+    'flag_raising': 'Flag Raising',
+    'flag_retreat': 'Flag Retreat',
+    'meeting': 'Meeting',
+}
+
+
+class EventAttendanceBatch(db.Model):
+    """One Excel upload of event attendance (flag raising / retreat / meeting)."""
+    __tablename__ = 'event_attendance_batches'
+
+    id = db.Column(db.Integer, primary_key=True)
+    category = db.Column(db.String(40), nullable=False)
+    event_date = db.Column(db.Date, nullable=False)
+    filename = db.Column(db.String(255), nullable=False, default='')
+    row_count = db.Column(db.Integer, nullable=False, default=0)
+    inserted_count = db.Column(db.Integer, nullable=False, default=0)
+    skipped_count = db.Column(db.Integer, nullable=False, default=0)
+    unmatched_count = db.Column(db.Integer, nullable=False, default=0)
+    uploaded_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    uploader = db.relationship(
+        'User', foreign_keys=[uploaded_by_user_id],
+        backref=db.backref('event_attendance_batches', lazy='dynamic'),
+    )
+    records = db.relationship(
+        'EventAttendance', backref='batch', lazy='dynamic',
+        cascade='all, delete-orphan',
+    )
+
+    def __repr__(self):
+        return f'<EventAttendanceBatch id={self.id} {self.category} {self.event_date}>'
+
+
+class EventAttendance(db.Model):
+    """
+    Per-employee check-in for a ceremony/meeting event.
+    Excel columns: employeeId, timestamp (epoch ms), lat, long.
+    """
+    __tablename__ = 'event_attendance'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'badge_employee_id', 'category', 'event_date', 'timestamp_ms',
+            name='uq_event_attendance_badge_cat_date_ts',
+        ),
+        db.Index('ix_event_attendance_cat_date', 'category', 'event_date'),
+        db.Index('ix_event_attendance_employee_date', 'employee_id', 'event_date'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    batch_id = db.Column(
+        db.Integer, db.ForeignKey('event_attendance_batches.id', ondelete='CASCADE'), nullable=True
+    )
+    employee_id = db.Column(
+        db.Integer, db.ForeignKey('employees.id', ondelete='SET NULL'), nullable=True
+    )
+    badge_employee_id = db.Column(db.String(50), nullable=False, default='')
+    category = db.Column(db.String(40), nullable=False)
+    event_date = db.Column(db.Date, nullable=False)
+    punched_at = db.Column(db.DateTime, nullable=False)
+    timestamp_ms = db.Column(db.BigInteger, nullable=False)
+    latitude = db.Column(db.Numeric(12, 7), nullable=True)
+    longitude = db.Column(db.Numeric(12, 7), nullable=True)
+    barangay = db.Column(db.String(120), nullable=True)
+    municipality = db.Column(db.String(120), nullable=True)  # town / city
+    province = db.Column(db.String(120), nullable=True)
+    location_text = db.Column(db.String(255), nullable=True)  # "Barangay, Town, Province"
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship(
+        'Employee', backref=db.backref('event_attendance_records', lazy='dynamic')
+    )
+
+    def __repr__(self):
+        return (
+            f'<EventAttendance id={self.id} badge={self.badge_employee_id} '
+            f'{self.category} {self.event_date}>'
+        )
 
 
 class DailyTimeRecord(db.Model):
@@ -284,6 +462,186 @@ class DailyTimeRecord(db.Model):
 
     def __repr__(self):
         return f'<DailyTimeRecord employee_id={self.employee_id} date={self.record_date}>'
+
+
+class DtrUploadBatch(db.Model):
+    """Audit log for a DTR .dat upload; supports full undo (created + merged rows)."""
+    __tablename__ = 'dtr_upload_batches'
+
+    id = db.Column(db.Integer, primary_key=True)
+    uploaded_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    uploaded_by_username = db.Column(db.String(80), nullable=False, default='')
+    quincena = db.Column(db.String(20), nullable=False)
+    filename = db.Column(db.String(255), nullable=False, default='')
+    record_count = db.Column(db.Integer, nullable=False, default=0)
+    saved_count = db.Column(db.Integer, nullable=False, default=0)
+    error_count = db.Column(db.Integer, nullable=False, default=0)
+    created_count = db.Column(db.Integer, nullable=False, default=0)
+    merged_count = db.Column(db.Integer, nullable=False, default=0)
+    status = db.Column(db.String(20), nullable=False, default='active')  # active | undone
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    undone_at = db.Column(db.DateTime, nullable=True)
+    undone_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    uploaded_by = db.relationship('User', foreign_keys=[uploaded_by_user_id], backref=db.backref('dtr_upload_batches', lazy='dynamic'))
+    undone_by = db.relationship('User', foreign_keys=[undone_by_user_id], backref=db.backref('dtr_uploads_undone', lazy='dynamic'))
+    items = db.relationship('DtrUploadBatchItem', backref='batch', lazy='dynamic', cascade='all, delete-orphan')
+
+    def __repr__(self):
+        return f'<DtrUploadBatch {self.id} {self.filename} status={self.status}>'
+
+
+class DtrUploadBatchItem(db.Model):
+    """One employee-day row touched by an upload (snapshot for undo)."""
+    __tablename__ = 'dtr_upload_batch_items'
+
+    id = db.Column(db.Integer, primary_key=True)
+    batch_id = db.Column(db.Integer, db.ForeignKey('dtr_upload_batches.id', ondelete='CASCADE'), nullable=False)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id', ondelete='CASCADE'), nullable=False)
+    record_date = db.Column(db.Date, nullable=False)
+    action = db.Column(db.String(20), nullable=False)  # created | merged
+    dtr_record_id = db.Column(db.Integer, db.ForeignKey('daily_time_record.id', ondelete='SET NULL'), nullable=True)
+    before_am_in = db.Column(db.Time, nullable=True)
+    before_am_out = db.Column(db.Time, nullable=True)
+    before_pm_in = db.Column(db.Time, nullable=True)
+    before_pm_out = db.Column(db.Time, nullable=True)
+    before_remarks = db.Column(db.String(100), nullable=True)
+    before_undertime_hrs = db.Column(db.SmallInteger, nullable=True)
+    before_undertime_mins = db.Column(db.SmallInteger, nullable=True)
+
+    employee = db.relationship(
+        'Employee',
+        backref=db.backref(
+            'dtr_upload_batch_items',
+            lazy='dynamic',
+            cascade='all, delete-orphan',
+            passive_deletes=True,
+        ),
+    )
+    dtr_record = db.relationship('DailyTimeRecord', backref=db.backref('upload_batch_items', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<DtrUploadBatchItem batch={self.batch_id} emp={self.employee_id} date={self.record_date}>'
+
+
+class DtrUploadPunch(db.Model):
+    """
+    One raw biometric punch retained from a DTR .dat upload.
+    Used so HR/Admin can inspect multiple punches for the same employee/date/slot.
+    ``slot`` is the immutable biometric source event; ``assigned_slot`` is the
+    reviewed destination among am_in / am_out / pm_in / pm_out (nullable when unused).
+    """
+    __tablename__ = 'dtr_upload_punches'
+    __table_args__ = (
+        db.Index('ix_dtr_upload_punches_batch_emp_date', 'batch_id', 'employee_id', 'record_date'),
+        db.Index('ix_dtr_upload_punches_emp_date_slot', 'employee_id', 'record_date', 'slot'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    batch_id = db.Column(db.Integer, db.ForeignKey('dtr_upload_batches.id', ondelete='CASCADE'), nullable=False)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id', ondelete='CASCADE'), nullable=False)
+    badge_employee_id = db.Column(db.String(50), nullable=False, default='')
+    record_date = db.Column(db.Date, nullable=False)
+    event_code = db.Column(db.SmallInteger, nullable=False)  # 0–3
+    slot = db.Column(db.String(10), nullable=False)  # am_in | am_out | pm_in | pm_out (source)
+    punch_time = db.Column(db.Time, nullable=True)
+    source_timestamp = db.Column(db.String(40), nullable=False, default='')
+    line_no = db.Column(db.Integer, nullable=False, default=0)
+    sequence_no = db.Column(db.Integer, nullable=False, default=0)
+    is_selected = db.Column(db.Boolean, nullable=False, default=False)  # last-wins at upload
+    assigned_slot = db.Column(db.String(10), nullable=True)  # reviewed destination slot or NULL
+
+    batch = db.relationship('DtrUploadBatch', backref=db.backref('punches', lazy='dynamic', cascade='all, delete-orphan'))
+    employee = db.relationship(
+        'Employee',
+        backref=db.backref(
+            'dtr_upload_punches',
+            lazy='dynamic',
+            cascade='all, delete-orphan',
+            passive_deletes=True,
+        ),
+    )
+
+    def __repr__(self):
+        return (
+            f'<DtrUploadPunch batch={self.batch_id} emp={self.employee_id} '
+            f'date={self.record_date} slot={self.slot} assigned={self.assigned_slot} '
+            f'time={self.punch_time}>'
+        )
+
+
+class DtrUploadPunchFlag(db.Model):
+    """
+    Duplicate-slot flag for an upload batch: same employee/date/slot had 2+ punches.
+    HR/Admin can choose the correct punch and resolve the flag.
+    """
+    __tablename__ = 'dtr_upload_punch_flags'
+    __table_args__ = (
+        db.Index('ix_dtr_upload_punch_flags_batch_status', 'batch_id', 'status'),
+        db.Index('ix_dtr_upload_punch_flags_emp_date', 'employee_id', 'record_date', 'status'),
+        db.UniqueConstraint('batch_id', 'employee_id', 'record_date', 'slot', name='uq_dtr_upload_punch_flag'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    batch_id = db.Column(db.Integer, db.ForeignKey('dtr_upload_batches.id', ondelete='CASCADE'), nullable=False)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id', ondelete='CASCADE'), nullable=False)
+    record_date = db.Column(db.Date, nullable=False)
+    slot = db.Column(db.String(10), nullable=False)  # am_in | am_out | pm_in | pm_out
+    punch_count = db.Column(db.Integer, nullable=False, default=0)
+    status = db.Column(db.String(20), nullable=False, default='open')  # open | resolved | inactive
+    selected_punch_id = db.Column(db.Integer, db.ForeignKey('dtr_upload_punches.id', ondelete='SET NULL'), nullable=True)
+    resolved_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    resolved_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    batch = db.relationship('DtrUploadBatch', backref=db.backref('punch_flags', lazy='dynamic', cascade='all, delete-orphan'))
+    employee = db.relationship(
+        'Employee',
+        backref=db.backref(
+            'dtr_upload_punch_flags',
+            lazy='dynamic',
+            cascade='all, delete-orphan',
+            passive_deletes=True,
+        ),
+    )
+    selected_punch = db.relationship('DtrUploadPunch', foreign_keys=[selected_punch_id])
+    resolved_by = db.relationship('User', foreign_keys=[resolved_by_user_id])
+
+    def __repr__(self):
+        return (
+            f'<DtrUploadPunchFlag batch={self.batch_id} emp={self.employee_id} '
+            f'date={self.record_date} slot={self.slot} status={self.status}>'
+        )
+
+
+class DtrQuincenaPeriod(db.Model):
+    """Lifecycle status for a DTR quincena (upload → review → process → payroll)."""
+    __tablename__ = 'dtr_quincena_periods'
+    __table_args__ = (
+        db.UniqueConstraint('year', 'month', 'quincena_half', name='uq_dtr_quincena_period'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    year = db.Column(db.SmallInteger, nullable=False)
+    month = db.Column(db.SmallInteger, nullable=False)
+    quincena_half = db.Column(db.String(1), nullable=False)  # '1' or '2'
+    status = db.Column(db.String(30), nullable=False, default='draft')
+    # draft | uploaded | review_open | review_closed | processed
+    review_deadline = db.Column(db.Date, nullable=True)
+    uploaded_at = db.Column(db.DateTime, nullable=True)
+    review_opened_at = db.Column(db.DateTime, nullable=True)
+    review_closed_at = db.Column(db.DateTime, nullable=True)
+    processed_at = db.Column(db.DateTime, nullable=True)
+    uploaded_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    processed_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    uploaded_by = db.relationship('User', foreign_keys=[uploaded_by_user_id])
+    processed_by = db.relationship('User', foreign_keys=[processed_by_user_id])
+
+    def __repr__(self):
+        return f'<DtrQuincenaPeriod {self.year}-{self.month:02d} Q{self.quincena_half} {self.status}>'
 
 
 class DtrWorkArrangementSetting(db.Model):
@@ -339,6 +697,67 @@ class DtrJustification(db.Model):
     __table_args__ = (
         db.UniqueConstraint('employee_id', 'record_date', name='uq_dtr_justification_employee_date'),
     )
+
+
+class DtrAccomplishmentReport(db.Model):
+    """JO/COS daily accomplishment report tied to a calendar date (My DTR)."""
+    __tablename__ = 'dtr_accomplishment_report'
+    __table_args__ = (
+        db.UniqueConstraint('employee_id', 'record_date', name='uq_dtr_accomplishment_emp_date'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    record_date = db.Column(db.Date, nullable=False)
+    report_text = db.Column(db.Text, nullable=False, default='')
+    updated_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('dtr_accomplishment_reports', lazy='dynamic'))
+    updated_by = db.relationship('User', foreign_keys=[updated_by_user_id])
+
+
+class DtrMonthlyPeriod(db.Model):
+    """Plantilla monthly DTR submission window (opens after 2nd quincena upload)."""
+    __tablename__ = 'dtr_monthly_periods'
+    __table_args__ = (
+        db.UniqueConstraint('year', 'month', name='uq_dtr_monthly_period'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    year = db.Column(db.SmallInteger, nullable=False)
+    month = db.Column(db.SmallInteger, nullable=False)
+    submission_deadline = db.Column(db.Date, nullable=True)
+    opened_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class DtrMonthlySubmission(db.Model):
+    """Plantilla employee monthly DTR packet attestation."""
+    __tablename__ = 'dtr_monthly_submissions'
+    __table_args__ = (
+        db.UniqueConstraint('employee_id', 'year', 'month', name='uq_dtr_monthly_submission_emp_month'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    year = db.Column(db.SmallInteger, nullable=False)
+    month = db.Column(db.SmallInteger, nullable=False)
+    status = db.Column(db.String(20), nullable=False, default='pending')  # pending | submitted | accepted | rejected
+    submitted_at = db.Column(db.DateTime, nullable=True)
+    submitted_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    reviewed_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    review_notes = db.Column(db.Text, nullable=True)
+    printed_at = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('dtr_monthly_submissions', lazy='dynamic'))
+    submitted_by = db.relationship('User', foreign_keys=[submitted_by_user_id])
+    reviewed_by = db.relationship('User', foreign_keys=[reviewed_by_user_id])
 
 
 class LeaveRequest(db.Model):
@@ -1454,6 +1873,11 @@ class LeaveLedger(db.Model):
     cto_used = db.Column(db.Numeric(6, 3), default=0)
     cto_balance = db.Column(db.Numeric(6, 3), default=0)
 
+    # Leave Without Pay (plantilla absences)
+    lwop_days = db.Column(db.Numeric(6, 3), default=0)
+    lwop_balance = db.Column(db.Numeric(8, 3), default=0)
+    lwop_amount = db.Column(db.Numeric(12, 2), default=0)
+
     # Remarks column (Approved, Dis-approved, Cancelled, or custom text)
     remarks = db.Column(db.String(500), nullable=True)
 
@@ -1545,6 +1969,10 @@ class LeaveLedgerDeletion(db.Model):
     cto_used = db.Column(db.Numeric(6, 3), default=0)
     cto_balance = db.Column(db.Numeric(6, 3), default=0)
 
+    lwop_days = db.Column(db.Numeric(6, 3), default=0)
+    lwop_balance = db.Column(db.Numeric(8, 3), default=0)
+    lwop_amount = db.Column(db.Numeric(12, 2), default=0)
+
     remarks = db.Column(db.String(500), nullable=True)
     orig_created_by = db.Column(db.Integer, nullable=True)
     orig_created_at = db.Column(db.DateTime, nullable=True)
@@ -1600,7 +2028,7 @@ class PhicContribution(db.Model):
     PhilHealth (PHIC) per-month contribution rows (Plantilla employees).
 
     Deductible period: year, month, deductible_quincena (always 2nd quincena).
-    Amounts: ps_amount, gs_amount (same tier formula; GS for reporting),
+    Amounts: ps_amount, gs_amount (equal split of 5% premium; odd centavo to GS),
     month_amount / deducted_amount (PS employee share only).
     """
     __tablename__ = 'phic_contributions'
@@ -1633,6 +2061,168 @@ class PhicContribution(db.Model):
 
     def __repr__(self):
         return f'<PhicContribution id={self.id} emp={self.employee_id} {self.year}-{self.month:02d} Q{self.deductible_quincena}>'
+
+
+class LbpBillingRecord(db.Model):
+    """Per-employee LBP billing amounts imported from the monthly LBP billing sheet."""
+    __tablename__ = 'lbp_billing_records'
+    __table_args__ = (
+        db.UniqueConstraint('employee_id', 'year', 'month', name='uq_lbp_billing_record_emp_ym'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    year = db.Column(db.Integer, nullable=False)
+    month = db.Column(db.Integer, nullable=False)
+    employee_no = db.Column(db.String(50), nullable=True)
+    percov = db.Column(db.String(10), nullable=True)
+    q1_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    q2_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    total_payable = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('lbp_billing_records', lazy='dynamic'))
+    creator = db.relationship('User', backref=db.backref('lbp_billing_records', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<LbpBillingRecord id={self.id} emp={self.employee_id} {self.year}-{self.month:02d}>'
+
+
+class LbpBillingDeduction(db.Model):
+    """Scheduled LBP billing deduction per employee and month."""
+    __tablename__ = 'lbp_billing_deductions'
+    __table_args__ = (
+        db.UniqueConstraint('employee_id', 'year', 'month', name='uq_lbp_billing_deduction_emp_ym'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    department_id = db.Column(db.Integer, db.ForeignKey('departments.id'), nullable=True)
+    year = db.Column(db.Integer, nullable=False)
+    month = db.Column(db.Integer, nullable=False)
+    month_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    q1_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    q2_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    q1_enabled = db.Column(db.Boolean, nullable=False, default=True)
+    q2_enabled = db.Column(db.Boolean, nullable=False, default=True)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('lbp_billing_deductions', lazy='dynamic'))
+    department = db.relationship('Department', backref=db.backref('lbp_billing_deductions', lazy='dynamic'))
+    creator = db.relationship('User', backref=db.backref('lbp_billing_deductions', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<LbpBillingDeduction id={self.id} emp={self.employee_id} {self.year}-{self.month:02d}>'
+
+
+class JofemcoBillingRecord(db.Model):
+    """Per-employee JOFEMCO billing amounts imported from the monthly schedule file."""
+    __tablename__ = 'jofemco_billing_records'
+    __table_args__ = (
+        db.UniqueConstraint('employee_id', 'year', 'month', name='uq_jofemco_billing_record_emp_ym'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    year = db.Column(db.Integer, nullable=False)
+    month = db.Column(db.Integer, nullable=False)
+    employee_no = db.Column(db.String(50), nullable=True)
+    percov = db.Column(db.String(10), nullable=True)
+    loan_q1 = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    loan_q2 = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    canteen_q1 = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    canteen_q2 = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    total_payable = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('jofemco_billing_records', lazy='dynamic'))
+    creator = db.relationship('User', backref=db.backref('jofemco_billing_records', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<JofemcoBillingRecord id={self.id} emp={self.employee_id} {self.year}-{self.month:02d}>'
+
+
+class JofemcoBillingDeduction(db.Model):
+    """Scheduled JOFEMCO billing deduction per employee and month."""
+    __tablename__ = 'jofemco_billing_deductions'
+    __table_args__ = (
+        db.UniqueConstraint('employee_id', 'year', 'month', name='uq_jofemco_billing_deduction_emp_ym'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    department_id = db.Column(db.Integer, db.ForeignKey('departments.id'), nullable=True)
+    year = db.Column(db.Integer, nullable=False)
+    month = db.Column(db.Integer, nullable=False)
+    month_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    q1_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    q2_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    q1_enabled = db.Column(db.Boolean, nullable=False, default=True)
+    q2_enabled = db.Column(db.Boolean, nullable=False, default=True)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('jofemco_billing_deductions', lazy='dynamic'))
+    department = db.relationship('Department', backref=db.backref('jofemco_billing_deductions', lazy='dynamic'))
+    creator = db.relationship('User', backref=db.backref('jofemco_billing_deductions', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<JofemcoBillingDeduction id={self.id} emp={self.employee_id} {self.year}-{self.month:02d}>'
+
+
+class WithholdingTaxRecord(db.Model):
+    """Per-employee withholding tax amounts imported from the tax schedule sheet."""
+    __tablename__ = 'withholding_tax_records'
+    __table_args__ = (
+        db.UniqueConstraint('employee_id', 'year', 'month', name='uq_withholding_tax_record_emp_ym'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    year = db.Column(db.Integer, nullable=False)
+    month = db.Column(db.Integer, nullable=False)
+    employee_no = db.Column(db.String(50), nullable=True)
+    percov = db.Column(db.String(10), nullable=True)
+    q1_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('withholding_tax_records', lazy='dynamic'))
+    creator = db.relationship('User', backref=db.backref('withholding_tax_records', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<WithholdingTaxRecord id={self.id} emp={self.employee_id} {self.year}-{self.month:02d}>'
+
+
+class WithholdingTaxDeduction(db.Model):
+    """Scheduled withholding tax deduction per employee and month (Q1 only)."""
+    __tablename__ = 'withholding_tax_deductions'
+    __table_args__ = (
+        db.UniqueConstraint('employee_id', 'year', 'month', name='uq_withholding_tax_deduction_emp_ym'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id'), nullable=False)
+    department_id = db.Column(db.Integer, db.ForeignKey('departments.id'), nullable=True)
+    year = db.Column(db.Integer, nullable=False)
+    month = db.Column(db.Integer, nullable=False)
+    month_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    q1_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    q2_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    q1_enabled = db.Column(db.Boolean, nullable=False, default=True)
+    q2_enabled = db.Column(db.Boolean, nullable=False, default=False)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship('Employee', backref=db.backref('withholding_tax_deductions', lazy='dynamic'))
+    department = db.relationship('Department', backref=db.backref('withholding_tax_deductions', lazy='dynamic'))
+    creator = db.relationship('User', backref=db.backref('withholding_tax_deductions', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<WithholdingTaxDeduction id={self.id} emp={self.employee_id} {self.year}-{self.month:02d}>'
 
 
 class GsisLoanRecord(db.Model):
@@ -1900,7 +2490,12 @@ class WorkHours(db.Model):
 class FlexibleWorktime(db.Model):
     """
     Quincena-specific flexible worktime assignments used by DTR regeneration.
-    One row = one employee date range (inclusive) with custom in / break-out / break-in / out.
+    One row = one employee date range (inclusive).
+
+    duty_mode:
+      - ``split`` (default): In / Break-out / Break-in / Out (meal break)
+      - ``straight``: In / Out only (continuous shift, typically 8 hours)
+      - ``rest``: scheduled rest day (no duty; times unused)
     """
     __tablename__ = 'flexible_worktime'
     __table_args__ = (
@@ -1915,10 +2510,11 @@ class FlexibleWorktime(db.Model):
     quincena_half = db.Column(db.String(1), nullable=False)  # '1' or '2'
     date_start = db.Column(db.Date, nullable=False)
     date_end = db.Column(db.Date, nullable=False)
-    time_in = db.Column(db.Time, nullable=False)
-    break_out = db.Column(db.Time, nullable=False)
-    break_in = db.Column(db.Time, nullable=False)
-    time_out = db.Column(db.Time, nullable=False)
+    duty_mode = db.Column(db.String(20), nullable=False, default='split')  # split | straight | rest
+    time_in = db.Column(db.Time, nullable=True)
+    break_out = db.Column(db.Time, nullable=True)
+    break_in = db.Column(db.Time, nullable=True)
+    time_out = db.Column(db.Time, nullable=True)
     created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -1929,7 +2525,7 @@ class FlexibleWorktime(db.Model):
     def __repr__(self):
         return (
             f'<FlexibleWorktime emp={self.employee_id} {self.year}-{self.month:02d} '
-            f'{self.quincena_half} {self.date_start}..{self.date_end}>'
+            f'{self.quincena_half} {self.date_start}..{self.date_end} mode={self.duty_mode}>'
         )
 
 
@@ -2112,4 +2708,127 @@ class HrmsNotification(db.Model):
     is_read = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
-    user = db.relationship('User', backref=db.backref('hrms_notifications', lazy='dynamic'))
+    user = db.relationship(
+        'User',
+        backref=db.backref(
+            'hrms_notifications',
+            lazy='dynamic',
+            cascade='all, delete-orphan',
+            passive_deletes=True,
+        ),
+    )
+
+class JoCosPayslip(db.Model):
+    """Generated JO/COS daily-wage payslip snapshot per employee and quincena."""
+    __tablename__ = 'jo_cos_payslips'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'employee_id', 'year', 'month', 'quincena_half',
+            name='uq_jo_cos_payslip_emp_ymq',
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id', ondelete='CASCADE'), nullable=False)
+    department_id = db.Column(db.Integer, db.ForeignKey('departments.id', ondelete='SET NULL'), nullable=True)
+    year = db.Column(db.Integer, nullable=False)
+    month = db.Column(db.SmallInteger, nullable=False)
+    quincena_half = db.Column(db.String(1), nullable=False)
+    employee_name = db.Column(db.String(200), nullable=False)
+    employee_no = db.Column(db.String(50), nullable=True)
+    designation = db.Column(db.String(120), nullable=True)
+    department_name = db.Column(db.String(200), nullable=True)
+    days_worked = db.Column(db.Numeric(8, 2), nullable=False, default=0)
+    rate_per_day = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    gross_salary = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    late_hours = db.Column(db.Numeric(8, 2), nullable=False, default=0)
+    late_deduction = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    hdmf_deduction = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    net_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    generated_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    generated_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    employee = db.relationship('Employee', backref=db.backref('jo_cos_payslips', lazy='dynamic'))
+    department = db.relationship('Department', backref=db.backref('jo_cos_payslips', lazy='dynamic'))
+    generator = db.relationship('User', backref=db.backref('jo_cos_payslips_generated', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<JoCosPayslip id={self.id} emp={self.employee_id} {self.year}-{self.month:02d} Q{self.quincena_half}>'
+
+
+class PlantillaPayslip(db.Model):
+    """Generated plantilla payslip snapshot per employee and quincena (view-only, no PDF)."""
+    __tablename__ = 'plantilla_payslips'
+    __table_args__ = (
+        db.UniqueConstraint(
+            'employee_id', 'year', 'month', 'quincena_half',
+            name='uq_plantilla_payslip_emp_ymq',
+        ),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey('employees.id', ondelete='CASCADE'), nullable=False)
+    department_id = db.Column(db.Integer, db.ForeignKey('departments.id', ondelete='SET NULL'), nullable=True)
+    year = db.Column(db.Integer, nullable=False)
+    month = db.Column(db.SmallInteger, nullable=False)
+    quincena_half = db.Column(db.String(1), nullable=False)
+
+    employee_name = db.Column(db.String(200), nullable=False)
+    employee_no = db.Column(db.String(50), nullable=True)
+    designation = db.Column(db.String(120), nullable=True)
+    department_name = db.Column(db.String(200), nullable=True)
+
+    monthly_rate = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    accrued = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    net_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+
+    deductions = db.Column(db.JSON, nullable=False, default=dict)  # key -> amount
+    gov_share = db.Column(db.JSON, nullable=False, default=dict)   # key -> amount
+    layout = db.Column(db.JSON, nullable=False, default=dict)      # keys/labels used at generation
+
+    generated_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    generated_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    employee = db.relationship('Employee', backref=db.backref('plantilla_payslips', lazy='dynamic'))
+    department = db.relationship('Department', backref=db.backref('plantilla_payslips', lazy='dynamic'))
+    generator = db.relationship('User', backref=db.backref('plantilla_payslips_generated', lazy='dynamic'))
+
+    def __repr__(self):
+        return f'<PlantillaPayslip id={self.id} emp={self.employee_id} {self.year}-{self.month:02d} Q{self.quincena_half}>'
+
+
+class SiteSetting(db.Model):
+    """Portal CMS / branding settings (JSON blobs keyed by section)."""
+    __tablename__ = 'site_settings'
+
+    section_key = db.Column(db.String(80), primary_key=True)
+    data = db.Column(db.JSON, nullable=False, default=dict)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<SiteSetting {self.section_key}>'
+
+
+class ErmtRecord(db.Model):
+    """Electronic Records Management Tool (eRMT) archive records — mirrored from TESDA RMT."""
+    __tablename__ = 'ermt_records'
+
+    id = db.Column(db.Integer, primary_key=True)
+    record_number = db.Column(db.String(24), unique=True, nullable=False)
+    title = db.Column(db.String(220), nullable=False)
+    record_type = db.Column(db.String(60))
+    record_type_part = db.Column(db.String(120))
+    record_date = db.Column(db.Date)
+    pdf_link = db.Column(db.String(1000))
+    local_file_path = db.Column(db.String(300))
+    drive_file_id = db.Column(db.String(100))
+    cabinet_number = db.Column(db.String(20), nullable=False)
+    shelf_number = db.Column(db.String(20), nullable=False)
+    keywords = db.Column(db.Text)
+    remarks = db.Column(db.Text)
+    encoded_by = db.Column(db.String(150))
+    date_encoded = db.Column(db.DateTime, default=datetime.utcnow)
+    date_updated = db.Column(db.DateTime, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f'<ErmtRecord {self.record_number} - {self.title}>'

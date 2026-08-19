@@ -1,13 +1,22 @@
-{% extends "base.html" %}
+{% extends "layouts/app.html" %}
 
 {% block title %}DTR Justifications - HRMS{% endblock %}
 
-{% block content %}
-<div class="dashboard-container">
-  <div class="dashboard-content">
-    <div class="page-header" style="display:flex; justify-content:space-between; align-items:center;">
+{% set navbar_title = 'DTR Justifications' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Time & Attendance'},
+    {'label': 'DTR Justifications'}
+] %}
+
+{% block app_content %}
+<div class="page-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem;">
       <h1 class="page-title" style="margin:0;">DTR Justifications</h1>
+      {% if (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') %}
       <a class="btn-secondary" href="{{ url_for('routes.dtr_records') }}">Back to DTR</a>
+      {% else %}
+      <a class="btn-secondary" href="{{ url_for('routes.dtr_my_records') }}">Back to My DTR</a>
+      {% endif %}
     </div>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
@@ -22,25 +31,9 @@
     {% endwith %}
 
     {% if (current_user.role or '')|lower not in ('admin', 'hr', 'payroll_maker') %}
-    <div class="card" style="padding:1rem 1.25rem; margin-bottom:1rem;">
-      <form method="POST" enctype="multipart/form-data">
-        <div class="form-grid" style="grid-template-columns:repeat(2, minmax(160px, 1fr)); gap:0.75rem;">
-          <div class="form-group">
-            <label for="record_date">Date</label>
-            <input type="date" id="record_date" name="record_date" class="form-control" required>
-          </div>
-          <div class="form-group">
-            <label for="reason">Reason / No biometrics justification</label>
-            <input type="text" id="reason" name="reason" class="form-control" required>
-          </div>
-          <div class="form-group" style="grid-column:1 / -1;">
-            <label for="attachment">Attachment (PDF/JPG/PNG/DOC/DOCX)</label>
-            <input type="file" id="attachment" name="attachment" class="form-control" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx">
-          </div>
-        </div>
-        <button type="submit" class="btn-primary">Submit Justification</button>
-      </form>
-    </div>
+    <p class="muted" style="margin:0 0 1rem; font-size:0.9rem;">
+      Submit new justifications from <a href="{{ url_for('routes.dtr_my_records') }}">My DTR</a> — open a flagged day and use <strong>Justify this day</strong>.
+    </p>
     {% endif %}
 
     <div class="card" style="padding:1rem 1.25rem;">
@@ -76,7 +69,14 @@
               </td>
               <td>{{ r.status|title }}</td>
               <td>
-                {% if (current_user.role or '')|lower in ('payroll_maker', 'admin', 'hr') and r.status == 'submitted' %}
+                {% if (current_user.role or '')|lower in ('admin', 'hr') and r.status in ('submitted', 'forwarded') %}
+                <form method="POST" action="{{ url_for('routes.dtr_justification_approve', id=r.id) }}" style="display:inline; margin:0 0.25rem 0 0;">
+                  <button type="submit" class="btn-action">Approve</button>
+                </form>
+                <form method="POST" action="{{ url_for('routes.dtr_justification_reject', id=r.id) }}" style="display:inline; margin:0;">
+                  <button type="submit" class="btn-action" style="color:#b91c1c;">Reject</button>
+                </form>
+                {% elif (current_user.role or '')|lower == 'payroll_maker' and r.status == 'submitted' %}
                 <form method="POST" action="{{ url_for('routes.dtr_justification_forward', id=r.id) }}" style="margin:0;">
                   <button type="submit" class="btn-action">Forward</button>
                 </form>
@@ -92,8 +92,6 @@
         </table>
       </div>
     </div>
-  </div>
-</div>
 
 <div id="attachmentPreviewModal" class="change-password-modal-overlay" style="display:none;">
   <div class="change-password-modal-dialog" style="max-width: 900px; width: 95%; max-height: 90vh;">

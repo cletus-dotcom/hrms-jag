@@ -5,38 +5,86 @@
 }
 
 :root {
-    --primary-black: #1a1a1a;
-    --secondary-black: #2d2d2d;
-    --dark-gray: #3a3a3a;
-    --medium-gray: #666666;
-    --light-gray: #e0e0e0;
+    --primary-blue: #013a63;
+    --secondary-blue: #2a6f97;
+    --accent-teal: #01c7b7;
+    --bg-light: #f8f9fa;
+    --text-dark: #1d2d44;
+    --primary-black: #1d2d44;
+    --secondary-black: #2d3a4d;
+    --dark-gray: #3a4a5c;
+    --medium-gray: #5c6b7a;
+    --light-gray: #e2e6ea;
     --white: #ffffff;
-    --gradient-start: #f4f7fb;
-    --gradient-end: #eef4ff;
+    --gradient-start: #f8f9fa;
+    --gradient-end: #eef2f6;
     --success-green: #4caf50;
     --warning-yellow: #ff9800;
     --danger-red: #f44336;
-    --info-blue: #2196f3;
-    --hrmdo-navy: #0d1f3c;
+    --info-blue: #2a6f97;
+    --hrmdo-navy: #0b132b;
     --hrmdo-navy-deep: #081428;
     --hrmdo-gold: #c9a227;
-    --brand-blue: #124072;
-    --brand-blue-dark: #0d2847;
-    --brand-blue-ink: #0b1a2d;
-    --brand-bg: #f4f7fb;
-    --brand-border: rgba(18, 64, 114, 0.14);
-    --brand-shadow: 0 10px 30px rgba(13, 40, 71, 0.12);
-    --brand-shadow-soft: 0 4px 18px rgba(13, 40, 71, 0.08);
+    --brand-blue: #013a63;
+    --brand-blue-dark: #012d4d;
+    --brand-blue-ink: #1d2d44;
+    --brand-bg: #f8f9fa;
+    --brand-border: rgba(1, 58, 99, 0.14);
+    --brand-shadow: 0 10px 30px rgba(1, 58, 99, 0.12);
+    --brand-shadow-soft: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+    --screensaver-bg: #0b132b;
     /* Slightly more compact default; JS keeps this in sync at runtime */
     --header-bar-height: 72px;
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    background: radial-gradient(1200px 800px at 70% 0%, rgba(18, 64, 114, 0.08) 0%, rgba(18, 64, 114, 0) 60%),
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    background: radial-gradient(1200px 800px at 70% 0%, rgba(1, 58, 99, 0.06) 0%, rgba(1, 58, 99, 0) 60%),
                 linear-gradient(135deg, var(--gradient-start) 0%, var(--gradient-end) 100%);
     min-height: 100vh;
     color: var(--primary-black);
+}
+
+/* ——— App-wide screensaver (inactivity) ——— */
+.screensaver {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--screensaver-bg, #0b132b);
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.6s ease, visibility 0.6s ease;
+    overflow: hidden;
+}
+
+.screensaver.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.screensaver-tagline {
+    position: absolute;
+    max-width: min(90vw, 42rem);
+    margin: 0;
+    padding: 1.5rem 2rem;
+    font-size: clamp(1rem, 3vw, 1.35rem);
+    font-weight: 500;
+    line-height: 1.55;
+    text-align: center;
+    color: var(--white);
+    letter-spacing: 0.01em;
+    text-shadow: 0 0 40px rgba(1, 199, 183, 0.35);
+    animation: screensaver-glow 4s ease-in-out infinite alternate;
+    transition: top 1.2s ease, left 1.2s ease, transform 1.2s ease;
+}
+
+@keyframes screensaver-glow {
+    from { text-shadow: 0 0 30px rgba(1, 199, 183, 0.2); }
+    to   { text-shadow: 0 0 60px rgba(42, 111, 151, 0.45); }
 }
 
 /* Header Bar (fixed; offset via --header-bar-height from JS) */
@@ -750,12 +798,12 @@ body {
     color: #155724;
 }
 
-.status-on_leave {
+.status-inactive {
     background-color: #fff3cd;
     color: #856404;
 }
 
-.status-terminated {
+.status-separated {
     background-color: #f8d7da;
     color: #721c24;
 }
@@ -976,7 +1024,6 @@ body {
     gap: 1rem;
 }
 
-.generate-dtr-period-mode,
 .generate-dtr-period-quincena {
     grid-column: 1 / -1;
 }
@@ -986,6 +1033,49 @@ body {
     grid-template-columns: 1fr 1fr;
     gap: 1rem;
     margin-bottom: 0.25rem;
+}
+
+.generate-dtr-workweek-segments-wrap {
+    margin-bottom: 0.5rem;
+}
+
+.generate-dtr-workweek-segments-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.generate-dtr-workweek-segment {
+    border: 1px solid var(--brand-border, rgba(18, 64, 114, 0.14));
+    border-radius: 8px;
+    padding: 0.75rem;
+    background: rgba(248, 250, 252, 0.6);
+}
+
+.generate-dtr-workweek-segment-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.generate-dtr-workweek-segment-title {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--medium-gray, #4b5563);
+}
+
+.generate-dtr-workweek-segment-remove {
+    min-width: 2rem;
+    padding: 0.2rem 0.5rem;
+    line-height: 1.2;
+    font-size: 1.1rem;
+}
+
+.generate-dtr-add-workweek-segment {
+    width: 100%;
 }
 
 @media (max-width: 719px) {
@@ -1686,7 +1776,7 @@ input[readonly]:not([value])::placeholder {
         overflow-x: scroll;
     }
     
-    .data-table {
+    body:not(.dashboard-layout) .data-table {
         min-width: 600px;
     }
     

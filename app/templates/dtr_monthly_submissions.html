@@ -1,0 +1,154 @@
+{% extends "layouts/app.html" %}
+
+{% block title %}Monthly Plantilla DTR Submissions - HRMS{% endblock %}
+
+{% set navbar_title = 'Monthly DTR Submissions' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Time & Attendance'},
+    {'label': 'Monthly DTR Submissions'}
+] %}
+
+{% block extra_css %}
+<style>
+  .mds-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+    gap: 0.65rem;
+    margin: 1rem 0 1.25rem;
+  }
+  .mds-stat {
+    background: #fff;
+    border: 1px solid rgba(1, 58, 99, 0.08);
+    border-radius: 8px;
+    padding: 0.65rem 0.75rem;
+  }
+  .mds-stat-label { font-size: 0.72rem; color: #6b7280; text-transform: uppercase; letter-spacing: 0.04em; }
+  .mds-stat-value { font-size: 1.25rem; font-weight: 700; color: #013a63; }
+  .mds-review-form { display: none; }
+  .mds-review-form.is-open { display: table-row; }
+</style>
+{% endblock %}
+
+{% block app_content %}
+{% include 'includes/flash_messages.html' %}
+
+<div class="page-header">
+  <h1 class="page-title" style="margin:0;">Monthly Plantilla DTR Submissions</h1>
+  <p class="muted" style="margin:0.35rem 0 0;">
+    Track plantilla employees’ monthly DTR packets for <strong>{{ period_label }}</strong>.
+    Submission deadline: <strong>{{ deadline.strftime('%Y-%m-%d') }}</strong>
+    {% if window_open %} · Window <strong>open</strong>{% else %} · Window <strong>closed</strong>{% endif %}
+  </p>
+</div>
+
+<div class="card" style="padding:1rem 1.25rem; margin-bottom:1rem;">
+  <form method="GET" action="{{ url_for('routes.dtr_monthly_submissions') }}" class="dtr-filter-strip" style="display:flex; flex-wrap:wrap; gap:0.75rem; align-items:flex-end;">
+    <div>
+      <label>Month</label>
+      <select name="month" class="form-control">
+        {% for m in range(1, 13) %}
+        <option value="{{ m }}" {% if month == m %}selected{% endif %}>{{ ['','January','February','March','April','May','June','July','August','September','October','November','December'][m] }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label>Year</label>
+      <input type="number" min="2000" max="2100" name="year" value="{{ year }}" class="form-control">
+    </div>
+    <div>
+      <label>Department</label>
+      <select name="department_id" class="form-control">
+        <option value="">All departments</option>
+        {% for d in departments %}
+        <option value="{{ d.id }}" {% if department_id == (d.id|string) %}selected{% endif %}>{{ d.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="btn-primary">Apply</button>
+  </form>
+</div>
+
+<div class="mds-stats">
+  <div class="mds-stat">
+    <div class="mds-stat-label">Pending</div>
+    <div class="mds-stat-value">{{ pending_count }}</div>
+  </div>
+  <div class="mds-stat">
+    <div class="mds-stat-label">Submitted</div>
+    <div class="mds-stat-value">{{ submitted_count }}</div>
+  </div>
+  <div class="mds-stat">
+    <div class="mds-stat-label">Accepted</div>
+    <div class="mds-stat-value">{{ accepted_count }}</div>
+  </div>
+</div>
+
+<div class="card" style="padding:1rem 1.25rem;">
+  <div class="table-container">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Employee</th>
+          <th>Department</th>
+          <th>Status</th>
+          <th>Submitted</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in submissions %}
+        <tr>
+          <td>{{ row.employee.directory_name }}<br><span class="muted" style="font-size:0.8rem;">{{ row.employee.employee_id }}</span></td>
+          <td>{{ row.employee.department.name if row.employee.department else '—' }}</td>
+          <td>
+            <span class="status-badge {% if row.status == 'accepted' %}status-approved{% elif row.status == 'submitted' %}status-pending{% elif row.status == 'rejected' %}status-rejected{% else %}status-neutral{% endif %}">{{ row.status_label }}</span>
+            {% if row.overdue %}<span class="status-badge status-rejected" style="margin-left:0.25rem;">Overdue</span>{% endif %}
+          </td>
+          <td>{% if row.submitted_at %}{{ row.submitted_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}</td>
+          <td>
+            <a class="btn-action" href="{{ url_for('routes.dtr_records', employee_id=row.employee.id, year=year, month=month, mode='month') }}">View month</a>
+            {% if row.submission and row.status == 'submitted' %}
+            <button type="button" class="btn-action mds-toggle-review" data-target="mds-review-{{ row.submission.id }}">Review</button>
+            {% endif %}
+          </td>
+        </tr>
+        {% if row.submission and row.status == 'submitted' %}
+        <tr id="mds-review-{{ row.submission.id }}" class="mds-review-form">
+          <td colspan="5" style="background:#f9fafb;">
+            <form method="POST" action="{{ url_for('routes.dtr_monthly_submissions') }}" style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:flex-end;">
+              <input type="hidden" name="submission_id" value="{{ row.submission.id }}">
+              <input type="hidden" name="year" value="{{ year }}">
+              <input type="hidden" name="month" value="{{ month }}">
+              <input type="hidden" name="department_id" value="{{ department_id }}">
+              <div style="flex:1 1 16rem;">
+                <label>Review notes</label>
+                <input type="text" name="review_notes" class="form-control" placeholder="Optional for accept; required for reject">
+              </div>
+              <button type="submit" name="action" value="accept" class="btn-primary">Accept</button>
+              <button type="submit" name="action" value="reject" class="btn-secondary">Return for resubmit</button>
+            </form>
+          </td>
+        </tr>
+        {% endif %}
+        {% else %}
+        <tr><td colspan="5" class="no-data">No plantilla employees found.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  document.querySelectorAll('.mds-toggle-review').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var row = document.getElementById(this.getAttribute('data-target'));
+      if (row) row.classList.toggle('is-open');
+    });
+  });
+});
+</script>
+{% endblock %}

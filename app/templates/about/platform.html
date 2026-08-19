@@ -1,0 +1,94 @@
+{% extends "layouts/app.html" %}
+
+{% block title %}About the Platform - HRMS{% endblock %}
+
+{% set navbar_title = 'About the Platform' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Help & Resources'},
+    {'label': 'About the Platform'}
+] %}
+
+{% block app_content %}
+{% include 'includes/flash_messages.html' %}
+
+<div class="page-header">
+    <div>
+        <h1 class="page-title">{{ platform.page_title }}</h1>
+        <p class="page-subtitle">{{ platform.tagline }}</p>
+    </div>
+</div>
+
+<div class="form-section" style="max-width: 980px; margin: 0 auto;">
+    <h2 style="margin:0 0 0.35rem; font-size:1.15rem; color: var(--primary-blue, #013a63);">{{ platform.title }}</h2>
+    <p style="margin:0; color: rgba(29,45,68,0.78); line-height:1.6;">{{ platform.intro }}</p>
+</div>
+
+<div class="form-section" style="max-width: 980px; margin: 0 auto;">
+    <h2 style="margin:0 0 0.75rem; font-size:1.05rem; color: var(--primary-blue, #013a63);">Explore features</h2>
+    <div class="table-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th style="width: 30%;">Module</th>
+                    <th>What it covers</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for title, desc in platform.features %}
+                <tr>
+                    <td><strong>{{ title }}</strong></td>
+                    <td>{{ desc }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% if platform.features_by_role %}
+<div class="form-section" style="max-width: 980px; margin: 0 auto;">
+    <h2 style="margin:0 0 0.75rem; font-size:1.05rem; color: var(--primary-blue, #013a63);">Features by role</h2>
+    <div class="table-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th style="width: 30%;">Role</th>
+                    <th>What you can do</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for title, desc in platform.features_by_role %}
+                <tr>
+                    <td><strong>{{ title }}</strong></td>
+                    <td>{{ desc }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <p class="muted" style="margin-top:0.65rem;">
+        Step-by-step instructions are in
+        <a href="{{ url_for('routes.users_manual') }}">User's Manual</a>
+        (Guides by role).
+    </p>
+</div>
+{% endif %}
+
+<div class="form-section" style="max-width: 980px; margin: 0 auto;">
+    <h2 style="margin:0 0 0.5rem; font-size:1.05rem; color: var(--primary-blue, #013a63);">
+        Platform developed by {{ developer.name }}
+    </h2>
+    <p style="margin:0 0 0.85rem; color: rgba(29,45,68,0.78); line-height:1.6;">{{ developer.blurb }}</p>
+    <div style="display:grid; gap:0.35rem; color: rgba(29,45,68,0.78);">
+        <div><strong>Address:</strong> {{ developer.address }}</div>
+        <div><strong>Phone:</strong> <a href="{{ developer.phone_href }}">{{ developer.phone }}</a></div>
+        <div><strong>Email:</strong> <a href="{{ developer.email_href }}">{{ developer.email }}</a></div>
+    </div>
+    <p class="muted" style="margin-top:0.85rem;">
+        For support, training, or customization requests, contact the developer during business hours.
+    </p>
+</div>
+
+{% endblock %}
+

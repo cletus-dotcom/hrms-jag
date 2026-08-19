@@ -4,9 +4,11 @@ Leave ledger balance recomputation and scheduled monthly leave accrual.
 VL/SL: 1.25 days per month; new appointees in a partial first calendar month use
 the daily (TABLE 2) points from appointment date through month-end (hire after the 1st).
 
-SPL/WL: 3 SPL and 5 WL on appointment (ledger row dated appointment date).
+SPL/WL: 3 SPL and 5 WL on appointment only when the appointment date falls in the
+        *current calendar year* (ledger row dated appointment date). Prior-year
+        appointment grants are not posted (and are purged if present).
         3 SPL and 5 WL each January 1 for anyone appointed before that calendar year’s Jan 1
-        (Jan 1 appointees rely on the appointment grant only).
+        (same-year Jan 1 appointees rely on the appointment grant only).
         On Dec 31, unused SPL and WL balances are posted as spl_used / wl_used (year-end lapse).
 """
 
@@ -40,6 +42,8 @@ LEAVE_CREDITS_STATUSES = (
     'Contractual',
 )
 
+APPOINTMENT_SPL_WL_PARTICULARS_PREFIX = 'SPL/WL grant on appointment - '
+
 
 def monthly_accrual_particulars(year: int, month: int) -> str:
     # Stable string for idempotency (do not change format for existing deployments).
@@ -57,7 +61,7 @@ def _dec(val) -> Decimal:
 
 
 def appointment_spl_wl_particulars(appt: date) -> str:
-    return f'SPL/WL grant on appointment - {appt.isoformat()}'
+    return f'{APPOINTMENT_SPL_WL_PARTICULARS_PREFIX}{appt.isoformat()}'
 
 
 def annual_spl_wl_particulars(year: int) -> str:
@@ -66,6 +70,98 @@ def annual_spl_wl_particulars(year: int) -> str:
 
 def year_end_lapse_particulars(year: int) -> str:
     return f'SPL/WL year-end lapse - {year:04d}'
+
+
+def appointment_spl_wl_allowed_for_date(appt: date | None, *, as_of: date | None = None) -> bool:
+    """True only when appointment falls in the same calendar year as as_of (default: today)."""
+    if not appt:
+        return False
+    ref = as_of or date.today()
+    return appt.year == ref.year
+
+
+def ensure_appointment_spl_wl_grant(
+    employee_id: int,
+    *,
+    created_by_user_id: int | None = None,
+    as_of: date | None = None,
+) -> bool:
+    """
+    Post 3 SPL + 5 WL on the employee's appointment date if leave-credits eligible
+    and the appointment date is in the current calendar year (as_of).
+    Prior-year appointments are skipped (no backdated grant).
+    Idempotent per appointment date. Returns True if a new row was added.
+    """
+    emp = Employee.query.get(employee_id)
+    if not emp or not _eligible_leave_credits(emp):
+        return False
+    if (emp.status or '').strip().lower() == 'separated':
+        return False
+    appt = emp.appointment_date
+    if not appointment_spl_wl_allowed_for_date(appt, as_of=as_of):
+        return False
+
+    particulars = appointment_spl_wl_particulars(appt)
+    if LeaveLedger.query.filter_by(employee_id=emp.id, particulars=particulars).first():
+        return False
+
+    row = LeaveLedger(
+        employee_id=emp.id,
+        transaction_date=appt,
+        particulars=particulars,
+        remarks='SPL and WL on appointment',
+        spl_earned=YEARLY_SPL_EARNED,
+        wl_earned=YEARLY_WL_EARNED,
+        created_by=created_by_user_id,
+    )
+    db.session.add(row)
+    db.session.flush()
+    recompute_leave_ledger_balances(emp.id)
+    return True
+
+
+def purge_prior_year_appointment_spl_wl_grants(
+    *,
+    as_of: date | None = None,
+    deleted_by_user_id: int | None = None,
+    deleted_by_username: str | None = None,
+) -> dict:
+    """
+    Delete SPL/WL appointment-grant ledger rows dated before Jan 1 of as_of's year.
+    Writes LeaveLedgerDeletion snapshots and recomputes balances for affected employees.
+    """
+    ref = as_of or date.today()
+    cutoff = date(ref.year, 1, 1)
+    rows = (
+        LeaveLedger.query.filter(
+            LeaveLedger.particulars.like(APPOINTMENT_SPL_WL_PARTICULARS_PREFIX + '%'),
+            LeaveLedger.transaction_date < cutoff,
+        )
+        .order_by(LeaveLedger.employee_id, LeaveLedger.id)
+        .all()
+    )
+    affected: set[int] = set()
+    deleted = 0
+    for entry in rows:
+        affected.add(entry.employee_id)
+        record_leave_ledger_deletion(
+            entry,
+            deleted_by_user_id=deleted_by_user_id,
+            deleted_by_username=deleted_by_username or 'system',
+            source='purge_prior_appt_spl_wl',
+        )
+        db.session.delete(entry)
+        deleted += 1
+
+    db.session.flush()
+    for emp_id in sorted(affected):
+        recompute_leave_ledger_balances(emp_id)
+
+    return {
+        'cutoff': cutoff.isoformat(),
+        'deleted': deleted,
+        'employees_affected': len(affected),
+    }
 
 
 def recompute_leave_ledger_balances(employee_id: int) -> None:
@@ -91,6 +187,7 @@ def recompute_leave_ledger_balances(employee_id: int) -> None:
         'se_calamity_balance': Decimal('0'),
         'adopt_balance': Decimal('0'),
         'cto_balance': Decimal('0'),
+        'lwop_balance': Decimal('0'),
     }
 
     for e in entries:
@@ -118,6 +215,7 @@ def recompute_leave_ledger_balances(employee_id: int) -> None:
         )
         e.adopt_balance = prev['adopt_balance'] + _dec(e.adopt_credits) - _dec(e.adopt_used)
         e.cto_balance = prev['cto_balance'] + _dec(e.cto_earned) - _dec(e.cto_used)
+        e.lwop_balance = prev['lwop_balance'] + _dec(e.lwop_days)
 
         prev['vl_balance'] = _dec(e.vl_balance)
         prev['sl_balance'] = _dec(e.sl_balance)
@@ -133,6 +231,7 @@ def recompute_leave_ledger_balances(employee_id: int) -> None:
         prev['se_calamity_balance'] = _dec(e.se_calamity_balance)
         prev['adopt_balance'] = _dec(e.adopt_balance)
         prev['cto_balance'] = _dec(e.cto_balance)
+        prev['lwop_balance'] = _dec(e.lwop_balance)
 
 
 def _vl_sl_for_month(emp: Employee, year: int, month: int) -> tuple[Decimal, Decimal]:
@@ -167,43 +266,6 @@ def _latest_spl_wl_balances(employee_id: int) -> tuple[Decimal, Decimal]:
     return _dec(last.spl_balance), _dec(last.wl_balance)
 
 
-def ensure_appointment_spl_wl_grant(
-    employee_id: int,
-    *,
-    created_by_user_id: int | None = None,
-) -> bool:
-    """
-    Post 3 SPL + 5 WL on the employee's appointment date if leave-credits eligible.
-    Idempotent per appointment date. Returns True if a new row was added.
-    """
-    emp = Employee.query.get(employee_id)
-    if not emp or not _eligible_leave_credits(emp):
-        return False
-    if (emp.status or '').strip().lower() == 'terminated':
-        return False
-    appt = emp.appointment_date
-    if not appt:
-        return False
-
-    particulars = appointment_spl_wl_particulars(appt)
-    if LeaveLedger.query.filter_by(employee_id=emp.id, particulars=particulars).first():
-        return False
-
-    row = LeaveLedger(
-        employee_id=emp.id,
-        transaction_date=appt,
-        particulars=particulars,
-        remarks='SPL and WL on appointment',
-        spl_earned=YEARLY_SPL_EARNED,
-        wl_earned=YEARLY_WL_EARNED,
-        created_by=created_by_user_id,
-    )
-    db.session.add(row)
-    db.session.flush()
-    recompute_leave_ledger_balances(emp.id)
-    return True
-
-
 def accrue_monthly_vl_sl_for_month(
     year: int,
     month: int,
@@ -214,7 +276,7 @@ def accrue_monthly_vl_sl_for_month(
     VL/SL: last day of month.
 
     January: also posts Jan 1 annual SPL/WL (3 + 5) for employees appointed before that
-    Jan 1 (appointment grant covers Jan 1 hires).
+    Jan 1 (same-year Jan 1 hires use the appointment grant only).
 
     December: after VL/SL, posts Dec 31 lapse of remaining SPL/WL balances.
 
@@ -233,7 +295,7 @@ def accrue_monthly_vl_sl_for_month(
     created_vlsl = 0
     skipped_duplicate = 0
     skipped_not_employed = 0
-    skipped_terminated = 0
+    skipped_separated = 0
 
     # --- January: annual SPL/WL first (dated Jan 1) so ordering is correct vs Jan 31 VL/SL ---
     created_annual = 0
@@ -242,7 +304,7 @@ def accrue_monthly_vl_sl_for_month(
         jan1 = date(year, 1, 1)
         annual_p = annual_spl_wl_particulars(year)
         for emp in employees:
-            if (emp.status or '').strip().lower() == 'terminated':
+            if (emp.status or '').strip().lower() == 'separated':
                 continue
             appt = emp.appointment_date
             if appt is not None and appt >= jan1:
@@ -271,8 +333,8 @@ def accrue_monthly_vl_sl_for_month(
 
     # --- Monthly VL/SL (last day of month) ---
     for emp in employees:
-        if (emp.status or '').strip().lower() == 'terminated':
-            skipped_terminated += 1
+        if (emp.status or '').strip().lower() == 'separated':
+            skipped_separated += 1
             continue
 
         vl_amt, sl_amt = _vl_sl_for_month(emp, year, month)
@@ -316,7 +378,7 @@ def accrue_monthly_vl_sl_for_month(
         lapse_p = year_end_lapse_particulars(year)
         lapse_emp_ids: list[int] = []
         for emp in employees:
-            if (emp.status or '').strip().lower() == 'terminated':
+            if (emp.status or '').strip().lower() == 'separated':
                 continue
             appt = emp.appointment_date
             if appt and appt > dec31:
@@ -367,7 +429,7 @@ def accrue_monthly_vl_sl_for_month(
         'skipped_lapse_no_balance': skipped_lapse_no_balance,
         'skipped_duplicate': skipped_duplicate,
         'skipped_not_employed': skipped_not_employed,
-        'skipped_terminated': skipped_terminated,
+        'skipped_separated': skipped_separated,
     }
 
 
@@ -519,5 +581,8 @@ def record_leave_ledger_deletion(
         cto_earned=entry.cto_earned,
         cto_used=entry.cto_used,
         cto_balance=entry.cto_balance,
+        lwop_days=entry.lwop_days,
+        lwop_balance=entry.lwop_balance,
+        lwop_amount=entry.lwop_amount,
     )
     db.session.add(snap)

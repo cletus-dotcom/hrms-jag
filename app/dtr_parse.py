@@ -8,18 +8,38 @@ Supports:
 
 Filenames like 1_attlog.dat, 58_attlog.dat, AECG214960162_attlog.dat only affect
 logging; employee IDs come from each data line.
+
+Each employee-day row keeps the four CSC slots (last punch wins per slot) and also
+retains every accepted raw punch for duplicate-slot review.
 """
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 
+# ZKTeco / fixed-width event code → CSC Form 48 slot name
+EVENT_CODE_TO_SLOT = {
+    0: "am_in",       # check-in
+    1: "pm_out",      # check-out
+    2: "am_out",      # break-out
+    3: "pm_in",       # break-in
+}
 
-def _parse_date_and_time_from_zk_field(col1: str) -> tuple[str | None, str]:
-    """Parse ZKTeco datetime field: 'YYYY-MM-DD HH:MM:SS' or 'YYYY-MM-DD HH:MM'."""
+SLOT_TO_ROW_FIELD = {
+    "am_in": "check_in",
+    "am_out": "break_out",
+    "pm_in": "break_in",
+    "pm_out": "check_out",
+}
+
+
+def _parse_date_and_time_from_zk_field(col1: str) -> tuple[str | None, str, str]:
+    """
+    Parse ZKTeco datetime field: 'YYYY-MM-DD HH:MM:SS' or 'YYYY-MM-DD HH:MM'.
+    Returns (date_yyyy_mm_dd, time_hh_mm, source_timestamp_raw).
+    """
     s = (col1 or "").strip()
     if not s:
-        return None, ""
+        return None, "", ""
     if " " in s:
         date_part, time_part = s.split(None, 1)
     elif "T" in s:
@@ -28,24 +48,28 @@ def _parse_date_and_time_from_zk_field(col1: str) -> tuple[str | None, str]:
         date_part, time_part = s, ""
     date_part = date_part.strip()
     time_part = time_part.strip()
+    source_ts = s
     dt_str = None
     if len(date_part) >= 10 and date_part[4] == "-" and date_part[7] == "-":
         dt_str = date_part[:10]
     elif len(date_part) >= 8 and date_part[:8].isdigit():
         dt_str = date_part[:4] + "-" + date_part[4:6] + "-" + date_part[6:8]
     if not dt_str:
-        return None, ""
+        return None, "", ""
     if not time_part:
-        return dt_str, ""
+        return dt_str, "", source_ts
     tparts = time_part.split(":")
     if len(tparts) >= 2:
         try:
             h, m = int(tparts[0]), int(tparts[1])
-            if 0 <= h <= 23 and 0 <= m <= 59:
-                return dt_str, f"{h:02d}:{m:02d}"
+            sec = int(tparts[2]) if len(tparts) >= 3 else 0
+            if 0 <= h <= 23 and 0 <= m <= 59 and 0 <= sec <= 59:
+                if len(tparts) >= 3:
+                    return dt_str, f"{h:02d}:{m:02d}:{sec:02d}", source_ts
+                return dt_str, f"{h:02d}:{m:02d}", source_ts
         except ValueError:
             pass
-    return dt_str, ""
+    return dt_str, "", source_ts
 
 
 def _parse_time_from_fixed_line(raw_line: str) -> str:
@@ -92,7 +116,7 @@ def _try_parse_tab_or_csv_line(ln: str) -> dict | None:
     emp_id = (parts[0] or "").strip()
     if not emp_id:
         return None
-    dt_str, tm = _parse_date_and_time_from_zk_field(parts[1] or "")
+    dt_str, tm, source_ts = _parse_date_and_time_from_zk_field(parts[1] or "")
     if not dt_str:
         return None
     try:
@@ -103,7 +127,13 @@ def _try_parse_tab_or_csv_line(ln: str) -> dict | None:
         return None
     if not tm:
         tm = _parse_time_from_fixed_line(ln)  # unlikely fallback
-    return {"emp_id": emp_id, "date": dt_str, "col38": status, "time": tm}
+    return {
+        "emp_id": emp_id,
+        "date": dt_str,
+        "col38": status,
+        "time": tm,
+        "source_timestamp": source_ts or (f"{dt_str} {tm}".strip() if tm else dt_str),
+    }
 
 
 def _try_parse_fixed_width_line(ln: str) -> dict | None:
@@ -136,13 +166,39 @@ def _try_parse_fixed_width_line(ln: str) -> dict | None:
     if not dt_str:
         return None
     tm = _parse_time_from_fixed_line(ln)
-    return {"emp_id": emp_id, "date": dt_str, "col38": col38, "time": tm}
+    source_ts = f"{dt_str} {tm}".strip() if tm else dt_str
+    return {
+        "emp_id": emp_id,
+        "date": dt_str,
+        "col38": col38,
+        "time": tm,
+        "source_timestamp": source_ts,
+    }
+
+
+def duplicate_slots_from_punches(punches: list[dict]) -> dict[str, list[dict]]:
+    """
+    Group punches by slot; return only slots that have 2+ punches
+    (including identical repeated timestamps).
+    """
+    by_slot: dict[str, list[dict]] = defaultdict(list)
+    for p in punches or []:
+        slot = (p.get("slot") or "").strip()
+        if slot in EVENT_CODE_TO_SLOT.values():
+            by_slot[slot].append(p)
+    return {slot: items for slot, items in by_slot.items() if len(items) >= 2}
 
 
 def parse_dtr_dat_file(file_content: bytes | str, filename: str = "") -> list[dict]:
     """
     Parse DTR .dat content. Returns sorted list of dicts:
-    employee_id, date (YYYY-MM-DD), check_in, break_out, break_in, check_out (HH:MM).
+    employee_id, date (YYYY-MM-DD), check_in, break_out, break_in, check_out (HH:MM or HH:MM:SS),
+    punches (list of raw punch dicts in source order).
+
+    Slot selection uses last-wins per (employee, date, event). Duplicate punches for
+    the same slot are retained in ``punches`` for HR review.
+
+    Times keep seconds when the source datetime includes them (HH:MM:SS).
 
     ``filename`` is accepted for API stability (any * _attlog.dat name is supported).
     """
@@ -155,32 +211,49 @@ def parse_dtr_dat_file(file_content: bytes | str, filename: str = "") -> list[di
     lines = [ln.rstrip("\r\n") for ln in text.splitlines() if ln.strip()]
 
     rows_raw: list[dict] = []
-    for ln in lines:
+    for line_idx, ln in enumerate(lines, start=1):
         rec = _try_parse_tab_or_csv_line(ln)
         if rec is None:
             rec = _try_parse_fixed_width_line(ln)
         if rec is None:
             continue
+        rec["line_no"] = line_idx
         rows_raw.append(rec)
 
     groups: dict = defaultdict(
-        lambda: {"check_in": "", "break_out": "", "break_in": "", "check_out": ""}
+        lambda: {
+            "check_in": "",
+            "break_out": "",
+            "break_in": "",
+            "check_out": "",
+            "punches": [],
+        }
     )
     for r in rows_raw:
         key = (r["emp_id"], r["date"])
         t = r["time"]
         c = r["col38"]
-        if c == 0:
-            groups[key]["check_in"] = t
-        elif c == 1:
-            groups[key]["check_out"] = t
-        elif c == 2:
-            groups[key]["break_out"] = t
-        elif c == 3:
-            groups[key]["break_in"] = t
+        slot = EVENT_CODE_TO_SLOT.get(c)
+        if not slot:
+            continue
+        punch = {
+            "event_code": c,
+            "slot": slot,
+            "time": t,
+            "source_timestamp": (r.get("source_timestamp") or "").strip() or t,
+            "line_no": r.get("line_no") or 0,
+            "sequence_no": len(groups[key]["punches"]) + 1,
+        }
+        groups[key]["punches"].append(punch)
+        field = SLOT_TO_ROW_FIELD[slot]
+        # Last punch wins for the selected CSC slot value
+        if t:
+            groups[key][field] = t
 
     out = []
     for (emp_id, dt_str), times in groups.items():
+        punches = times["punches"]
+        dup_slots = duplicate_slots_from_punches(punches)
         out.append(
             {
                 "employee_id": emp_id,
@@ -189,6 +262,9 @@ def parse_dtr_dat_file(file_content: bytes | str, filename: str = "") -> list[di
                 "break_out": times["break_out"],
                 "break_in": times["break_in"],
                 "check_out": times["check_out"],
+                "punches": punches,
+                "duplicate_slots": sorted(dup_slots.keys()),
+                "has_duplicate_punches": bool(dup_slots),
             }
         )
     out.sort(key=lambda x: (x["employee_id"], x["date"]))

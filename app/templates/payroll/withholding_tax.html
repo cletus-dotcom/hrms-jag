@@ -1,0 +1,432 @@
+{% extends "layouts/app.html" %}
+
+{% block title %}Withholding Tax - HRMS{% endblock %}
+
+{% set navbar_title = 'Withholding Tax' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Payroll'},
+    {'label': 'Deductions'},
+    {'label': 'Withholding Tax'}
+] %}
+
+{% block extra_css %}
+<style>
+  .wht-filters {
+    display: grid;
+    gap: 0.75rem;
+    column-gap: 1.25rem;
+    align-items: end;
+    margin-top: 1rem;
+  }
+  @media (min-width: 900px) {
+    .wht-filters {
+      grid-template-columns: 6rem 9rem auto minmax(16rem, 1fr);
+    }
+  }
+  .wht-note {
+    color: var(--medium-gray, #6b7280);
+    font-size: 0.95rem;
+    margin-top: 0.75rem;
+  }
+  .wht-submit-bar {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    justify-content: flex-end;
+    margin-top: 1rem;
+    flex-wrap: wrap;
+  }
+  .wht-table th, .wht-table td { white-space: nowrap; }
+  .wht-table-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+    margin-bottom: 0.75rem;
+  }
+  .wht-table-toolbar .search-bar {
+    flex: 1 1 220px;
+    max-width: 360px;
+    margin: 0;
+  }
+  .wht-upload-zone {
+    border: 2px dashed #cbd5e1;
+    border-radius: 10px;
+    padding: 1.25rem;
+    text-align: center;
+    background: #fafafa;
+  }
+  .wht-loading-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10500;
+    background: rgba(15, 23, 42, 0.45);
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+  }
+  .wht-loading-overlay.is-visible { display: flex; }
+  .wht-loading-card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 1.5rem 1.75rem;
+    text-align: center;
+    max-width: 22rem;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.15);
+  }
+  .wht-loading-spinner {
+    width: 2.25rem;
+    height: 2.25rem;
+    margin: 0 auto 0.85rem;
+    border: 3px solid #e5e7eb;
+    border-top-color: #1e40af;
+    border-radius: 50%;
+    animation: wht-spin 0.75s linear infinite;
+  }
+  @keyframes wht-spin { to { transform: rotate(360deg); } }
+  .wht-row-clickable { cursor: pointer; }
+  .wht-row-clickable:hover { background-color: rgba(18, 64, 114, 0.04); }
+  .wht-deduction-row.is-expanded { background-color: rgba(18, 64, 114, 0.06); }
+  .wht-label { font-weight: 600; color: var(--brand-blue-ink, #1e3a5f); }
+  .wht-details-row td.wht-details-cell {
+    background: #f8fafc;
+    padding: 0.65rem 1rem 0.85rem 2.25rem;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .wht-details-panel { display: inline-block; min-width: 14rem; }
+  .wht-details-panel-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--medium-gray, #6b7280);
+    margin: 0 0 0.4rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .wht-details-table { width: auto; border-collapse: collapse; }
+  .wht-details-table td {
+    padding: 0.25rem 0.75rem 0.25rem 0;
+    font-size: 0.9rem;
+    border: none;
+  }
+  .wht-details-table td.num {
+    text-align: right;
+    padding-right: 0;
+    font-variant-numeric: tabular-nums;
+  }
+</style>
+{% endblock %}
+
+{% block app_content %}
+<div class="page-header" style="align-items: center;">
+      <div>
+        <h1 class="page-title">Withholding Tax</h1>
+      </div>
+      <a href="{{ url_for('routes.dashboard') }}" class="btn-secondary">Dashboard</a>
+    </div>
+
+    <section class="card" style="padding: 1rem 1.25rem; border: 1px solid var(--brand-border, #e5e7eb); border-radius: 12px;">
+      <h2 style="margin: 0 0 0.35rem; font-size: 1.05rem;">Schedule</h2>
+      <div class="wht-note">Deductible on <strong>1st quincena</strong> only. Loaded rows are not editable.</div>
+
+      {% if show_upload %}
+      <p class="wht-note" style="margin-top: 0;">
+        <a href="{{ url_for('routes.payroll_deductions_withholding_tax', loan_view='load') }}">← Back to load deductions</a>
+      </p>
+      <div class="wht-upload-zone" style="margin-top: 0.75rem;">
+        <p class="wht-note" style="margin-top: 0;">Upload <strong>WITHHOLDING TAX.xlsx</strong>. Uses sheet <strong>TAX_SCHEDULE</strong>. Parses <strong>Employee No.</strong>, <strong>PERCOV</strong>, and <strong>Q1 ONLY</strong>.</p>
+        <input type="file" id="whtFileInput" accept=".xls,.xlsx" style="display:none;">
+        <button type="button" class="btn-primary" id="whtUploadBtn">Upload</button>
+      </div>
+
+      <div id="whtPreviewWrap" style="display:none; margin-top: 1rem;">
+        <p class="wht-note" id="whtPreviewMeta"></p>
+        <div class="table-container" style="overflow-x:auto; margin-top: 0.75rem;">
+          <table class="data-table wht-table" id="whtPreviewTable">
+            <thead>
+              <tr>
+                <th>Employee No.</th>
+                <th>Emp ID</th>
+                <th>Employee</th>
+                <th>Department</th>
+                <th>PERCOV</th>
+                <th class="num">Q1 ONLY</th>
+              </tr>
+            </thead>
+            <tbody id="whtPreviewBody"></tbody>
+          </table>
+        </div>
+        <form method="POST" action="{{ url_for('routes.payroll_deductions_withholding_tax_upload_submit') }}" id="whtUploadSubmitForm" style="margin-top: 1rem;">
+          <input type="hidden" name="year" id="whtUploadYear" value="">
+          <input type="hidden" name="month" id="whtUploadMonth" value="">
+          <input type="hidden" name="rows_json" id="whtUploadRowsJson" value="[]">
+          <button type="submit" class="btn-primary" id="whtUploadSubmitBtn" disabled>Submit</button>
+        </form>
+      </div>
+      {% else %}
+
+      <div id="whtLoadCard" style="margin-top: 1rem;">
+        <p class="wht-note" style="margin-top: 0;">
+          {% if has_data %}
+          Withholding tax data is on file. Load deductions by period below, or
+          <a href="{{ url_for('routes.payroll_deductions_withholding_tax', loan_view='upload') }}">upload a new file</a>.
+          {% else %}
+          Load deductions by period below, or
+          <a href="{{ url_for('routes.payroll_deductions_withholding_tax', loan_view='upload') }}">upload a withholding tax file</a> first.
+          {% endif %}
+        </p>
+        <form method="GET" action="{{ url_for('routes.payroll_deductions_withholding_tax') }}" class="wht-filters" id="whtLoadForm">
+          <input type="hidden" name="loan_view" value="load">
+          <div>
+            <label class="form-label" for="whtYear">Year</label>
+            <input id="whtYear" name="year" class="form-control" value="{{ year }}" />
+          </div>
+          <div>
+            <label class="form-label" for="whtMonth">Month</label>
+            <select id="whtMonth" name="month" class="form-control">
+              {% for m in range(1, 13) %}
+                <option value="{{ m }}" {% if m == month %}selected{% endif %}>{{ ['January','February','March','April','May','June','July','August','September','October','November','December'][m-1] }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <input type="hidden" name="loan_load" value="1" />
+            <button class="btn-primary" type="submit">Load</button>
+          </div>
+          <div>
+            <label class="form-label" for="whtDept">Department (optional)</label>
+            <select id="whtDept" name="department_id" class="form-control">
+              <option value="">All departments</option>
+              {% for d in departments %}
+                <option value="{{ d.id }}" {% if selected_department and d.id == selected_department.id %}selected{% endif %}>{{ d.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </form>
+
+        {% if loaded %}
+        {% if not rows %}
+          <p class="wht-note" style="margin-top: 0.75rem;">No employees with withholding tax data found for the selected scope.</p>
+        {% else %}
+        <form method="POST" action="{{ url_for('routes.payroll_deductions_withholding_tax_deductions_submit') }}" id="whtDeductionForm" style="margin-top: 1rem;">
+          <input type="hidden" name="year" value="{{ year }}">
+          <input type="hidden" name="month" value="{{ month }}">
+          <input type="hidden" name="department_id" value="{{ selected_department.id if selected_department else '' }}">
+          <input type="hidden" name="rows_json" id="whtDeductionRowsJson" value="[]">
+
+          <div class="wht-table-toolbar">
+            <div class="search-bar">
+              <input type="text" id="whtEmployeeSearch" class="search-input" placeholder="Search employees…" autocomplete="off">
+              <span class="search-icon">🔍</span>
+            </div>
+            <span style="font-size: 0.85rem; color: var(--medium-gray);"><strong id="whtRowCount">{{ rows|length }}</strong> employee(s)</span>
+          </div>
+
+          <div class="table-container" style="overflow-x:auto;">
+            <table class="data-table wht-table" id="whtDeductionTable">
+              <thead>
+                <tr>
+                  <th>Emp ID</th>
+                  <th>Employee</th>
+                  <th>Department</th>
+                  <th>Deduction</th>
+                  <th class="num">Q1 Amount</th>
+                  <th>Deductible on</th>
+                </tr>
+              </thead>
+              <tbody id="whtDeductionBody">
+                {% for r in rows %}
+                <tr class="wht-deduction-row wht-row-clickable"
+                    data-employee-pk="{{ r.employee_pk }}"
+                    data-search="{{ r.search_text }}"
+                    data-q1-amount="{{ r.q1_amount_raw }}"
+                    title="Click row to expand details">
+                  <td>{{ r.employee_id }}</td>
+                  <td>{{ r.employee_name }}</td>
+                  <td>{{ r.department_name }}</td>
+                  <td><span class="wht-label">{{ r.label }}</span></td>
+                  <td class="num">{{ r.q1_amount }}</td>
+                  <td><span class="wht-note" style="margin:0;">1st quincena</span></td>
+                </tr>
+                <tr class="wht-details-row" style="display:none;" data-parent-pk="{{ r.employee_pk }}">
+                  <td colspan="6" class="wht-details-cell">
+                    <div class="wht-details-panel">
+                      <p class="wht-details-panel-title">Details{% if r.percov %} (PERCOV {{ r.percov }}){% endif %}</p>
+                      <table class="wht-details-table">
+                        <tbody>
+                          <tr>
+                            <td>Q1 ONLY</td>
+                            <td class="num">{{ r.q1_amount }}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          <p id="whtSearchNoMatch" style="display:none; margin-top:0.75rem; color:var(--medium-gray); font-size:0.9rem;">No rows match your search.</p>
+          <div class="wht-submit-bar">
+            <button type="submit" class="btn-primary">Submit</button>
+          </div>
+        </form>
+        {% endif %}
+        {% elif has_data %}
+        <p class="wht-note" style="margin-top: 0.75rem;">Select year and month, then click <strong>Load</strong>.</p>
+        {% endif %}
+      </div>
+      {% endif %}
+    </section>
+
+    <div id="whtLoadingOverlay" class="wht-loading-overlay" aria-live="polite" aria-busy="true">
+      <div class="wht-loading-card">
+        <div class="wht-loading-spinner" aria-hidden="true"></div>
+        <p style="margin:0; font-weight:600;">Reading file in progress. Please wait a moment.</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  var overlay = document.getElementById('whtLoadingOverlay');
+  var uploadBtn = document.getElementById('whtUploadBtn');
+  var fileInput = document.getElementById('whtFileInput');
+  var previewWrap = document.getElementById('whtPreviewWrap');
+  var previewBody = document.getElementById('whtPreviewBody');
+  var previewMeta = document.getElementById('whtPreviewMeta');
+  var uploadSubmitBtn = document.getElementById('whtUploadSubmitBtn');
+  var uploadRowsJson = document.getElementById('whtUploadRowsJson');
+  var uploadYear = document.getElementById('whtUploadYear');
+  var uploadMonth = document.getElementById('whtUploadMonth');
+  var previewData = [];
+
+  if (uploadBtn && fileInput) {
+    uploadBtn.addEventListener('click', function () { fileInput.click(); });
+    fileInput.addEventListener('change', function () {
+      if (!fileInput.files || !fileInput.files[0]) return;
+      var fd = new FormData();
+      fd.append('withholding_tax_file', fileInput.files[0]);
+      if (overlay) overlay.classList.add('is-visible');
+      fetch('{{ url_for("routes.payroll_deductions_withholding_tax_preview") }}', {
+        method: 'POST',
+        body: fd,
+        credentials: 'same-origin'
+      }).then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (overlay) overlay.classList.remove('is-visible');
+          if (!data.ok) {
+            alert(data.error || 'Failed to read file.');
+            return;
+          }
+          previewData = data.rows || [];
+          if (uploadYear) uploadYear.value = data.year;
+          if (uploadMonth) uploadMonth.value = data.month;
+          if (previewMeta) {
+            previewMeta.textContent = 'PERCOV period: ' + data.month + '/' + data.year
+              + ' — matched ' + data.matched_count + ' of ' + data.total_count
+              + ' row(s). Unmatched employee numbers are shown but not submitted.';
+          }
+          if (previewBody) {
+            previewBody.innerHTML = '';
+            previewData.forEach(function (r) {
+              var tr = document.createElement('tr');
+              if (!r.matched) tr.className = 'wht-unmatched';
+              var cols = ['employee_no','employee_id','employee_name','department_name','percov','q1_display'];
+              cols.forEach(function (c) {
+                var td = document.createElement('td');
+                td.textContent = r[c] || (c === 'employee_name' && !r.matched ? '(unmatched)' : '');
+                if (c === 'q1_display') td.className = 'num';
+                tr.appendChild(td);
+              });
+              previewBody.appendChild(tr);
+            });
+          }
+          if (previewWrap) previewWrap.style.display = '';
+          if (uploadSubmitBtn) uploadSubmitBtn.disabled = !(data.matched_count > 0);
+        })
+        .catch(function () {
+          if (overlay) overlay.classList.remove('is-visible');
+          alert('Failed to read file.');
+        });
+    });
+  }
+
+  var uploadForm = document.getElementById('whtUploadSubmitForm');
+  if (uploadForm && uploadRowsJson) {
+    uploadForm.addEventListener('submit', function () {
+      var matched = previewData.filter(function (r) { return r.matched && r.employee_pk; });
+      uploadRowsJson.value = JSON.stringify(matched);
+    });
+  }
+
+  var body = document.getElementById('whtDeductionBody');
+  if (body) {
+    function detailsRow(tr) {
+      var next = tr.nextElementSibling;
+      return (next && next.classList.contains('wht-details-row')) ? next : null;
+    }
+    function toggleDetails(tr) {
+      var detailRow = detailsRow(tr);
+      if (!detailRow) return;
+      var expanded = !tr.classList.contains('is-expanded');
+      tr.classList.toggle('is-expanded', expanded);
+      detailRow.style.display = expanded ? '' : 'none';
+    }
+
+    body.addEventListener('click', function (e) {
+      if (e.target.closest('input, button, label, select, a')) return;
+      var tr = e.target.closest('tr.wht-deduction-row');
+      if (tr) toggleDetails(tr);
+    });
+  }
+
+  function filterRows() {
+    var inp = document.getElementById('whtEmployeeSearch');
+    var tbody = document.getElementById('whtDeductionBody');
+    if (!inp || !tbody) return;
+    var q = (inp.value || '').trim().toLowerCase();
+    var shown = 0;
+    tbody.querySelectorAll('tr.wht-deduction-row').forEach(function (tr) {
+      var hay = tr.getAttribute('data-search') || '';
+      var ok = !q || hay.indexOf(q) !== -1;
+      tr.style.display = ok ? '' : 'none';
+      var detailRow = tr.nextElementSibling;
+      if (detailRow && detailRow.classList.contains('wht-details-row')) {
+        detailRow.style.display = (ok && tr.classList.contains('is-expanded')) ? '' : 'none';
+      }
+      if (ok) shown++;
+    });
+    var countEl = document.getElementById('whtRowCount');
+    if (countEl) countEl.textContent = String(shown);
+    var noMatch = document.getElementById('whtSearchNoMatch');
+    if (noMatch) noMatch.style.display = (q && shown === 0) ? 'block' : 'none';
+  }
+  var searchInp = document.getElementById('whtEmployeeSearch');
+  if (searchInp) searchInp.addEventListener('input', filterRows);
+
+  var dedForm = document.getElementById('whtDeductionForm');
+  var dedOut = document.getElementById('whtDeductionRowsJson');
+  if (dedForm && dedOut) {
+    dedForm.addEventListener('submit', function () {
+      var rows = [];
+      document.querySelectorAll('#whtDeductionBody tr.wht-deduction-row').forEach(function (tr) {
+        var empPk = tr.getAttribute('data-employee-pk');
+        if (!empPk) return;
+        rows.push({
+          employee_pk: empPk,
+          q1_amount: tr.getAttribute('data-q1-amount') || '0'
+        });
+      });
+      dedOut.value = JSON.stringify(rows);
+    });
+  }
+})();
+</script>
+{% endblock %}
+

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portal Administrator — HRMS</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/portal-admin.css') }}">
+</head>
+<body class="portal-admin-body">
+<main class="portal-admin-main">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} portal-admin-flash">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+    <div class="portal-admin-login-wrap">
+        <div class="portal-admin-login-card">
+            <h1>Portal Administrator</h1>
+            <p class="portal-admin-login-lead">System console for branding, landing CMS, and database import tools. For installation teams and LGU IT administrators.</p>
+            <form method="POST" action="{{ url_for('portal_admin.login') }}" class="portal-admin-login-form">
+                {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" class="form-control" required autocomplete="username" placeholder="PortalAdmin">
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" class="form-control" required autocomplete="current-password">
+                </div>
+                <button type="submit" class="btn-primary portal-admin-login-btn">Sign In</button>
+            </form>
+            <p class="portal-admin-login-foot"><a href="{{ url_for('routes.index') }}">← Back to public site</a></p>
+        </div>
+    </div>
+</main>
+</body>
+</html>

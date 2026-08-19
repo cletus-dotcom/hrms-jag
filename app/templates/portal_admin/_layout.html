@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block portal_title %}Portal Console{% endblock %} — HRMS</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/portal-admin.css') }}">
+    {% block portal_extra_css %}{% endblock %}
+</head>
+<body class="portal-admin-body">
+    <header class="portal-admin-topbar">
+        <div class="portal-admin-topbar-inner">
+            <a href="{{ url_for('portal_admin.console') }}" class="portal-admin-brand">
+                <span class="portal-admin-brand-icon" aria-hidden="true">🛡</span>
+                <span>Portal Console</span>
+            </a>
+            <nav class="portal-admin-topnav" aria-label="Portal admin">
+                <a href="{{ url_for('portal_admin.console') }}" class="{% if request.endpoint == 'portal_admin.console' %}active{% endif %}">Overview</a>
+                <a href="{{ url_for('portal_admin.branding') }}" class="{% if request.endpoint == 'portal_admin.branding' %}active{% endif %}">Branding</a>
+                <a href="{{ url_for('portal_admin.cms_landing') }}" class="{% if request.endpoint == 'portal_admin.cms_landing' %}active{% endif %}">Landing CMS</a>
+                <a href="{{ url_for('portal_admin.import_home') }}" class="{% if request.endpoint and request.endpoint.startswith('portal_admin.import') %}active{% endif %}">Data Import</a>
+                <a href="{{ url_for('routes.dashboard') }}">HRMS Dashboard</a>
+                <a href="{{ url_for('routes.index') }}" target="_blank" rel="noopener">View Site</a>
+                <a href="{{ url_for('portal_admin.logout') }}">Sign Out</a>
+            </nav>
+        </div>
+    </header>
+    <main class="portal-admin-main">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, message in messages %}
+              <div class="alert alert-{{ category }} portal-admin-flash">{{ message }}</div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+        {% block portal_content %}{% endblock %}
+    </main>
+    <script src="{{ url_for('static', filename='js/portal-admin-import.js') }}"></script>
+    {% block portal_extra_js %}{% endblock %}
+</body>
+</html>

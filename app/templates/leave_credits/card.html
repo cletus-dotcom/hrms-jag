@@ -1,6 +1,13 @@
-{% extends "base.html" %}
+{% extends "layouts/app.html" %}
 
 {% block title %}Leave Card - {{ emp.employee_id }} - HRMS{% endblock %}
+
+{% set navbar_title = 'Leave Credit Card' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Leave Management'},
+    {'label': 'Leave Credit Card'}
+] %}
 
 {% block extra_css %}
 <style>
@@ -77,198 +84,304 @@
     .add-entry-btn:hover {
         background: var(--primary-hover, #004494);
     }
-    .modal-overlay {
+    #addEntryModal.modal-overlay {
         display: none;
         position: fixed;
-        top: 0; left: 0; right: 0; bottom: 0;
-        background: rgba(0,0,0,0.5);
-        z-index: 1000;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.48);
+        z-index: 2000;
         align-items: center;
         justify-content: center;
+        padding: 1rem;
     }
-    .modal-overlay.active {
+    #addEntryModal.modal-overlay.active {
         display: flex;
     }
-    .modal-content {
+    #addEntryModal .modal-dialog {
         background: #fff;
-        border-radius: 8px;
-        padding: 1.5rem;
-        max-width: 900px;
-        width: 95%;
-        max-height: 90vh;
-        overflow-y: auto;
+        border-radius: 10px;
+        box-shadow: 0 16px 48px rgba(15, 23, 42, 0.22);
+        width: 100%;
+        max-width: 840px;
+        max-height: min(92vh, 900px);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        min-height: 0;
     }
-    .modal-header {
+    #addEntryModal .modal-dialog > form {
+        display: flex;
+        flex-direction: column;
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: hidden;
+    }
+    #addEntryModal .modal-header {
         display: flex;
         justify-content: space-between;
-        align-items: center;
-        margin-bottom: 1rem;
-        border-bottom: 1px solid #eee;
-        padding-bottom: 0.75rem;
+        align-items: flex-start;
+        gap: 1rem;
+        padding: 1rem 1.35rem;
+        border-bottom: 1px solid #e5e7eb;
+        background: #f8fafc;
+        flex-shrink: 0;
     }
-    .modal-header h3 {
+    #addEntryModal .modal-header-text {
+        min-width: 0;
+    }
+    #addEntryModal .modal-title {
         margin: 0;
-        font-size: 1.2rem;
+        font-size: 1.15rem;
+        font-weight: 700;
+        color: var(--primary-blue, #013a63);
+        line-height: 1.3;
     }
-    .modal-close {
+    #addEntryModal .modal-subtitle {
+        margin: 0.25rem 0 0;
+        font-size: 0.8rem;
+        color: #64748b;
+        line-height: 1.4;
+    }
+    #addEntryModal .modal-close {
         background: none;
         border: none;
         font-size: 1.5rem;
         cursor: pointer;
-        color: #666;
+        color: #64748b;
+        line-height: 1;
+        padding: 0.15rem 0.35rem;
+        border-radius: 6px;
+        flex-shrink: 0;
     }
-    .form-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: 0.75rem;
+    #addEntryModal .modal-close:hover {
+        background: #e2e8f0;
+        color: #0f172a;
     }
-    .form-group {
-        display: flex;
-        flex-direction: column;
-        gap: 0.25rem;
+    #addEntryModal .modal-body {
+        padding: 1.15rem 1.35rem 1.35rem;
+        overflow-x: hidden;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        flex: 1 1 auto;
+        min-height: 0;
+        overscroll-behavior: contain;
     }
-    .form-group label {
-        font-size: 0.8rem;
-        font-weight: 500;
-        color: #555;
-    }
-    .form-group input {
-        padding: 0.4rem 0.5rem;
-        border: 1px solid #ccc;
-        border-radius: 4px;
-        font-size: 0.85rem;
-    }
-    .form-group.full-width {
-        grid-column: 1 / -1;
-    }
-    .section-title {
-        font-weight: 600;
-        font-size: 0.9rem;
-        margin: 1rem 0 0.5rem;
-        padding: 0.5rem;
-        border-radius: 4px;
-    }
-    .section-title.vl { background: #d4edda; }
-    .section-title.sl { background: #cce5ff; }
-    .section-title.other { background: #fff3cd; }
-    .section-title.cto { background: #f8d7da; }
-    .modal-actions {
-        margin-top: 1.5rem;
+    #addEntryModal .modal-footer {
         display: flex;
         justify-content: flex-end;
-        gap: 0.75rem;
+        gap: 0.65rem;
+        padding: 0.85rem 1.35rem;
+        border-top: 1px solid #e5e7eb;
+        background: #f8fafc;
+        flex-shrink: 0;
     }
-    .btn-submit {
-        padding: 0.5rem 1.25rem;
-        background: var(--primary-color, #0056b3);
-        color: #fff;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 0.9rem;
+    #addEntryModal .form-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 0.75rem 0.85rem;
     }
-    .btn-cancel {
-        padding: 0.5rem 1.25rem;
-        background: #6c757d;
-        color: #fff;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
+    @media (max-width: 780px) {
+        #addEntryModal .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 520px) {
+        #addEntryModal .form-grid { grid-template-columns: 1fr; }
+    }
+    #addEntryModal .form-group {
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+        min-width: 0;
+    }
+    #addEntryModal .form-group label {
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: #334155;
+        letter-spacing: 0.01em;
+    }
+    #addEntryModal .form-group input {
+        width: 100%;
+        padding: 0.45rem 0.6rem;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        font-size: 0.875rem;
+        color: #0f172a;
+        background: #fff;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    #addEntryModal .form-group input:focus {
+        outline: none;
+        border-color: #3b82c4;
+        box-shadow: 0 0 0 3px rgba(1, 58, 99, 0.12);
+    }
+    #addEntryModal .form-group.full-width {
+        grid-column: 1 / -1;
+    }
+    #addEntryModal .ledger-meta-block {
+        margin-bottom: 0.35rem;
+    }
+    #addEntryModal .ledger-section {
+        margin-top: 1.15rem;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        overflow: hidden;
+        background: #fff;
+    }
+    #addEntryModal .ledger-section-head {
+        display: flex;
+        align-items: center;
+        gap: 0.55rem;
+        padding: 0.55rem 0.85rem;
+        font-size: 0.8rem;
+        font-weight: 700;
+        color: #0f172a;
+        border-bottom: 1px solid #e5e7eb;
+        background: #f8fafc;
+    }
+    #addEntryModal .ledger-section-head::before {
+        content: '';
+        width: 3px;
+        height: 1rem;
+        border-radius: 2px;
+        background: #94a3b8;
+        flex-shrink: 0;
+    }
+    #addEntryModal .ledger-section.vl .ledger-section-head::before { background: #16a34a; }
+    #addEntryModal .ledger-section.sl .ledger-section-head::before { background: #2563eb; }
+    #addEntryModal .ledger-section.other .ledger-section-head::before { background: #ca8a04; }
+    #addEntryModal .ledger-section.cto .ledger-section-head::before { background: #dc2626; }
+    #addEntryModal .ledger-section.remarks .ledger-section-head::before { background: #64748b; }
+    #addEntryModal .ledger-section-body {
+        padding: 0.85rem;
+    }
+    #addEntryModal .ledger-date-panel {
+        display: grid;
+        grid-template-columns: minmax(0, 1.35fr) minmax(180px, 0.9fr);
+        gap: 0.85rem;
+        align-items: stretch;
+        margin-top: 0.45rem;
+    }
+    @media (max-width: 720px) {
+        #addEntryModal .ledger-date-panel { grid-template-columns: 1fr; }
+    }
+    #addEntryModal .ledger-calendar {
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 0.7rem;
+        background: #fff;
+    }
+    #addEntryModal .ledger-cal-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.55rem;
+    }
+    #addEntryModal .ledger-cal-title {
+        font-weight: 700;
         font-size: 0.9rem;
+        color: #0f172a;
+    }
+    #addEntryModal .ledger-cal-btn {
+        border: 1px solid #cbd5e1;
+        background: #fff;
+        border-radius: 6px;
+        padding: 0.25rem 0.55rem;
+        cursor: pointer;
+        font-size: 0.8rem;
+        color: #334155;
+        line-height: 1.2;
+    }
+    #addEntryModal .ledger-cal-btn:hover {
+        background: #f1f5f9;
+        border-color: #94a3b8;
+    }
+    #addEntryModal .ledger-cal-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 0.2rem;
+    }
+    #addEntryModal .ledger-cal-dow {
+        font-size: 0.68rem;
+        font-weight: 600;
+        color: #64748b;
+        text-align: center;
+        padding: 0.2rem 0 0.35rem;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+    #addEntryModal .ledger-cal-day {
+        text-align: center;
+        padding: 0.42rem 0;
+        border-radius: 7px;
+        cursor: pointer;
+        user-select: none;
+        border: 1px solid transparent;
+        font-size: 0.82rem;
+        color: #0f172a;
+        font-variant-numeric: tabular-nums;
+    }
+    #addEntryModal .ledger-cal-day.muted {
+        color: #cbd5e1;
+        cursor: default;
+    }
+    #addEntryModal .ledger-cal-day.selected {
+        background: var(--primary-blue, #013a63);
+        color: #fff;
+        font-weight: 600;
+    }
+    #addEntryModal .ledger-cal-day:hover:not(.muted):not(.selected) {
+        background: #eff6ff;
+        border-color: #bfdbfe;
+    }
+    #addEntryModal .ledger-date-side {
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 0.75rem;
+        background: #f8fafc;
+        display: flex;
+        flex-direction: column;
+        min-height: 11rem;
+    }
+    #addEntryModal .ledger-date-side-title {
+        font-weight: 700;
+        font-size: 0.78rem;
+        color: #334155;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        margin-bottom: 0.45rem;
+    }
+    #addEntryModal .ledger-date-pills {
+        flex: 1 1 auto;
+        max-height: 9rem;
+        overflow-y: auto;
+        margin-bottom: 0.35rem;
+    }
+    #addEntryModal .ledger-date-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 0.18rem 0.5rem;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        font-weight: 500;
+        background: #e2e8f0;
+        color: #0f172a;
+        margin: 0 0.25rem 0.25rem 0;
+        font-variant-numeric: tabular-nums;
+    }
+    #addEntryModal .ledger-date-helper {
+        font-size: 0.78rem;
+        color: #64748b;
+        margin: 0;
+        line-height: 1.4;
+    }
+    #addEntryModal .ledger-date-side .ledger-cal-btn {
+        align-self: flex-start;
+        margin-top: 0.35rem;
     }
 </style>
 {% endblock %}
 
-{% block content %}
-<div class="dashboard-container">
-    <div class="header-bar">
-        <div class="header-content">
-            {% include 'includes/navbar_brand.html' %}
-            <nav class="main-nav">
-                <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
-                {% if (current_user.role or '')|lower in ('admin', 'hr') %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Settings <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
-                        <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Manage Employees</a>
-                        <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
-                        <hr class="dropdown-separator">
-                        <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
-                        <a href="{{ url_for('routes.jo_cos_designations_list') }}" class="dropdown-item">JO/COS designations</a>
-                        <a href="{{ url_for('routes.jo_cos_rates_list') }}" class="dropdown-item">JO and COS Rates</a>
-                        <a href="{{ url_for('routes.flexi_time_schedule_list') }}" class="dropdown-item">Flexi-time schedule</a>
-                        <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
-                        <hr class="dropdown-separator">
-                        <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
-                    </div>
-                </div>
-                {% endif %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Daily Time Records <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
-                        {% include 'includes/nav_dtr_upload_link.html' %}
-                        <a href="{{ url_for('routes.dtr_justifications') }}" class="dropdown-item">DTR Justifications</a>
-                        {% include 'includes/nav_dtr_edit_link.html' %}
-                    </div>
-                </div>
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link nav-link-active">Leave Management <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        {% if (current_user.role or '')|lower in ('admin', 'hr') %}
-                        <a href="{{ url_for('routes.leave_settings_list') }}" class="dropdown-item">Leave Settings</a>
-                        <a href="{{ url_for('routes.leave_credits_list') }}" class="dropdown-item">Leave Credits</a>
-                        <hr class="dropdown-separator">
-                        {% endif %}
-                        <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply for Leave</a>
-                        <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
-                        {% if (current_user.role or '')|lower == 'manager' %}
-                        <hr class="dropdown-separator">
-                        <a href="{{ url_for('routes.leave_approvals') }}" class="dropdown-item">Leave Approvals</a>
-                        {% endif %}
-                    </div>
-                </div>
-                {% include 'includes/nav_payroll_top_menu.html' %}
-                {% if (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        {% include 'includes/reports_dropdown_links.html' %}
-                    </div>
-                </div>
-                {% else %}
-                <a href="#" class="nav-link">Reports</a>
-                {% endif %}
-                <div class="nav-dropdown">
-                    <a href="#" class="nav-link">ABOUT <span class="dropdown-arrow">▼</span></a>
-                    <div class="dropdown-menu">
-                        <a href="{{ url_for('routes.users_manual') }}" class="dropdown-item">User's Manual</a>
-                        <a href="{{ url_for('routes.hrmdo_manual') }}" class="dropdown-item">HRMDO Manual</a>
-                    </div>
-                </div>
-            </nav>
-            <div class="user-dropdown">
-                <a href="#" class="user-info">
-                    {% if employee %}
-                        {{ employee.full_name }} ({{ current_user.role|title }})
-                    {% else %}
-                        {{ current_user.username }} ({{ current_user.role|title }})
-                    {% endif %}
-                    <span class="dropdown-arrow">▼</span>
-                </a>
-                <div class="dropdown-menu dropdown-menu-right">
-                    <button type="button" class="dropdown-item btn-change-password" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Change password</button>
-                    <form method="POST" action="{{ url_for('routes.logout') }}" style="margin: 0;">
-                        <button type="submit" class="dropdown-item" style="width: 100%; text-align: left; background: none; border: none; cursor: pointer; font: inherit; padding: 0.5rem 1rem;">Logout</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="dashboard-content">
-        {% with messages = get_flashed_messages(with_categories=true) %}
+{% block app_content %}
+{% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
                     <div class="alert alert-{{ category }} alert-dismissible">
@@ -287,10 +400,19 @@
                 </p>
             </div>
             <div style="display: flex; gap: 0.75rem;">
+                {% if can_export_pdf and pdf_url %}
+                <a href="{{ pdf_url }}" class="btn-primary">Export PDF</a>
+                {% endif %}
                 <button type="button" class="add-entry-btn" onclick="openAddModal()">+ Add Entry</button>
                 <a href="{{ url_for('routes.leave_credits_list') }}" class="btn-secondary">Back to Leave Credits</a>
             </div>
         </div>
+
+        {% if lwop_balance and lwop_balance > 0 %}
+        <div class="card" style="padding: 0.85rem 1.1rem; margin-bottom: 1rem; border-left: 4px solid #dc2626; background: #fef2f2;">
+            <strong>LWOP balance:</strong> {{ '{:,.3f}'.format(lwop_balance) }} day(s) pending deduction on the next 1st quincena payroll (monthly rate ÷ 22 per day).
+        </div>
+        {% endif %}
 
         <div class="card" style="padding: 1.25rem 1.5rem;">
             <h2 style="font-size: 1.1rem; margin-bottom: 1rem;">Leave Ledger</h2>
@@ -312,6 +434,7 @@
                             <th colspan="5" class="section-header vl-header">Vacation Leave</th>
                             <th colspan="3" class="section-header sl-header">Sick Leave</th>
                             <th colspan="{{ other_colspan }}" class="section-header other-header">Other Kinds of Leave</th>
+                            <th colspan="3" class="section-header lwop-header" style="background:#fee2e2;">LWOP</th>
                             <th rowspan="3" style="min-width: 120px;">Remarks</th>
                         </tr>
                         <!-- Row 2: Sub-headers -->
@@ -336,6 +459,9 @@
                             <th colspan="3" class="section-header leave-secalamity">SE-Calamity</th>
                             <th colspan="3" class="section-header leave-adopt">Adopt</th>
                             <th colspan="3" class="section-header cto-header">CTO</th>
+                            <th rowspan="2" class="lwop-header" style="background:#fee2e2;">Days</th>
+                            <th rowspan="2" class="lwop-header" style="background:#fee2e2;">Amount</th>
+                            <th rowspan="2" class="lwop-header" style="background:#fee2e2;">Balance</th>
                         </tr>
                         <!-- Row 3: Other kinds of leave sub-columns -->
                         <tr>
@@ -441,6 +567,10 @@
                             <td>{{ '{:,.3f}'.format(entry.cto_earned) if entry.cto_earned else '' }}</td>
                             <td>{{ '{:,.3f}'.format(entry.cto_used) if entry.cto_used else '' }}</td>
                             <td class="balance-cell">{{ '{:,.3f}'.format(entry.cto_balance) if entry.cto_balance else '' }}</td>
+                            <!-- LWOP -->
+                            <td>{{ '{:,.3f}'.format(entry.lwop_days) if entry.lwop_days else '' }}</td>
+                            <td>{{ '{:,.2f}'.format(entry.lwop_amount) if entry.lwop_amount else '' }}</td>
+                            <td class="balance-cell">{{ '{:,.3f}'.format(entry.lwop_balance) if entry.lwop_balance else '' }}</td>
                             <!-- Remarks -->
                             <td class="text-left">
                                 <div>{{ entry.remarks or '' }}</div>
@@ -500,202 +630,365 @@
                         </tr>
                         {% else %}
                         <tr>
-                            <td colspan="{{ 11 + other_colspan }}" class="no-data" style="padding: 2rem; color: #666;">No leave ledger entries for this employee. Click "Add Entry" to create the first record.</td>
+                            <td colspan="{{ 11 + other_colspan + 3 }}" class="no-data" style="padding: 2rem; color: #666;">No leave ledger entries for this employee. Click "Add Entry" to create the first record.</td>
                         </tr>
                         {% endfor %}
                     </tbody>
                 </table>
             </div>
             <p style="margin-top: 0.75rem; font-size: 0.8rem; color: var(--medium-gray, #666);">
-                <strong>Legend:</strong> SPL = Special Privilege Leave, WL = Wellness Leave (5 days/year, max 3 consecutive),{% if show_ml %} ML = Maternity Leave,{% endif %}{% if show_pl %} PL = Paternity Leave,{% endif %}{% if show_sp %} SP = Solo Parent,{% endif %}{% if show_avaw %} AVAW = Anti-Violence Against Women,{% endif %}{% if show_slbw %} SLBW = Special Leave Benefits for Women,{% endif %} SE-Calamity = Special Emergency (Calamity), CTO = Credit to Overtime, Abs. Tard. = Absence Tardiness, Abs. UT = Absence Undertime
+                <strong>Legend:</strong> SPL = Special Privilege Leave, WL = Wellness Leave (5 days/year, max 3 consecutive),{% if show_ml %} ML = Maternity Leave,{% endif %}{% if show_pl %} PL = Paternity Leave,{% endif %}{% if show_sp %} SP = Solo Parent,{% endif %}{% if show_avaw %} AVAW = Anti-Violence Against Women,{% endif %}{% if show_slbw %} SLBW = Special Leave Benefits for Women,{% endif %} SE-Calamity = Special Emergency (Calamity), CTO = Credit to Overtime, LWOP = Leave Without Pay (absences), Abs. Tard. = Absence Tardiness, Abs. UT = Absence Undertime
             </p>
         </div>
     </div>
 </div>
 
 <!-- Add Entry Modal -->
-<div id="addEntryModal" class="modal-overlay">
-    <div class="modal-content">
+<div id="addEntryModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="addEntryModalTitle">
+    <div class="modal-dialog">
         <div class="modal-header">
-            <h3>Add Leave Ledger Entry</h3>
-            <button type="button" class="modal-close" onclick="closeAddModal()">&times;</button>
+            <div class="modal-header-text">
+                <h3 class="modal-title" id="addEntryModalTitle">Add Leave Ledger Entry</h3>
+                <p class="modal-subtitle" id="addEntryModalSubtitle">Post earned credits or leave usage to this employee’s card.</p>
+            </div>
+            <button type="button" class="modal-close" onclick="closeAddModal()" aria-label="Close">&times;</button>
         </div>
-        <form method="POST" action="{{ url_for('routes.leave_ledger_add', id=emp.id) }}">
-            <div class="form-grid">
+        <form method="POST" action="{{ url_for('routes.leave_ledger_add', id=emp.id) }}" id="leaveLedgerForm" onsubmit="return prepareLedgerSubmit()">
+            <div class="modal-body">
                 <input type="hidden" id="entry_id" name="entry_id">
-                <div class="form-group">
-                    <label for="transaction_date">Date *</label>
-                    <input type="date" id="transaction_date" name="transaction_date" required>
+                <input type="hidden" id="selected_dates" name="selected_dates" value="">
+
+                <div class="form-grid ledger-meta-block">
+                    <div class="form-group full-width">
+                        <label id="ledgerDatesLabel">Date(s) <span style="color:#dc2626;">*</span></label>
+                        <p class="ledger-date-helper" id="ledgerDatesHint">Select one or more days. Each date creates its own ledger row. VL/SL/LWOP use workweek charging (1.000 on 5-day, 1.250 on 4-day). Other leave kinds charge 1.000 day each.</p>
+                        <div class="ledger-date-panel">
+                            <div class="ledger-calendar" id="ledgerCalendar" aria-label="Leave ledger date picker"></div>
+                            <div class="ledger-date-side">
+                                <div class="ledger-date-side-title">Selected</div>
+                                <div class="ledger-date-pills" id="ledgerSelectedPills"></div>
+                                <p class="ledger-date-helper" id="ledgerSelectedSummary">No dates selected.</p>
+                                <button type="button" class="ledger-cal-btn" onclick="clearLedgerDates()">Clear dates</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group full-width">
+                        <label for="particulars">Particulars <span style="color:#dc2626;">*</span></label>
+                        <input type="text" id="particulars" name="particulars" placeholder="e.g. Monthly earned credit, VL application, Tardiness deduction" required>
+                    </div>
                 </div>
-                <div class="form-group full-width">
-                    <label for="particulars">Particulars *</label>
-                    <input type="text" id="particulars" name="particulars" placeholder="e.g., Monthly earned credit, VL application, Tardiness deduction" required>
+
+                <div class="ledger-section vl">
+                    <div class="ledger-section-head">Vacation Leave (VL)</div>
+                    <div class="ledger-section-body">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="vl_earned">Earned</label>
+                                <input type="number" step="0.001" id="vl_earned" name="vl_earned" placeholder="0.000">
+                            </div>
+                            <div class="form-group">
+                                <label for="vl_applied">Applied &amp; Approved</label>
+                                <input type="number" step="0.001" id="vl_applied" name="vl_applied" placeholder="0.000">
+                            </div>
+                            <div class="form-group">
+                                <label for="vl_tardiness">Abs. Tardiness w/ Pay</label>
+                                <input type="number" step="0.001" id="vl_tardiness" name="vl_tardiness" placeholder="0.000">
+                            </div>
+                            <div class="form-group">
+                                <label for="vl_undertime">Abs. Undertime w/ Pay</label>
+                                <input type="number" step="0.001" id="vl_undertime" name="vl_undertime" placeholder="0.000">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="ledger-section sl">
+                    <div class="ledger-section-head">Sick Leave (SL)</div>
+                    <div class="ledger-section-body">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="sl_earned">Earned</label>
+                                <input type="number" step="0.001" id="sl_earned" name="sl_earned" placeholder="0.000">
+                            </div>
+                            <div class="form-group">
+                                <label for="sl_applied">Applied &amp; Approved</label>
+                                <input type="number" step="0.001" id="sl_applied" name="sl_applied" placeholder="0.000">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="ledger-section other">
+                    <div class="ledger-section-head">Other Kinds of Leave</div>
+                    <div class="ledger-section-body">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="spl_earned">SPL Credits</label>
+                                <input type="number" step="0.001" id="spl_earned" name="spl_earned" placeholder="0.000">
+                            </div>
+                            <div class="form-group">
+                                <label for="spl_used">SPL Used</label>
+                                <input type="number" step="0.001" id="spl_used" name="spl_used" placeholder="0.000">
+                            </div>
+                            <div class="form-group">
+                                <label for="wl_earned">WL Credits</label>
+                                <input type="number" step="0.001" id="wl_earned" name="wl_earned" placeholder="0.000">
+                            </div>
+                            <div class="form-group">
+                                <label for="wl_used">WL Used</label>
+                                <input type="number" step="0.001" id="wl_used" name="wl_used" placeholder="0.000">
+                            </div>
+                            {% if show_ml %}
+                            <div class="form-group">
+                                <label for="ml_credits">ML Credits</label>
+                                <input type="number" step="0.001" id="ml_credits" name="ml_credits" placeholder="0.000">
+                            </div>
+                            <div class="form-group">
+                                <label for="ml_used">ML Used</label>
+                                <input type="number" step="0.001" id="ml_used" name="ml_used" placeholder="0.000">
+                            </div>
+                            {% endif %}
+                            {% if show_pl %}
+                            <div class="form-group">
+                                <label for="pl_credits">PL Credits</label>
+                                <input type="number" step="0.001" id="pl_credits" name="pl_credits" placeholder="0.000">
+                            </div>
+                            <div class="form-group">
+                                <label for="pl_used">PL Used</label>
+                                <input type="number" step="0.001" id="pl_used" name="pl_used" placeholder="0.000">
+                            </div>
+                            {% endif %}
+                            {% if show_sp %}
+                            <div class="form-group">
+                                <label for="sp_credits">SP Credits</label>
+                                <input type="number" step="0.001" id="sp_credits" name="sp_credits" placeholder="0.000">
+                            </div>
+                            <div class="form-group">
+                                <label for="sp_used">SP Used</label>
+                                <input type="number" step="0.001" id="sp_used" name="sp_used" placeholder="0.000">
+                            </div>
+                            {% endif %}
+                            {% if show_avaw %}
+                            <div class="form-group">
+                                <label for="avaw_credits">AVAW Credits</label>
+                                <input type="number" step="0.001" id="avaw_credits" name="avaw_credits" placeholder="0.000">
+                            </div>
+                            <div class="form-group">
+                                <label for="avaw_used">AVAW Used</label>
+                                <input type="number" step="0.001" id="avaw_used" name="avaw_used" placeholder="0.000">
+                            </div>
+                            {% endif %}
+                            <div class="form-group">
+                                <label for="study_credits">Study Credits</label>
+                                <input type="number" step="0.001" id="study_credits" name="study_credits" placeholder="0.000">
+                            </div>
+                            <div class="form-group">
+                                <label for="study_used">Study Used</label>
+                                <input type="number" step="0.001" id="study_used" name="study_used" placeholder="0.000">
+                            </div>
+                            <div class="form-group">
+                                <label for="rehab_credits">Rehab Credits</label>
+                                <input type="number" step="0.001" id="rehab_credits" name="rehab_credits" placeholder="0.000">
+                            </div>
+                            <div class="form-group">
+                                <label for="rehab_used">Rehab Used</label>
+                                <input type="number" step="0.001" id="rehab_used" name="rehab_used" placeholder="0.000">
+                            </div>
+                            {% if show_slbw %}
+                            <div class="form-group">
+                                <label for="slbw_credits">SLBW Credits</label>
+                                <input type="number" step="0.001" id="slbw_credits" name="slbw_credits" placeholder="0.000">
+                            </div>
+                            <div class="form-group">
+                                <label for="slbw_used">SLBW Used</label>
+                                <input type="number" step="0.001" id="slbw_used" name="slbw_used" placeholder="0.000">
+                            </div>
+                            {% endif %}
+                            <div class="form-group">
+                                <label for="se_calamity_credits">SE-Calamity Credits</label>
+                                <input type="number" step="0.001" id="se_calamity_credits" name="se_calamity_credits" placeholder="0.000">
+                            </div>
+                            <div class="form-group">
+                                <label for="se_calamity_used">SE-Calamity Used</label>
+                                <input type="number" step="0.001" id="se_calamity_used" name="se_calamity_used" placeholder="0.000">
+                            </div>
+                            <div class="form-group">
+                                <label for="adopt_credits">Adopt Credits</label>
+                                <input type="number" step="0.001" id="adopt_credits" name="adopt_credits" placeholder="0.000">
+                            </div>
+                            <div class="form-group">
+                                <label for="adopt_used">Adopt Used</label>
+                                <input type="number" step="0.001" id="adopt_used" name="adopt_used" placeholder="0.000">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="ledger-section cto">
+                    <div class="ledger-section-head">CTO (Credit to Overtime)</div>
+                    <div class="ledger-section-body">
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="cto_earned">CTO Earned</label>
+                                <input type="number" step="0.001" id="cto_earned" name="cto_earned" placeholder="0.000">
+                            </div>
+                            <div class="form-group">
+                                <label for="cto_used">CTO Used</label>
+                                <input type="number" step="0.001" id="cto_used" name="cto_used" placeholder="0.000">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="ledger-section remarks">
+                    <div class="ledger-section-head">Remarks</div>
+                    <div class="ledger-section-body">
+                        <div class="form-grid">
+                            <div class="form-group full-width">
+                                <label for="remarks">Optional notes</label>
+                                <input type="text" id="remarks" name="remarks" placeholder="e.g. Approved 01/15/2026–01/17/2026, Disapproved, Cancelled">
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
-
-            <div class="section-title vl">Vacation Leave (VL)</div>
-            <div class="form-grid">
-                <div class="form-group">
-                    <label for="vl_earned">Earned</label>
-                    <input type="number" step="0.001" id="vl_earned" name="vl_earned" placeholder="0.000">
-                </div>
-                <div class="form-group">
-                    <label for="vl_applied">Applied & Approved</label>
-                    <input type="number" step="0.001" id="vl_applied" name="vl_applied" placeholder="0.000">
-                </div>
-                <div class="form-group">
-                    <label for="vl_tardiness">Abs. Tardiness w/ Pay</label>
-                    <input type="number" step="0.001" id="vl_tardiness" name="vl_tardiness" placeholder="0.000">
-                </div>
-                <div class="form-group">
-                    <label for="vl_undertime">Abs. Undertime w/ Pay</label>
-                    <input type="number" step="0.001" id="vl_undertime" name="vl_undertime" placeholder="0.000">
-                </div>
-            </div>
-
-            <div class="section-title sl">Sick Leave (SL)</div>
-            <div class="form-grid">
-                <div class="form-group">
-                    <label for="sl_earned">Earned</label>
-                    <input type="number" step="0.001" id="sl_earned" name="sl_earned" placeholder="0.000">
-                </div>
-                <div class="form-group">
-                    <label for="sl_applied">Applied & Approved</label>
-                    <input type="number" step="0.001" id="sl_applied" name="sl_applied" placeholder="0.000">
-                </div>
-            </div>
-
-            <div class="section-title other">Other Kinds of Leave</div>
-            <div class="form-grid">
-                <div class="form-group">
-                    <label for="spl_earned">SPL Credits</label>
-                    <input type="number" step="0.001" id="spl_earned" name="spl_earned" placeholder="0.000">
-                </div>
-                <div class="form-group">
-                    <label for="spl_used">SPL Used</label>
-                    <input type="number" step="0.001" id="spl_used" name="spl_used" placeholder="0.000">
-                </div>
-                <div class="form-group">
-                    <label for="wl_earned">WL Credits</label>
-                    <input type="number" step="0.001" id="wl_earned" name="wl_earned" placeholder="0.000">
-                </div>
-                <div class="form-group">
-                    <label for="wl_used">WL Used</label>
-                    <input type="number" step="0.001" id="wl_used" name="wl_used" placeholder="0.000">
-                </div>
-                {% if show_ml %}
-                <div class="form-group">
-                    <label for="ml_credits">ML Credits</label>
-                    <input type="number" step="0.001" id="ml_credits" name="ml_credits" placeholder="0.000">
-                </div>
-                <div class="form-group">
-                    <label for="ml_used">ML Used</label>
-                    <input type="number" step="0.001" id="ml_used" name="ml_used" placeholder="0.000">
-                </div>
-                {% endif %}
-                {% if show_pl %}
-                <div class="form-group">
-                    <label for="pl_credits">PL Credits</label>
-                    <input type="number" step="0.001" id="pl_credits" name="pl_credits" placeholder="0.000">
-                </div>
-                <div class="form-group">
-                    <label for="pl_used">PL Used</label>
-                    <input type="number" step="0.001" id="pl_used" name="pl_used" placeholder="0.000">
-                </div>
-                {% endif %}
-                {% if show_sp %}
-                <div class="form-group">
-                    <label for="sp_credits">SP Credits</label>
-                    <input type="number" step="0.001" id="sp_credits" name="sp_credits" placeholder="0.000">
-                </div>
-                <div class="form-group">
-                    <label for="sp_used">SP Used</label>
-                    <input type="number" step="0.001" id="sp_used" name="sp_used" placeholder="0.000">
-                </div>
-                {% endif %}
-                {% if show_avaw %}
-                <div class="form-group">
-                    <label for="avaw_credits">AVAW Credits</label>
-                    <input type="number" step="0.001" id="avaw_credits" name="avaw_credits" placeholder="0.000">
-                </div>
-                <div class="form-group">
-                    <label for="avaw_used">AVAW Used</label>
-                    <input type="number" step="0.001" id="avaw_used" name="avaw_used" placeholder="0.000">
-                </div>
-                {% endif %}
-                <div class="form-group">
-                    <label for="study_credits">Study Credits</label>
-                    <input type="number" step="0.001" id="study_credits" name="study_credits" placeholder="0.000">
-                </div>
-                <div class="form-group">
-                    <label for="study_used">Study Used</label>
-                    <input type="number" step="0.001" id="study_used" name="study_used" placeholder="0.000">
-                </div>
-                <div class="form-group">
-                    <label for="rehab_credits">Rehab Credits</label>
-                    <input type="number" step="0.001" id="rehab_credits" name="rehab_credits" placeholder="0.000">
-                </div>
-                <div class="form-group">
-                    <label for="rehab_used">Rehab Used</label>
-                    <input type="number" step="0.001" id="rehab_used" name="rehab_used" placeholder="0.000">
-                </div>
-                {% if show_slbw %}
-                <div class="form-group">
-                    <label for="slbw_credits">SLBW Credits</label>
-                    <input type="number" step="0.001" id="slbw_credits" name="slbw_credits" placeholder="0.000">
-                </div>
-                <div class="form-group">
-                    <label for="slbw_used">SLBW Used</label>
-                    <input type="number" step="0.001" id="slbw_used" name="slbw_used" placeholder="0.000">
-                </div>
-                {% endif %}
-                <div class="form-group">
-                    <label for="se_calamity_credits">SE-Calamity Credits</label>
-                    <input type="number" step="0.001" id="se_calamity_credits" name="se_calamity_credits" placeholder="0.000">
-                </div>
-                <div class="form-group">
-                    <label for="se_calamity_used">SE-Calamity Used</label>
-                    <input type="number" step="0.001" id="se_calamity_used" name="se_calamity_used" placeholder="0.000">
-                </div>
-                <div class="form-group">
-                    <label for="adopt_credits">Adopt Credits</label>
-                    <input type="number" step="0.001" id="adopt_credits" name="adopt_credits" placeholder="0.000">
-                </div>
-                <div class="form-group">
-                    <label for="adopt_used">Adopt Used</label>
-                    <input type="number" step="0.001" id="adopt_used" name="adopt_used" placeholder="0.000">
-                </div>
-            </div>
-
-            <div class="section-title cto">CTO (Credit to Overtime)</div>
-            <div class="form-grid">
-                <div class="form-group">
-                    <label for="cto_earned">CTO Earned</label>
-                    <input type="number" step="0.001" id="cto_earned" name="cto_earned" placeholder="0.000">
-                </div>
-                <div class="form-group">
-                    <label for="cto_used">CTO Used</label>
-                    <input type="number" step="0.001" id="cto_used" name="cto_used" placeholder="0.000">
-                </div>
-            </div>
-
-            <div class="section-title" style="background: #e9ecef;">Remarks</div>
-            <div class="form-grid">
-                <div class="form-group full-width">
-                    <label for="remarks">Remarks (e.g., Approved 01/15/2026-01/17/2026, Dis-approved, Cancelled)</label>
-                    <input type="text" id="remarks" name="remarks" placeholder="Approved, Dis-approved, Cancelled, or custom text">
-                </div>
-            </div>
-
-            <div class="modal-actions">
-                <button type="button" class="btn-cancel" onclick="closeAddModal()">Cancel</button>
-                <button type="submit" class="btn-submit">Save</button>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" onclick="closeAddModal()">Cancel</button>
+                <button type="submit" class="btn-primary">Save entry</button>
             </div>
         </form>
     </div>
 </div>
 
 <script>
+const ledgerCal = {
+    year: new Date().getFullYear(),
+    month: new Date().getMonth(),
+    selected: new Set(),
+    editMode: false
+};
+const ledgerMonthNames = [
+    'January','February','March','April','May','June',
+    'July','August','September','October','November','December'
+];
+
+function ledgerIso(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dd}`;
+}
+
+function renderLedgerCalendar() {
+    const cal = document.getElementById('ledgerCalendar');
+    if (!cal) return;
+    const first = new Date(ledgerCal.year, ledgerCal.month, 1);
+    const last = new Date(ledgerCal.year, ledgerCal.month + 1, 0);
+    const startDow = first.getDay();
+    const daysInMonth = last.getDate();
+    const title = `${ledgerMonthNames[ledgerCal.month]} ${ledgerCal.year}`;
+
+    let html = `
+      <div class="ledger-cal-head">
+        <button type="button" class="ledger-cal-btn" onclick="ledgerPrevMonth()">&lt;</button>
+        <div class="ledger-cal-title">${title}</div>
+        <button type="button" class="ledger-cal-btn" onclick="ledgerNextMonth()">&gt;</button>
+      </div>
+      <div class="ledger-cal-grid">
+        ${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => `<div class="ledger-cal-dow">${d}</div>`).join('')}
+    `;
+    for (let i = 0; i < startDow; i++) {
+        html += `<div class="ledger-cal-day muted"></div>`;
+    }
+    for (let day = 1; day <= daysInMonth; day++) {
+        const d = new Date(ledgerCal.year, ledgerCal.month, day);
+        const k = ledgerIso(d);
+        const selected = ledgerCal.selected.has(k) ? 'selected' : '';
+        html += `<div class="ledger-cal-day ${selected}" onclick="toggleLedgerDate('${k}')">${day}</div>`;
+    }
+    html += `</div>`;
+    cal.innerHTML = html;
+    syncLedgerDates();
+}
+
+function toggleLedgerDate(k) {
+    if (ledgerCal.editMode) {
+        ledgerCal.selected.clear();
+        ledgerCal.selected.add(k);
+    } else if (ledgerCal.selected.has(k)) {
+        ledgerCal.selected.delete(k);
+    } else {
+        ledgerCal.selected.add(k);
+    }
+    renderLedgerCalendar();
+}
+
+function syncLedgerDates() {
+    const out = Array.from(ledgerCal.selected).sort();
+    const hidden = document.getElementById('selected_dates');
+    if (hidden) hidden.value = out.join(',');
+    const pills = document.getElementById('ledgerSelectedPills');
+    if (pills) {
+        pills.innerHTML = out.map(d => `<span class="ledger-date-pill">${d}</span>`).join('');
+    }
+    const summary = document.getElementById('ledgerSelectedSummary');
+    if (summary) {
+        summary.textContent = out.length === 0
+            ? 'No dates selected.'
+            : (out.length === 1 ? '1 day selected.' : `${out.length} days selected.`);
+    }
+}
+
+function clearLedgerDates() {
+    ledgerCal.selected.clear();
+    renderLedgerCalendar();
+}
+
+function ledgerPrevMonth() {
+    ledgerCal.month--;
+    if (ledgerCal.month < 0) { ledgerCal.month = 11; ledgerCal.year--; }
+    renderLedgerCalendar();
+}
+
+function ledgerNextMonth() {
+    ledgerCal.month++;
+    if (ledgerCal.month > 11) { ledgerCal.month = 0; ledgerCal.year++; }
+    renderLedgerCalendar();
+}
+
+function setLedgerDatesHint(editMode) {
+    const hint = document.getElementById('ledgerDatesHint');
+    const label = document.getElementById('ledgerDatesLabel');
+    const title = document.getElementById('addEntryModalTitle');
+    const subtitle = document.getElementById('addEntryModalSubtitle');
+    if (label) {
+        label.innerHTML = editMode
+            ? 'Date <span style="color:#dc2626;">*</span>'
+            : 'Date(s) <span style="color:#dc2626;">*</span>';
+    }
+    if (hint) {
+        hint.textContent = editMode
+            ? 'Editing one entry — choose a single date. Amounts are saved as entered.'
+            : 'Select one or more days. Each date creates its own ledger row. VL/SL/LWOP use workweek charging (1.000 on 5-day, 1.250 on 4-day). Other leave kinds charge 1.000 day each.';
+    }
+    if (title) title.textContent = editMode ? 'Edit Leave Ledger Entry' : 'Add Leave Ledger Entry';
+    if (subtitle) {
+        subtitle.textContent = editMode
+            ? 'Update the date, particulars, and credit amounts for this row.'
+            : 'Post earned credits or leave usage to this employee’s card.';
+    }
+}
+
+function prepareLedgerSubmit() {
+    syncLedgerDates();
+    const dates = (document.getElementById('selected_dates').value || '').trim();
+    if (!dates) {
+        alert('Please select at least one date.');
+        return false;
+    }
+    return true;
+}
+
 function resetNumericFields() {
     const ids = [
         'vl_earned','vl_applied','vl_tardiness','vl_undertime',
@@ -722,10 +1015,16 @@ function resetNumericFields() {
 function openAddModal() {
     const modal = document.getElementById('addEntryModal');
     document.getElementById('entry_id').value = '';
-    document.getElementById('transaction_date').valueAsDate = new Date();
     document.getElementById('particulars').value = '';
     document.getElementById('remarks').value = '';
     resetNumericFields();
+    ledgerCal.editMode = false;
+    setLedgerDatesHint(false);
+    const today = new Date();
+    ledgerCal.year = today.getFullYear();
+    ledgerCal.month = today.getMonth();
+    ledgerCal.selected = new Set([ledgerIso(today)]);
+    renderLedgerCalendar();
     modal.classList.add('active');
 }
 
@@ -733,7 +1032,6 @@ function openEditModal(button) {
     const d = button.dataset;
     const modal = document.getElementById('addEntryModal');
     document.getElementById('entry_id').value = d.entryId || '';
-    document.getElementById('transaction_date').value = d.date || '';
     document.getElementById('particulars').value = d.particulars || '';
     document.getElementById('remarks').value = d.remarks || '';
 
@@ -773,6 +1071,18 @@ function openEditModal(button) {
     setVal('cto_earned','ctoEarned');
     setVal('cto_used','ctoUsed');
 
+    ledgerCal.editMode = true;
+    setLedgerDatesHint(true);
+    const dateStr = (d.date || '').trim();
+    ledgerCal.selected = new Set(dateStr ? [dateStr] : []);
+    if (dateStr) {
+        const [y, m] = dateStr.split('-').map(Number);
+        if (y && m) {
+            ledgerCal.year = y;
+            ledgerCal.month = m - 1;
+        }
+    }
+    renderLedgerCalendar();
     modal.classList.add('active');
 }
 function closeAddModal() {

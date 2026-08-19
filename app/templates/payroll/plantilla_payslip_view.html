@@ -1,0 +1,101 @@
+{% extends "layouts/app.html" %}
+
+{% block title %}Payslip - HRMS{% endblock %}
+
+{% set navbar_title = 'Payslip' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'My Records'},
+    {'label': 'Payslip'}
+] %}
+
+{% block app_content %}
+{% include 'includes/flash_messages.html' %}
+
+<div class="page-header" style="flex-wrap: wrap; gap: 0.75rem;">
+    <h1 class="page-title">Payslip</h1>
+    {% if is_admin_view %}
+    <a href="{{ url_for('routes.payroll_plantilla', year=payslip.year, month=payslip.month, quincena=payslip.quincena, department_id=payslip.department_id, load=1) }}" class="btn-secondary">← Plantilla Payroll</a>
+    {% else %}
+    <a href="{{ url_for('routes.payroll_plantilla_my_payslips') }}" class="btn-secondary">← My Payslips</a>
+    {% endif %}
+</div>
+
+<div class="form-section" style="padding: 1rem 1.25rem;">
+    <div style="display:grid; gap:0.25rem; margin-bottom:0.75rem;">
+        <div><strong>Name:</strong> {{ payslip.employee_name }}</div>
+        <div><strong>Emp. No.:</strong> {{ payslip.employee_no or '—' }}</div>
+        <div><strong>Designation:</strong> {{ payslip.designation }}</div>
+        <div><strong>Department:</strong> {{ payslip.department_name }}</div>
+        <div><strong>Period:</strong> {{ payslip.period_label }}</div>
+    </div>
+
+    <div class="table-container">
+        <table class="data-table payslip-table">
+            <thead>
+                <tr><th>Earnings</th><th class="num">Amount</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>Monthly Rate</td><td class="num">{{ payslip.monthly_rate_display }}</td></tr>
+                <tr><td>Accrued</td><td class="num">{{ payslip.accrued_display }}</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div style="height: 0.75rem;"></div>
+
+    <div class="table-container">
+        <table class="data-table payslip-table">
+            <thead>
+                <tr><th>Deductions</th><th class="num">Amount</th></tr>
+            </thead>
+            <tbody>
+                {% for row in payslip.deductions_rows %}
+                <tr>
+                    <td>{{ row.label }}</td>
+                    <td class="num">{{ row.amount_display }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="2" class="no-data">No deductions recorded.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if payslip.gov_share_rows %}
+    <div style="height: 0.75rem;"></div>
+    <div class="table-container">
+        <table class="data-table payslip-table">
+            <thead>
+                <tr><th>Gov. Share (reference)</th><th class="num">Amount</th></tr>
+            </thead>
+            <tbody>
+                {% for row in payslip.gov_share_rows %}
+                <tr>
+                    <td>{{ row.label }}</td>
+                    <td class="num">{{ row.amount_display }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <div style="height: 0.75rem;"></div>
+    <div class="table-container">
+        <table class="data-table payslip-table">
+            <thead>
+                <tr><th>Net Pay</th><th class="num">Amount</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><strong>Total</strong></td><td class="num"><strong>{{ payslip.net_amount_display }}</strong></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <p class="muted" style="margin-top:0.75rem;">
+        Generated {{ payslip.generated_at.strftime('%Y-%m-%d %H:%M') if payslip.generated_at else '' }}.
+    </p>
+</div>
+{% endblock %}
+

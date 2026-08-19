@@ -1,6 +1,7 @@
-from flask import Blueprint, render_template, request, redirect, url_for, flash, session, Response, jsonify, send_file, abort
+from flask import Blueprint, render_template, request, redirect, url_for, flash, session, Response, jsonify, send_file, abort, send_from_directory, g
 from flask_login import login_user, logout_user, login_required, current_user
 from datetime import datetime, date, time, timedelta
+from types import SimpleNamespace
 import calendar
 import json
 import re
@@ -8,6 +9,12 @@ import csv
 import io
 import os
 from app import db
+from app.config import (
+    DTR_JUSTIFICATION_REASON_OTHERS,
+    DTR_JUSTIFICATION_REASONS,
+    EMPLOYEE_SEPARATION_TYPES,
+    EMPLOYEE_STATUSES,
+)
 from app.leave_ledger_service import (
     LEAVE_CREDITS_STATUSES,
     accrue_monthly_vl_sl_for_month,
@@ -16,9 +23,53 @@ from app.leave_ledger_service import (
     recompute_leave_ledger_balances,
     undo_monthly_accrual_for_month,
 )
-from app.leave_utils import minutes_to_day_equivalent
-from app.models import User, Employee, Department, Position, SalaryGrade, Attendance, LeaveRequest, LeaveType, LeaveBalance, EmployeePDS, EmployeeAppointmentHistory, DailyTimeRecord, LeaveLedger, DtrWorkArrangementSetting, DtrJustification, JoCosDesignation, JoCosRate, FlexiTimeSchedule, EmployeeFlexiDay, DtrQuincenaWorktimeSummary, WorkHours, FlexibleWorktime, OvertimeAuthorization, JoCosExtendService, JoCosOvertime, JoCosOvertimeLedger, JoCosOvertimeOffsetRequest, HrmsNotification, GsisContribution, GsisLoanRecord, GsisLoanDeduction, PhicContribution, HdmfContributionRecord, HdmfContributionDeduction, HdmfLoanRecord, HdmfLoanDeduction
+from app.leave_utils import minutes_to_day_equivalent, leave_day_credit_for_workweek
+from app.lwop_ledger_service import (
+    any_lwop_payroll_deduction,
+    delete_lwop_regen_rows_for_quincena,
+    post_lwop_for_absent_days,
+    post_lwop_payroll_settlement,
+    preview_lwop_payroll_deduction,
+    reverse_lwop_for_approved_justification,
+)
+from app.models import User, Employee, Department, Position, SalaryGrade, Attendance, LeaveRequest, LeaveType, LeaveBalance, EmployeePDS, EmployeeAppointmentHistory, DailyTimeRecord, DtrUploadBatch, DtrUploadBatchItem, DtrUploadPunch, DtrUploadPunchFlag, DtrQuincenaPeriod, DtrMonthlySubmission, LeaveLedger, DtrWorkArrangementSetting, DtrJustification, DtrAccomplishmentReport, JoCosDesignation, JoCosRate, FlexiTimeSchedule, EmployeeFlexiDay, DtrQuincenaWorktimeSummary, WorkHours, FlexibleWorktime, OvertimeAuthorization, JoCosExtendService, JoCosOvertime, JoCosOvertimeLedger, JoCosOvertimeOffsetRequest, HrmsNotification, GsisContribution, GsisLoanRecord, GsisLoanDeduction, PhicContribution, LbpBillingRecord, LbpBillingDeduction, JofemcoBillingRecord, JofemcoBillingDeduction, WithholdingTaxRecord, WithholdingTaxDeduction, HdmfContributionRecord, HdmfContributionDeduction, HdmfLoanRecord, HdmfLoanDeduction, JoCosPayslip, PlantillaPayslip, EventAttendance, EventAttendanceBatch, EVENT_ATTENDANCE_CATEGORIES, EVENT_ATTENDANCE_CATEGORY_LABELS
 from app.dtr_parse import parse_dtr_dat_file as _parse_dtr_dat_file
+from app.dtr_upload_staging import discard_staged_dtr_upload, load_staged_dtr_upload_rows
+from app.dtr_upload_batch_service import (
+    DTR_UPLOAD_QUINCENA_BUFFER_DAYS,
+    SLOT_LABELS as DTR_PUNCH_SLOT_LABELS,
+    apply_day_punch_assignments,
+    apply_selected_punch_to_dtr,
+    can_undo_dtr_batch,
+    count_open_punch_flags,
+    create_upload_batch,
+    list_punch_flags_for_batch,
+    list_recent_dtr_upload_batches,
+    log_batch_item,
+    open_punch_flags_by_date,
+    persist_upload_punches_and_flags,
+    punches_by_employee_day_for_batch,
+    punches_for_employee_day,
+    punches_for_flag,
+    quincena_core_date_range,
+    quincena_upload_accept_range,
+    reviewable_punch_flags_by_date,
+    snapshot_dtr_row,
+    undo_dtr_upload_batch,
+)
+from app import dtr_quincena_period_service as dtr_period
+from app import dtr_work_arrangement_service as dtr_wa
+from app.dtr_jo_cos_actual_punch_service import (
+    merge_prefer_actual_over_duty_stamp,
+    restore_actual_dtr_punches,
+)
+from app import dtr_monthly_submission_service as dtr_monthly
+from app.dtr_accomplishment_service import (
+    approved_accomplishment_export_rows,
+    enrich_jo_cos_dtr_rows,
+    has_approved_justification_for_export,
+    save_accomplishment_reports,
+)
 from decimal import Decimal, ROUND_HALF_UP, ROUND_FLOOR
 from werkzeug.utils import secure_filename
 from sqlalchemy import func
@@ -30,15 +81,40 @@ bp = Blueprint('routes', __name__)
 @bp.app_context_processor
 def inject_hrms_globals():
     from flask_login import current_user
-    if not current_user.is_authenticated:
-        return {'unread_notification_count': 0}
+    from app.portal_auth import is_portal_admin_session
+
+    branding_ctx = {}
     try:
-        count = HrmsNotification.query.filter_by(
-            user_id=current_user.id, is_read=False
-        ).count()
+        from app.portal_site_service import get_branding, branding_logo_url, branding_seal_url
+        branding = get_branding()
+        branding_ctx = {
+            'site_branding': branding,
+            'site_logo_url': branding_logo_url(branding),
+            'site_seal_url': branding_seal_url(branding),
+            'is_portal_admin_session': is_portal_admin_session(),
+        }
+    except Exception:
+        branding_ctx = {
+            'site_branding': {},
+            'site_logo_url': url_for('static', filename='hrmdo_logo_transparent.png'),
+            'site_seal_url': url_for('static', filename='jagna_logo.png'),
+            'is_portal_admin_session': is_portal_admin_session(),
+        }
+
+    if not current_user.is_authenticated:
+        return {'unread_notification_count': 0, 'employee': None, **branding_ctx}
+    try:
+        uid = getattr(current_user, 'id', None)
+        if uid:
+            count = HrmsNotification.query.filter_by(
+                user_id=uid, is_read=False
+            ).count()
+        else:
+            count = 0
     except Exception:
         count = 0
-    return {'unread_notification_count': count}
+    emp = _current_employee_for_user() if current_user.is_authenticated else None
+    return {'unread_notification_count': count, 'employee': emp, **branding_ctx}
 
 # Employees list report — matches Add/Edit Employee "Status of appointment" options
 REPORT_EMPLOYEE_PLANTILLA_STATUSES = (
@@ -93,24 +169,33 @@ def _resolve_position_and_jo_cos_fk(status_of_appointment, position_form_val, jo
         return (pos_in or None), None
     return (pos_in or None), None
 
-def _next_employee_id_6digit() -> str:
+def _next_employee_id_5digit() -> str:
     """
-    Returns the next 6-digit numeric employee_id, based on the current maximum
-    6-digit numeric employee_id in the database.
+    Returns the next 5-digit numeric employee_id, based on the current maximum
+    1–5 digit numeric employee_id in the database.
     """
     from sqlalchemy import text
 
-    # Postgres regex (~) matches only 6-digit numeric IDs (e.g. '000123').
+    # Postgres regex (~) matches up to 5-digit numeric IDs (e.g. '40555').
     max_val = db.session.execute(
         text(
             r"SELECT MAX(CAST(employee_id AS INTEGER)) "
             r"FROM employees "
-            r"WHERE employee_id ~ '^[0-9]{6}$'"
+            r"WHERE employee_id ~ '^[0-9]{1,5}$'"
         )
     ).scalar()
     next_val = (int(max_val) if max_val is not None else 0) + 1
-    # Keep 6-digit padding; if it overflows 999999, return the full number.
-    return f"{next_val:06d}" if next_val <= 999999 else str(next_val)
+    # Keep 5-digit padding; if it overflows 99999, return the full number.
+    return f"{next_val:05d}" if next_val <= 99999 else str(next_val)
+
+
+def _validate_employee_badge_id(employee_id: str) -> str:
+    """Require exactly 5 numeric digits for new/changed employee badge IDs."""
+    badge = (employee_id or '').strip()
+    if not re.fullmatch(r'[0-9]{5}', badge):
+        raise ValueError('Employee ID must be exactly 5 digits.')
+    return badge
+
 
 
 def _get_leave_balances_for_employee(emp: Employee) -> dict:
@@ -324,6 +409,16 @@ def _serialize_salary_grades(salary_grades):
         })
     return out
 
+
+def _agency_from_department(dept):
+    """Map department to salary schedule agency. MHO/RHU use National; others Local."""
+    if not dept:
+        return None
+    name = (getattr(dept, 'name', None) or '').strip().upper()
+    if name in ('MHO', 'RHU'):
+        return 'National'
+    return 'Local'
+
 def _dashboard_for_user(user):
     """Return dashboard route name for post-login redirect: employee role -> employee_dashboard, else dashboard."""
     if not user:
@@ -341,12 +436,18 @@ def _dashboard_for_user(user):
 
 
 def _require_admin_or_hr():
-    """If current user is not Admin or HR, flash and return redirect; else return None."""
-    role = (getattr(current_user, 'role', None) or '').strip().lower()
-    if role not in ('admin', 'hr'):
-        flash('Access denied. This section is for Admin and HR only.', 'error')
-        return redirect(url_for(_dashboard_for_user(current_user)))
-    return None
+    """If current user is not Admin or HR (or Portal Admin), flash and return redirect; else return None."""
+    from app.portal_config import is_admin_or_hr_role
+    if is_admin_or_hr_role(getattr(current_user, 'role', None)):
+        return None
+    flash('Access denied. This section is for Admin and HR only.', 'error')
+    return redirect(url_for(_dashboard_for_user(current_user)))
+
+
+def _can_edit_employee_id() -> bool:
+    """Only Admin (and Portal Admin) may change an existing employee_id."""
+    from app.portal_config import is_admin_role
+    return is_admin_role(getattr(current_user, 'role', None))
 
 
 def _can_edit_employee_pds(emp):
@@ -389,12 +490,9 @@ def _managed_department_ids_for_manager():
 
 def _public_landing_stats():
     """Aggregate counts for the public landing page (best-effort)."""
-    from sqlalchemy import or_
     stats = {'employees': 0, 'departments': 0, 'leave_requests': 0, 'positions': 0}
     try:
-        stats['employees'] = Employee.query.filter(
-            or_(Employee.status == 'active', Employee.status == 'on_leave')
-        ).count()
+        stats['employees'] = Employee.query.filter(Employee.status == 'active').count()
     except Exception:
         try:
             stats['employees'] = Employee.query.count()
@@ -420,7 +518,7 @@ def _public_personnel_breakdown() -> dict:
     Public landing helper: count plantilla vs non-plantilla personnel and provide
     a per-status breakdown (best-effort).
 
-    We only include employees that are active or on_leave to match the public
+    We only include employees that are active to match the public
     "NUMBER OF PERSONNEL" card logic.
     """
     from sqlalchemy import func, or_
@@ -446,7 +544,7 @@ def _public_personnel_breakdown() -> dict:
         ("JO", "job order"),
     ]
 
-    base = Employee.query.filter(or_(Employee.status == 'active', Employee.status == 'on_leave'))
+    base = Employee.query.filter(Employee.status == 'active')
 
     breakdown_plantilla: list[dict] = []
     breakdown_nonplantilla: list[dict] = []
@@ -505,7 +603,7 @@ def _public_birthdays_this_week(limit: int = 12) -> dict:
         rows = (db.session.query(Employee, EmployeePDS)
                 .join(EmployeePDS, EmployeePDS.employee_id == Employee.id)
                 .filter(EmployeePDS.date_of_birth.isnot(None))
-                .filter(or_(Employee.status == 'active', Employee.status == 'on_leave'))
+                .filter(Employee.status == 'active')
                 .all())
 
         for emp, pds in rows:
@@ -602,18 +700,55 @@ def _public_on_leave_this_week(limit: int = 12) -> dict:
 
 @bp.route('/')
 def index():
-    if current_user.is_authenticated:
-        return redirect(url_for(_dashboard_for_user(current_user)))
+    from app.portal_site_service import get_landing_cms
     return render_template(
         'landing.html',
         stats=_public_landing_stats(),
         birthdays=_public_birthdays_this_week(),
         on_leave=_public_on_leave_this_week(),
         personnel=_public_personnel_breakdown(),
+        landing_cms=get_landing_cms(),
     )
+
+
+@bp.route('/site-media/<path:filename>')
+def site_media(filename):
+    from app.portal_site_service import site_upload_dir
+    safe = os.path.basename(filename)
+    if safe != filename:
+        abort(404)
+    return send_from_directory(site_upload_dir(), safe)
 
 @bp.route('/login', methods=['GET', 'POST'])
 def login():
+    from app.portal_auth import is_portal_admin_session, start_portal_admin_session
+    from app.portal_config import verify_portal_admin_credentials
+
+    def _safe_post_login_redirect(next_page: str) -> str | None:
+        """Allow only same-origin relative paths for known modules."""
+        value = (next_page or '').strip()
+        if not value.startswith('/') or value.startswith('//'):
+            return None
+        allowed_prefixes = (
+            '/dashboard',
+            '/employee-dashboard',
+            '/portal-admin',
+            '/ermt',
+            '/payroll',
+            '/leave',
+            '/dtr',
+            '/employees',
+            '/reports',
+            '/notifications',
+            '/my-service-record',
+        )
+        if any(value == p or value.startswith(p + '/') or value.startswith(p + '?') for p in allowed_prefixes):
+            return value
+        return None
+
+    if is_portal_admin_session() and request.method == 'GET' and not request.args.get('logged_out'):
+        return redirect(url_for('routes.dashboard'))
+
     # If user came from logout (cookie may not have cleared), force show login and clear session again
     if request.args.get('logged_out'):
         logout_user()
@@ -634,22 +769,34 @@ def login():
         if not employee_id or not password:
             flash('Please enter both ID Number and Password.', 'error')
             return render_template('login.html')
-        
+
+        if verify_portal_admin_credentials(employee_id, password):
+            start_portal_admin_session()
+            flash('Signed in with Portal Administrator and Admin access.', 'success')
+            next_page = (request.args.get('next') or request.form.get('next') or '').strip()
+            safe_next = _safe_post_login_redirect(next_page)
+            if safe_next:
+                return redirect(safe_next)
+            return redirect(url_for('routes.dashboard'))
+
         # Find user by employee_id
         user = User.query.filter_by(employee_id=employee_id).first()
-        
+
         if user and user.check_password(password) and user.is_active:
             login_user(user)
             user.last_login = datetime.utcnow()
             db.session.commit()
-            
+
             # Store user info in session
             session['user_name'] = user.employee.full_name if user.employee else user.username
             session['user_role'] = user.role
-            
+
             flash(f'Welcome back, {employee_id}!', 'success')
-            next_page = request.args.get('next')
-            return redirect(next_page) if next_page else redirect(url_for(_dashboard_for_user(user)))
+            next_page = (request.args.get('next') or request.form.get('next') or '').strip()
+            safe_next = _safe_post_login_redirect(next_page)
+            if safe_next:
+                return redirect(safe_next)
+            return redirect(url_for(_dashboard_for_user(user)))
         else:
             flash('Invalid ID Number or Password.', 'error')
     
@@ -670,6 +817,10 @@ def logout():
 @bp.route('/change-password', methods=['POST'])
 @login_required
 def change_password():
+    from app.portal_auth import is_portal_admin_session
+    if is_portal_admin_session():
+        flash('Portal administrators cannot change password here.', 'error')
+        return redirect(url_for('routes.dashboard'))
     current = request.form.get('current_password', '')
     new_pw = request.form.get('new_password', '')
     if not current:
@@ -700,7 +851,266 @@ def employee_dashboard():
     if not employee:
         flash('Employee record not linked to your account.', 'error')
         return redirect(url_for('routes.logout'))
-    return render_template('employee_dashboard.html', employee=employee)
+    from app.employee_id_photo_service import employee_has_id_photo
+    return render_template(
+        'employee_dashboard.html',
+        employee=employee,
+        has_id_photo=employee_has_id_photo(employee),
+    )
+
+
+@bp.route('/employees/<int:id>/photo')
+@login_required
+def employee_id_photo(id):
+    """Proxy ID photo bytes from the eRMT-linked NAS/local path."""
+    from app.employee_id_photo_service import can_view_employee_id_photo, read_employee_id_photo
+
+    emp = Employee.query.get_or_404(id)
+    if not can_view_employee_id_photo(current_user, emp):
+        abort(403)
+    data, mime, _record = read_employee_id_photo(emp)
+    if not data:
+        abort(404)
+    resp = Response(data, mimetype=mime or 'image/jpeg')
+    resp.headers['Cache-Control'] = 'private, max-age=300'
+    return resp
+
+
+@bp.route('/my/photo')
+@login_required
+def my_id_photo():
+    emp = _current_employee_for_user()
+    if not emp:
+        abort(404)
+    return redirect(url_for('routes.employee_id_photo', id=emp.id))
+
+
+@bp.route('/my-service-record')
+@login_required
+def my_service_record():
+    """Read-only employment / appointment history for the logged-in employee."""
+    emp = _current_employee_for_user()
+    if not emp:
+        flash('No employee record is linked to your account.', 'error')
+        return redirect(url_for(_dashboard_for_user(current_user)))
+    emp, history, current_amount, si_due = _service_record_context(emp.id)
+    role = (getattr(current_user, 'role', None) or '').strip().lower()
+    can_export_pdf = role in ('admin', 'hr')
+
+    return render_template(
+        'my_service_record.html',
+        employee=emp,
+        history_list=history,
+        current_amount=current_amount,
+        si_due=si_due,
+        can_export_pdf=can_export_pdf,
+
+        pdf_url=(
+            url_for('routes.employee_service_record_pdf', id=emp.id)
+            if can_export_pdf else None
+        ),
+        dashboard_url=url_for('routes.employee_dashboard'),
+        page_title='My Service Record',
+    )
+
+
+def _service_record_context(employee_id: int) -> tuple[Employee, list[EmployeeAppointmentHistory], Decimal | None, date | None]:
+    emp = (
+        Employee.query
+        .options(db.joinedload(Employee.department))
+        .filter_by(id=employee_id)
+        .first()
+    )
+    if not emp:
+        raise ValueError('Employee not found')
+    history = list(
+        emp.appointment_history.order_by(
+            EmployeeAppointmentHistory.effectivity_date.desc().nullslast(),
+            EmployeeAppointmentHistory.timestamp.desc(),
+            EmployeeAppointmentHistory.id.desc(),
+        ).all()
+    )
+    current_amount = _current_salary_amount(emp)
+    si_due = None
+    try:
+        si_due = _step_increment_due_date(emp, history_rows=history)
+    except Exception:
+        si_due = None
+    return emp, history, current_amount, si_due
+
+
+def _service_record_pdf_bytes(
+    emp: Employee,
+    history: list[EmployeeAppointmentHistory],
+    current_amount: Decimal | None,
+    si_due: date | None,
+) -> io.BytesIO:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+
+    page_w, page_h = A4
+    margin = 28
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(page_w, page_h))
+
+    # 3-column heading: logo (left), office text (center), balanced spacer (right).
+    top_y = page_h - margin
+    header_h = 54
+    side_col_w = 72
+    logo_size = 50
+    header_bottom = top_y - header_h
+    header_center_y = header_bottom + header_h / 2
+
+    logo_path = os.path.join(os.path.dirname(__file__), 'static', 'jagna_logo.png')
+    left_col_center = margin + side_col_w / 2
+    if os.path.exists(logo_path):
+        logo_x = left_col_center - logo_size / 2
+        logo_y = header_bottom + (header_h - logo_size) / 2
+        c.drawImage(
+            logo_path, logo_x, logo_y,
+            width=logo_size, height=logo_size,
+            preserveAspectRatio=True, mask='auto',
+        )
+
+    center_x = page_w / 2
+    title_size, sub_size, line_gap = 14, 9.5, 0
+    half_leading = (title_size + line_gap) / 2
+    title_baseline = header_center_y + half_leading
+    sub_baseline = header_center_y - half_leading
+    c.setFont('Helvetica-Bold', title_size)
+    c.drawCentredString(center_x, title_baseline, 'Municipality of Jagna')
+    c.setFont('Helvetica', sub_size)
+    c.drawCentredString(center_x, sub_baseline, 'Poblacion, Jagna, Bohol')
+
+    sep_y = header_bottom - 10
+    c.setStrokeColor(colors.HexColor('#0b3b6f'))
+    c.setLineWidth(0.8)
+    c.line(margin, sep_y, page_w - margin, sep_y)
+    c.setStrokeColor(colors.black)
+    c.setLineWidth(1)
+
+    c.setFont('Helvetica-Bold', 12)
+    c.drawCentredString(center_x, sep_y - 18, 'EMPLOYEE SERVICE RECORD')
+
+    name = emp.directory_name
+    if emp.middle_name:
+        name = f'{name} {emp.middle_name}'
+    c.setFont('Helvetica', 7.5)
+    one_liner = (
+        f'Emp ID: {emp.employee_id or "—"}'
+        f'   |   Dept: {emp.department.name if emp.department else "—"}'
+        f'   |   Name: {name}'
+        f'   |   Position: {emp.position or "—"}'
+    )
+    c.drawString(margin, sep_y - 38, one_liner)
+
+    headers = ['Change Type', 'Effectivity', 'Status', 'Nature', 'SG', 'Step', 'From-To', 'Amount', 'Remarks']
+    col_widths = [62, 50, 54, 58, 24, 24, 40, 46, 181]
+    table_x = margin
+    table_y = sep_y - 58
+    row_h = 18
+
+    c.setFillColor(colors.HexColor('#0b3b6f'))
+    c.rect(table_x, table_y - row_h, sum(col_widths), row_h, fill=1, stroke=1)
+    c.setFillColor(colors.white)
+    c.setFont('Helvetica-Bold', 6.8)
+    x = table_x
+    for idx, head in enumerate(headers):
+        c.drawString(x + 3, table_y - 14, head)
+        x += col_widths[idx]
+
+    c.setFillColor(colors.black)
+    c.setFont('Helvetica', 6.6)
+    y = table_y - row_h
+    if not history:
+        y -= row_h
+        c.rect(table_x, y, sum(col_widths), row_h, fill=0, stroke=1)
+        c.drawString(table_x + 3, y + 7, 'No appointment history has been recorded.')
+    else:
+        for h in history:
+            y -= row_h
+            if y < 90:
+                c.showPage()
+                y = page_h - margin - 30
+                c.setFillColor(colors.HexColor('#0b3b6f'))
+                c.rect(table_x, y - row_h, sum(col_widths), row_h, fill=1, stroke=1)
+                c.setFillColor(colors.white)
+                c.setFont('Helvetica-Bold', 6.8)
+                x = table_x
+                for idx, head in enumerate(headers):
+                    c.drawString(x + 3, y - 14, head)
+                    x += col_widths[idx]
+                c.setFillColor(colors.black)
+                c.setFont('Helvetica', 6.6)
+                y -= row_h
+
+            vals = [
+                (h.change_type or h.appoint_nature or '—'),
+                (h.effectivity_date.strftime('%Y-%m-%d') if h.effectivity_date else '—'),
+                (h.appoint_status or '—'),
+                (h.appoint_nature or '—'),
+                (str(h.sal_grade) if h.sal_grade is not None else '—'),
+                (str(h.sal_step) if h.sal_step is not None else '—'),
+                (
+                    f'{h.from_sal_step if h.from_sal_step is not None else "—"}→'
+                    f'{h.to_sal_step if h.to_sal_step is not None else "—"}'
+                ),
+                (f'{h.sal_amount:,.2f}' if h.sal_amount is not None else '—'),
+                (h.remarks or '—'),
+            ]
+            x = table_x
+            for idx, v in enumerate(vals):
+                c.rect(x, y, col_widths[idx], row_h, fill=0, stroke=1)
+                raw = str(v)
+                if len(raw) > 34 and idx in (8,):
+                    raw = raw[:31] + '...'
+                elif len(raw) > 14 and idx not in (8,):
+                    raw = raw[:11] + '...'
+                c.drawString(x + 2, y + 6, raw)
+                x += col_widths[idx]
+
+    sign_y = 52
+    c.setFont('Helvetica', 9)
+    c.line(page_w - 280, sign_y + 14, page_w - 80, sign_y + 14)
+    c.drawCentredString(page_w - 180, sign_y, 'HRMDO Head')
+    c.drawCentredString(page_w - 180, sign_y - 12, 'Signature over Printed Name')
+
+    c.save()
+    buf.seek(0)
+    return buf
+
+
+@bp.route('/employees/<int:id>/service-record')
+@login_required
+def employee_service_record(id: int):
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    emp, history, current_amount, si_due = _service_record_context(id)
+    return render_template(
+        'my_service_record.html',
+        employee=emp,
+        history_list=history,
+        current_amount=current_amount,
+        si_due=si_due,
+        can_export_pdf=True,
+        pdf_url=url_for('routes.employee_service_record_pdf', id=emp.id),
+        dashboard_url=url_for('routes.employees_list'),
+        page_title='Employee Service Record',
+    )
+
+
+@bp.route('/employees/<int:id>/service-record/pdf')
+@login_required
+def employee_service_record_pdf(id: int):
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    emp, history, current_amount, si_due = _service_record_context(id)
+    buf = _service_record_pdf_bytes(emp, history, current_amount, si_due)
+    fname = f'service_record_{(emp.employee_id or str(emp.id)).strip()}.pdf'
+    return send_file(buf, mimetype='application/pdf', as_attachment=True, download_name=fname)
 
 
 def _time_24_to_12(t):
@@ -741,13 +1151,6 @@ def _is_cos_employee(emp: Employee) -> bool:
     if 'job order' in t:
         return False
     return 'cos' in t or t == 'c.o.s.'
-
-
-def _is_jo_only_employee(emp: Employee) -> bool:
-    """Job Order only (8:00 / 17:00 defaults under 4-day); excludes COS."""
-    if not _is_jo_cos_employee(emp):
-        return False
-    return not _is_cos_employee(emp)
 
 
 def _is_regular_employee(emp: Employee) -> bool:
@@ -834,10 +1237,47 @@ def _duty_schedule_time_strings(base):
     )
 
 
+def _prefetch_flexi_schedule_rows_for_range(emp: Employee, start_d: date, end_d: date) -> None:
+    """Load flexi assignments for the viewed range in two queries instead of two per day."""
+    if not emp or not getattr(emp, 'flexible_worktime', False) or not start_d or not end_d:
+        return
+    by_date: dict[date, FlexiTimeSchedule | None] = {}
+    curr = start_d
+    while curr <= end_d:
+        by_date[curr] = None
+        curr += timedelta(days=1)
+    days = (
+        EmployeeFlexiDay.query
+        .filter(EmployeeFlexiDay.employee_id == emp.id)
+        .filter(EmployeeFlexiDay.work_date >= start_d)
+        .filter(EmployeeFlexiDay.work_date <= end_d)
+        .all()
+    )
+    sids = {row.flexi_time_schedule_id for row in days if row.flexi_time_schedule_id}
+    scheds = {}
+    if sids:
+        scheds = {
+            s.id: s
+            for s in FlexiTimeSchedule.query.filter(FlexiTimeSchedule.id.in_(sids)).all()
+        }
+    for row in days:
+        by_date[row.work_date] = scheds.get(row.flexi_time_schedule_id)
+    try:
+        g._flexi_sched_lookup = {'emp_id': emp.id, 'by_date': by_date}
+    except RuntimeError:
+        pass
+
+
 def _flexi_schedule_row_for_employee_date(emp: Employee, d: date):
     """FlexiTimeSchedule row for this calendar day, if employee is on flexi and has an assignment."""
     if not getattr(emp, 'flexible_worktime', False):
         return None
+    try:
+        look = getattr(g, '_flexi_sched_lookup', None)
+    except RuntimeError:
+        look = None
+    if look and look.get('emp_id') == getattr(emp, 'id', None) and d in look.get('by_date', {}):
+        return look['by_date'][d]
     day = EmployeeFlexiDay.query.filter_by(employee_id=emp.id, work_date=d).first()
     if not day or not day.flexi_time_schedule_id:
         return None
@@ -950,20 +1390,88 @@ def _jo_cos_rate_form_kwargs():
     }
 
 
+def _parse_employee_separation_type(raw):
+    value = (raw or '').strip()
+    if not value:
+        return None
+    if value not in EMPLOYEE_SEPARATION_TYPES:
+        raise ValueError(f"Invalid separation type. Allowed: {', '.join(EMPLOYEE_SEPARATION_TYPES)}.")
+    return value
+
+
 def _employee_form_flexi_kwargs(emp=None):
-    return _jo_cos_rate_form_kwargs()
+    return {
+        **_jo_cos_rate_form_kwargs(),
+        'employee_separation_types': EMPLOYEE_SEPARATION_TYPES,
+    }
+
+
+def _flexible_worktime_rows_for_employee(emp_id: int):
+    """All quincena Flexible Worktime rows for an employee, cached per request."""
+    if not emp_id:
+        return []
+    try:
+        cache = g._flexi_worktime_rows_cache
+    except (AttributeError, RuntimeError):
+        cache = None
+    if cache is None:
+        cache = {}
+        try:
+            g._flexi_worktime_rows_cache = cache
+        except RuntimeError:
+            pass
+    if emp_id not in cache:
+        cache[emp_id] = (
+            FlexibleWorktime.query
+            .filter_by(employee_id=emp_id)
+            .order_by(FlexibleWorktime.date_start.asc(), FlexibleWorktime.id.asc())
+            .all()
+        )
+    return cache[emp_id]
+
+
+def _flexible_worktime_row_for_date(emp: Employee, d: date):
+    """Quincena Flexible Worktime row covering this calendar date, if any."""
+    if not emp or not d:
+        return None
+    match = None
+    for row in _flexible_worktime_rows_for_employee(getattr(emp, 'id', None)):
+        if row.date_start <= d <= row.date_end:
+            match = row
+    return match
+
+
+def _flexible_worktime_duty_schedule_for_date(emp: Employee, d: date):
+    """Duty schedule from the Flexible Worktime list for this date (None when not listed)."""
+    row = _flexible_worktime_row_for_date(emp, d)
+    if not row:
+        return None
+    return _duty_schedule_from_flexible_worktime_row(row)
+
+
+def _employee_is_flexible_for_date(emp: Employee, d: date) -> bool:
+    """
+    True when the employee is flexible for this date, from either source:
+    the Employee.flexible_worktime flag or the quincena Flexible Worktime list.
+    """
+    if bool(getattr(emp, 'flexible_worktime', False)):
+        return True
+    return _flexible_worktime_row_for_date(emp, d) is not None
 
 
 def _pick_work_arrangement_for_date(emp: Employee, d: date):
     """Pick a date-effective arrangement; defaults to 5-day when none matched."""
+    # Quincena Flexible Worktime list wins: it carries explicit in/break/out targets.
+    flexi_list_sched = _flexible_worktime_duty_schedule_for_date(emp, d)
+    if flexi_list_sched:
+        return flexi_list_sched
+
     if bool(getattr(emp, 'flexible_worktime', False)):
-        day_row = EmployeeFlexiDay.query.filter_by(employee_id=emp.id, work_date=d).first()
-        if day_row and day_row.flexi_time_schedule_id:
-            sch = FlexiTimeSchedule.query.get(day_row.flexi_time_schedule_id)
-            if sch:
-                base = _duty_base_from_flexi_schedule_row(sch)
-                if base:
-                    return base
+        sch = _flexi_schedule_row_for_employee_date(emp, d)
+        if sch:
+            base = _duty_base_from_flexi_schedule_row(sch)
+            if base:
+                return base
         flex_start = getattr(emp, 'flexible_start_time', None)
         flex_end = getattr(emp, 'flexible_end_time', None)
         base = dict(_DTR_DUTY_MODELS['5day'])
@@ -974,11 +1482,7 @@ def _pick_work_arrangement_for_date(emp: Employee, d: date):
         return base
 
     is_regular = _is_regular_employee(emp)
-    rows = (DtrWorkArrangementSetting.query
-            .filter(DtrWorkArrangementSetting.start_date <= d)
-            .filter(DtrWorkArrangementSetting.end_date >= d)
-            .order_by(DtrWorkArrangementSetting.created_at.desc(), DtrWorkArrangementSetting.id.desc())
-            .all())
+    rows = dtr_wa.work_arrangement_settings_covering(d)
     for row in rows:
         applies = (row.applies_to or 'all').strip().lower()
         if applies == 'all':
@@ -1003,14 +1507,10 @@ def _employee_matches_dtr_applies_to(emp: Employee, applies_to: str) -> bool:
 
 def _arrangement_model_code_for_date(emp: Employee, d: date) -> str:
     """Effective duty model code for late/undertime (e.g. '4day', '5day'); 'flex' if flexible_worktime."""
-    if bool(getattr(emp, 'flexible_worktime', False)):
+    if _employee_is_flexible_for_date(emp, d):
         return 'flex'
     is_regular = _is_regular_employee(emp)
-    rows = (DtrWorkArrangementSetting.query
-            .filter(DtrWorkArrangementSetting.start_date <= d)
-            .filter(DtrWorkArrangementSetting.end_date >= d)
-            .order_by(DtrWorkArrangementSetting.created_at.desc(), DtrWorkArrangementSetting.id.desc())
-            .all())
+    rows = dtr_wa.work_arrangement_settings_covering(d)
     for row in rows:
         applies = (row.applies_to or 'all').strip().lower()
         if applies == 'all' or (applies == 'regular' and is_regular) or (applies == 'jo_cos' and not is_regular):
@@ -1019,18 +1519,14 @@ def _arrangement_model_code_for_date(emp: Employee, d: date) -> str:
 
 
 def _pick_late_undertime_schedule(emp: Employee, d: date):
-    """
-    Schedule used only for late/undertime computation.
-    Job Order only: under effective 4-day compressed, use 5-day anchors (8:00–17:00) so default
-    8 AM / 5 PM stamps match targets. COS and plantilla use true 4-day (7:00–18:00) targets.
-    """
-    if _is_jo_only_employee(emp) and _arrangement_model_code_for_date(emp, d) == '4day':
-        return _DTR_DUTY_MODELS['5day']
+    """Schedule used only for late/undertime computation (true 4-day / 5-day / flexi)."""
     return _pick_work_arrangement_for_date(emp, d)
 
 
 def _late_undertime_minutes_for_record(rec, schedule):
     if not rec or not schedule:
+        return 0, 0
+    if _duty_schedule_is_rest(schedule):
         return 0, 0
 
     target_am_in = schedule['am_in'][0] * 60 + schedule['am_in'][1]
@@ -1042,6 +1538,24 @@ def _late_undertime_minutes_for_record(rec, schedule):
     am_out = _time_to_minutes(rec.am_out)
     pm_in = _time_to_minutes(rec.pm_in)
     pm_out = _time_to_minutes(rec.pm_out)
+
+    # Straight duty (no meal break): only In and Out matter.
+    if _duty_schedule_is_straight(schedule):
+        late_mins = 0
+        undertime_mins = 0
+        punch_in = am_in if am_in is not None else pm_in
+        punch_out = pm_out if pm_out is not None else am_out
+        if punch_in is not None and punch_in > target_am_in:
+            late_mins += punch_in - target_am_in
+        if punch_out is not None:
+            if target_pm_out < target_am_in:
+                eff_target = target_pm_out + 24 * 60
+                eff_actual = punch_out + (24 * 60 if punch_out < target_am_in else 0)
+                if eff_actual < eff_target:
+                    undertime_mins += eff_target - eff_actual
+            elif punch_out < target_pm_out:
+                undertime_mins += target_pm_out - punch_out
+        return late_mins, undertime_mins
 
     # Overnight-style flexi (e.g. 8:00 pm → 5:00 am): duty end is "earlier" on clock than start.
     if target_pm_out < target_am_in:
@@ -1069,19 +1583,34 @@ def _late_undertime_minutes_for_record(rec, schedule):
     return late_mins, undertime_mins
 
 
+def _duty_schedule_is_straight(sched) -> bool:
+    return ((sched or {}).get('duty_mode') or 'split').strip().lower() == 'straight'
+
+
+def _duty_schedule_is_rest(sched) -> bool:
+    return ((sched or {}).get('duty_mode') or '').strip().lower() == 'rest'
+
+
 def _scheduled_shift_minutes_from_duty_schedule(sched):
     """
     Expected duty length in minutes for one calendar DTR row (same dict shape as 5day / flexi duty base).
 
-    Overnight flex (duty clock-out before clock-in, e.g. 8:00 pm → 5:00 am) uses two segments
-    (in → break-out, break-in → out) with midnight wrap where needed.
+    Rest mode: 0 (scheduled day off).
+    Straight mode: continuous In → Out (supports overnight when Out < In).
+    Split / overnight flex: two segments (in → break-out, break-in → out) with midnight wrap where needed.
     """
     if not sched:
         return 8 * 60
+    if _duty_schedule_is_rest(sched):
+        return 0
     t_am_in = sched['am_in'][0] * 60 + sched['am_in'][1]
     t_am_out = sched['am_out'][0] * 60 + sched['am_out'][1]
     t_pm_in = sched['pm_in'][0] * 60 + sched['pm_in'][1]
     t_pm_out = sched['pm_out'][0] * 60 + sched['pm_out'][1]
+    if _duty_schedule_is_straight(sched):
+        if t_pm_out < t_am_in:
+            return max(0, (24 * 60 - t_am_in) + t_pm_out)
+        return max(0, t_pm_out - t_am_in)
     if t_pm_out < t_am_in:
         if t_am_out < t_am_in:
             seg_am = max(0, (24 * 60 - t_am_in) + t_am_out)
@@ -1096,7 +1625,7 @@ def _scheduled_shift_minutes_from_duty_schedule(sched):
 
 
 def _duty_schedule_is_overnight(sched) -> bool:
-    if not sched:
+    if not sched or _duty_schedule_is_rest(sched):
         return False
     t_am_in = sched['am_in'][0] * 60 + sched['am_in'][1]
     t_pm_out = sched['pm_out'][0] * 60 + sched['pm_out'][1]
@@ -1107,6 +1636,9 @@ def _scheduled_segment_minutes_from_duty_schedule(sched, segment: str) -> int:
     """AM or PM segment length in minutes from a duty schedule dict."""
     if not sched:
         return 0
+    if _duty_schedule_is_straight(sched):
+        # Half-day holiday/suspension on a straight shift: half of full duty minutes.
+        return _scheduled_shift_minutes_from_duty_schedule(sched) // 2
     if segment == 'AM':
         t_in = sched['am_in'][0] * 60 + sched['am_in'][1]
         t_out = sched['am_out'][0] * 60 + sched['am_out'][1]
@@ -1120,6 +1652,7 @@ def _worked_minutes_within_flexi_schedule(rec, schedule) -> int:
     """
     Minutes credited within flexi schedule windows only (in / break-out / break-in / out).
     Punches before time-in or after time-out do not add credit beyond the allowable shift.
+    Straight mode credits a single In → Out window.
     """
     if not rec or not schedule:
         return 0
@@ -1134,6 +1667,36 @@ def _worked_minutes_within_flexi_schedule(rec, schedule) -> int:
     pm_out = _time_to_minutes(rec.pm_out)
 
     if not any(v is not None for v in (am_in, am_out, pm_in, pm_out)):
+        return 0
+
+    full_sched = _scheduled_shift_minutes_from_duty_schedule(schedule)
+
+    if _duty_schedule_is_straight(schedule):
+        punch_in = am_in if am_in is not None else pm_in
+        punch_out = pm_out if pm_out is not None else am_out
+        if punch_in is None and punch_out is None:
+            return 0
+        eff_in = punch_in if punch_in is not None else t_am_in
+        eff_out = punch_out if punch_out is not None else t_pm_out
+        start = max(eff_in, t_am_in)
+        end = min(eff_out, t_pm_out)
+        if t_pm_out < t_am_in:
+            # Overnight straight: wrap past midnight.
+            if punch_out is not None and punch_out < t_am_in:
+                end = punch_out + 24 * 60
+                start = max(eff_in, t_am_in)
+                end = min(end, t_pm_out + 24 * 60)
+                total = max(0, end - start)
+            else:
+                # Incomplete overnight: credit whatever falls inside either side of midnight
+                total = 0
+                if punch_in is not None:
+                    total += max(0, (24 * 60) - max(punch_in, t_am_in))
+                if punch_out is not None:
+                    total += max(0, min(punch_out, t_pm_out) - 0)
+            return min(total, full_sched)
+        if end > start:
+            return min(end - start, full_sched)
         return 0
 
     if t_pm_out < t_am_in:
@@ -1162,7 +1725,6 @@ def _worked_minutes_within_flexi_schedule(rec, schedule) -> int:
                     total += max(0, (24 * 60 - start) + end)
             elif end > start:
                 total += end - start
-        full_sched = _scheduled_shift_minutes_from_duty_schedule(schedule)
         return min(total, full_sched)
 
     total = 0
@@ -1194,7 +1756,6 @@ def _worked_minutes_within_flexi_schedule(rec, schedule) -> int:
         elif two_punch and pm_out >= t_pm_in:
             total += max(0, min(pm_out, t_pm_out) - t_pm_in)
 
-    full_sched = _scheduled_shift_minutes_from_duty_schedule(schedule)
     return min(total, full_sched)
 
 
@@ -1213,6 +1774,8 @@ def _dtr_is_paid_leave_remark(remarks: str | None) -> bool:
 
 def _dtr_gross_minutes_for_flexi_day(rec, schedule, remarks: str) -> int:
     """Gross worktime for quincena flexible_worktime rows — capped to schedule windows."""
+    if _duty_schedule_is_rest(schedule):
+        return 0
     r = _dtr_normalize_remarks(remarks).strip().upper()
     if r == 'REST DAY':
         return 0
@@ -1412,16 +1975,48 @@ def _is_allowed_justification_filename(name: str) -> bool:
     return ext in _JUSTIFICATION_ALLOWED_EXTS
 
 
+def _dtr_justification_reason_from_form(form) -> tuple[str | None, str | None]:
+    """Return (reason text, error message)."""
+    category = (form.get('reason_category') or '').strip()
+    if category not in DTR_JUSTIFICATION_REASONS:
+        return None, 'Please select a valid reason.'
+    if category == DTR_JUSTIFICATION_REASON_OTHERS:
+        other = (form.get('reason_other') or '').strip()
+        if not other:
+            return None, 'Please provide details when reason is Others.'
+        return f'Others — {other}', None
+    return category, None
+
+
+def _redirect_after_dtr_justify_error(role: str, form) -> Response:
+    rec_date_raw = (form.get('record_date') or '').strip()
+    if (role or '').strip().lower() == 'employee' and rec_date_raw:
+        try:
+            rec_date = datetime.strptime(rec_date_raw, '%Y-%m-%d').date()
+        except ValueError:
+            return redirect(url_for('routes.dtr_my_records'))
+        mode = (form.get('justify_mode') or 'quincena').strip().lower()
+        if mode not in ('quincena', 'month'):
+            mode = 'quincena'
+        quincena = (form.get('justify_quincena') or '1').strip()
+        return redirect(url_for(
+            'routes.dtr_my_records',
+            year=rec_date.year,
+            month=rec_date.month,
+            mode=mode,
+            quincena=quincena,
+            justify_date=rec_date_raw,
+        ))
+    return redirect(url_for('routes.dtr_justifications'))
+
+
 def _month_date_range(year: int, month: int) -> tuple[date, date]:
     last_day = calendar.monthrange(year, month)[1]
     return date(year, month, 1), date(year, month, last_day)
 
 
 def _quincena_date_range(year: int, month: int, quincena: str) -> tuple[date, date]:
-    if quincena == '2':
-        last_day = calendar.monthrange(year, month)[1]
-        return date(year, month, 16), date(year, month, last_day)
-    return date(year, month, 1), date(year, month, 15)
+    return quincena_core_date_range(year, month, quincena)
 
 
 def _build_quincena_upload_options(anchor: date):
@@ -1473,6 +2068,61 @@ def _missing_dates_for_quincena(row_dates: set[date], year: int, month: int, qui
     return missing
 
 
+def _row_dates_from_upload_payload(row_data: list[dict]) -> set[date]:
+    dates = set()
+    for row in row_data:
+        rec_date = _parse_dtr_upload_form_date(str(row.get('date') or '').strip())
+        if rec_date is not None:
+            dates.add(rec_date)
+    return dates
+
+
+def _row_dates_in_core_quincena(
+    row_data: list[dict],
+    year: int,
+    month: int,
+    quincena: str,
+) -> set[date]:
+    """Dates from upload rows that fall inside the quincena itself (not buffer days)."""
+    core_start, core_end = _quincena_date_range(year, month, quincena)
+    dates = set()
+    for row in row_data:
+        rec_date = _parse_dtr_upload_form_date(str(row.get('date') or '').strip())
+        if rec_date is not None and core_start <= rec_date <= core_end:
+            dates.add(rec_date)
+    return dates
+
+
+def _filter_upload_rows_for_quincena(row_data: list[dict], upload_quincena: str):
+    """
+    Keep rows whose date falls inside the selected quincena, plus one buffer day
+    before and after (night shift / flexitime).
+    Returns (filtered_rows, outside_dates, skipped_row_count, error_message).
+    """
+    qy, qm, qh = _parse_quincena_upload_value(upload_quincena)
+    if qy is None:
+        return [], [], 0, 'Invalid quincena selection.'
+    accept_start, accept_end, _core_start, _core_end = quincena_upload_accept_range(qy, qm, qh)
+    filtered = []
+    outside_dates = set()
+    skipped = 0
+    for row in row_data:
+        rec_date = _parse_dtr_upload_form_date(str(row.get('date') or '').strip())
+        if rec_date is not None and (rec_date < accept_start or rec_date > accept_end):
+            outside_dates.add(rec_date)
+            skipped += 1
+            continue
+        filtered.append(row)
+    return filtered, sorted(outside_dates), skipped, None
+
+
+def _dtr_upload_batch_label(batch: DtrUploadBatch) -> str:
+    qy, qm, qh = _parse_quincena_upload_value(batch.quincena or '')
+    if qy is not None:
+        return _jo_cos_payslip_period_label(qy, qm, str(qh))
+    return batch.quincena or '—'
+
+
 def _resolve_dtr_am_out_pm_in_conflict(am_out, pm_in):
     """If AM break-out and PM break-in cross, align timestamps (same employee/date)."""
     if am_out is None or pm_in is None:
@@ -1482,6 +2132,11 @@ def _resolve_dtr_am_out_pm_in_conflict(am_out, pm_in):
     if pm_in < am_out:
         am_out = pm_in
     return am_out, pm_in
+
+
+DTR_UPLOAD_MERGE_FILL_BLANKS = 'fill_blanks'
+DTR_UPLOAD_MERGE_MINMAX = 'merge_minmax'
+DTR_UPLOAD_MERGE_STRATEGIES = frozenset({DTR_UPLOAD_MERGE_FILL_BLANKS, DTR_UPLOAD_MERGE_MINMAX})
 
 
 def _merge_two_dtr_times_pick_min(existing, new):
@@ -1502,15 +2157,66 @@ def _merge_two_dtr_times_pick_max(existing, new):
     return existing if existing >= new else new
 
 
+def _merge_two_dtr_times_fill_blank(existing, new):
+    """Never change a stored punch; only fill when the DB slot is blank."""
+    return existing if existing is not None else new
+
+
+def _normalize_dtr_upload_merge_strategy(raw) -> str:
+    s = (raw or '').strip().lower()
+    if s in DTR_UPLOAD_MERGE_STRATEGIES:
+        return s
+    return DTR_UPLOAD_MERGE_FILL_BLANKS
+
+
 def _merge_dtr_times_with_upload(existing_am_in, existing_am_out, existing_pm_in, existing_pm_out,
-                                   upload_am_in, upload_am_out, upload_pm_in, upload_pm_out):
-    """Merge stored DTR with upload: fill blanks; combine duplicates via min/max; normalize break."""
-    am_in = _merge_two_dtr_times_pick_min(existing_am_in, upload_am_in)
-    am_out = _merge_two_dtr_times_pick_max(existing_am_out, upload_am_out)
-    pm_in = _merge_two_dtr_times_pick_min(existing_pm_in, upload_pm_in)
-    pm_out = _merge_two_dtr_times_pick_max(existing_pm_out, upload_pm_out)
+                                   upload_am_in, upload_am_out, upload_pm_in, upload_pm_out,
+                                   strategy=DTR_UPLOAD_MERGE_FILL_BLANKS):
+    """
+    Merge stored DTR with upload.
+    fill_blanks (default): only fill None slots; never change an existing punch,
+    except generated duty In (7/8 AM) / Out (5/6 PM) which yield to actual timestamps.
+    merge_minmax: fill blanks; when both set, keep earlier in / later out.
+    """
+    strategy = _normalize_dtr_upload_merge_strategy(strategy)
+    if strategy == DTR_UPLOAD_MERGE_MINMAX:
+        am_in = _merge_two_dtr_times_pick_min(existing_am_in, upload_am_in)
+        am_out = _merge_two_dtr_times_pick_max(existing_am_out, upload_am_out)
+        pm_in = _merge_two_dtr_times_pick_min(existing_pm_in, upload_pm_in)
+        pm_out = _merge_two_dtr_times_pick_max(existing_pm_out, upload_pm_out)
+    else:
+        am_in = merge_prefer_actual_over_duty_stamp(existing_am_in, upload_am_in, 'am_in')
+        am_out = _merge_two_dtr_times_fill_blank(existing_am_out, upload_am_out)
+        pm_in = _merge_two_dtr_times_fill_blank(existing_pm_in, upload_pm_in)
+        pm_out = merge_prefer_actual_over_duty_stamp(existing_pm_out, upload_pm_out, 'pm_out')
     am_out, pm_in = _resolve_dtr_am_out_pm_in_conflict(am_out, pm_in)
     return am_in, am_out, pm_in, pm_out
+
+
+def _dtr_upload_force_processed_allowed(user=None) -> bool:
+    """Only Admin may force re-upload into a processed quincena."""
+    from app.portal_auth import is_portal_admin_session
+    from app.portal_config import is_admin_role
+    if is_portal_admin_session():
+        return True
+    user = user or current_user
+    return is_admin_role(getattr(user, 'role', None))
+
+
+def _dtr_upload_period_gate(upload_quincena: str, *, force_processed: bool = False) -> str | None:
+    """Return error message if upload must be blocked for this quincena; else None."""
+    qy, qm, qh = _parse_quincena_upload_value(upload_quincena)
+    if qy is None or qm is None or qh is None:
+        return None
+    period = dtr_period.get_period(qy, qm, str(qh))
+    if not dtr_period.is_period_locked(period):
+        return None
+    if force_processed and _dtr_upload_force_processed_allowed():
+        return None
+    return (
+        'This quincena has been processed. Reopen it from Quincena Processing before uploading, '
+        'or an Admin can check “Force upload into processed quincena”.'
+    )
 
 
 def _parse_dtr_special_days_for_generate(
@@ -1580,15 +2286,47 @@ def _dtr_effective_remarks_for_day(emp: Employee, rec, curr: date, approved_date
         and not (rec and _dtr_is_special_day_remark(rec.remarks))
     ):
         remarks = 'REST DAY'
+    else:
+        flexi_sched = _flexible_worktime_duty_schedule_for_date(emp, curr)
+        if flexi_sched and _duty_schedule_is_rest(flexi_sched):
+            if not remarks or remarks in ('SATURDAY', 'SUNDAY'):
+                remarks = 'REST DAY'
     return remarks
 
 
 def _duty_schedule_from_flexible_worktime_row(row: FlexibleWorktime) -> dict:
+    mode = ((getattr(row, 'duty_mode', None) or 'split')).strip().lower()
+    if mode not in ('split', 'straight', 'rest'):
+        mode = 'split'
+    if mode == 'rest':
+        return {
+            'duty_mode': 'rest',
+            'am_in': (0, 0),
+            'am_out': (0, 0),
+            'pm_in': (0, 0),
+            'pm_out': (0, 0),
+        }
+    tin = row.time_in
+    tout = row.time_out
+    if tin is None or tout is None:
+        raise ValueError('Flexible worktime split/straight rows require time in and time out.')
+    if mode == 'straight':
+        # Single continuous window; am_out/pm_in unused by straight helpers.
+        return {
+            'duty_mode': 'straight',
+            'am_in': (tin.hour, tin.minute),
+            'am_out': (tin.hour, tin.minute),
+            'pm_in': (tout.hour, tout.minute),
+            'pm_out': (tout.hour, tout.minute),
+        }
+    bout = row.break_out or tin
+    bin_ = row.break_in or tout
     return {
-        'am_in': (row.time_in.hour, row.time_in.minute),
-        'am_out': (row.break_out.hour, row.break_out.minute),
-        'pm_in': (row.break_in.hour, row.break_in.minute),
-        'pm_out': (row.time_out.hour, row.time_out.minute),
+        'duty_mode': 'split',
+        'am_in': (tin.hour, tin.minute),
+        'am_out': (bout.hour, bout.minute),
+        'pm_in': (bin_.hour, bin_.minute),
+        'pm_out': (tout.hour, tout.minute),
     }
 
 
@@ -1603,6 +2341,21 @@ def _employee_on_flexible_worktime_quincena(
     )
 
 
+def _flexible_worktime_entry_date_bounds(
+    start_d: date,
+    end_d: date,
+    *,
+    buffer_days: int = DTR_UPLOAD_QUINCENA_BUFFER_DAYS,
+) -> tuple[date, date]:
+    """
+    Selectable date-from / date-to window for Flexible Worktime entries.
+    Widens the quincena by one day on each side so night-shift ranges can
+    cover the adjacent calendar day (e.g. 8 pm → 5 am).
+    """
+    buf = max(0, int(buffer_days))
+    return start_d - timedelta(days=buf), end_d + timedelta(days=buf)
+
+
 def _flexible_worktime_schedule_by_date(
     emp_id: int, year: int, month: int, quincena_half: str, start_d: date, end_d: date
 ) -> dict[date, dict]:
@@ -1614,11 +2367,13 @@ def _flexible_worktime_schedule_by_date(
         .order_by(FlexibleWorktime.date_start.asc(), FlexibleWorktime.id.asc())
         .all()
     )
+    # Include ±1 day so overnight / night-shift entry ranges still map.
+    win_start, win_end = _flexible_worktime_entry_date_bounds(start_d, end_d)
     sched_by_date: dict[date, dict] = {}
     for row in rows:
         sched = _duty_schedule_from_flexible_worktime_row(row)
-        curr = max(row.date_start, start_d)
-        stop = min(row.date_end, end_d)
+        curr = max(row.date_start, win_start)
+        stop = min(row.date_end, win_end)
         while curr <= stop:
             sched_by_date[curr] = sched
             curr += timedelta(days=1)
@@ -1675,11 +2430,18 @@ def _flexible_worktime_parse_filters(args) -> dict:
 def _flexible_worktime_row_dict(row: FlexibleWorktime) -> dict:
     emp = row.employee
     code = (emp.employee_id or '') if emp else ''
-    name = f"{emp.last_name}, {emp.first_name}" if emp else ''
+    name = emp.directory_name if emp else ''
     dept = emp.department if emp else None
+    mode = ((getattr(row, 'duty_mode', None) or 'split')).strip().lower()
+    if mode not in ('split', 'straight', 'rest'):
+        mode = 'split'
     sched = _duty_schedule_from_flexible_worktime_row(row)
-    t_in = row.time_in.hour * 60 + row.time_in.minute
-    t_out = row.time_out.hour * 60 + row.time_out.minute
+    if mode == 'rest' or not row.time_in or not row.time_out:
+        is_overnight = False
+    else:
+        t_in = row.time_in.hour * 60 + row.time_in.minute
+        t_out = row.time_out.hour * 60 + row.time_out.minute
+        is_overnight = t_out < t_in
     return {
         'id': row.id,
         'employee_id': row.employee_id,
@@ -1689,11 +2451,12 @@ def _flexible_worktime_row_dict(row: FlexibleWorktime) -> dict:
         'department_name': dept.name if dept else '',
         'date_start': row.date_start.isoformat(),
         'date_end': row.date_end.isoformat(),
-        'time_in': row.time_in.strftime('%H:%M'),
-        'break_out': row.break_out.strftime('%H:%M'),
-        'break_in': row.break_in.strftime('%H:%M'),
-        'time_out': row.time_out.strftime('%H:%M'),
-        'is_overnight': t_out < t_in,
+        'duty_mode': mode,
+        'time_in': row.time_in.strftime('%H:%M') if row.time_in else '',
+        'break_out': row.break_out.strftime('%H:%M') if row.break_out else '',
+        'break_in': row.break_in.strftime('%H:%M') if row.break_in else '',
+        'time_out': row.time_out.strftime('%H:%M') if row.time_out else '',
+        'is_overnight': is_overnight,
         'shift_mins': _scheduled_shift_minutes_from_duty_schedule(sched),
         'search_text': f"{code} {name} {dept.name if dept else ''}".lower(),
     }
@@ -2121,7 +2884,7 @@ def _sync_jo_cos_overtime_earned_ledger_for_quincena(
 def _jo_cos_extend_service_row_dict(row: JoCosExtendService) -> dict:
     emp = row.employee
     code = (emp.employee_id or '') if emp else ''
-    name = f"{emp.last_name}, {emp.first_name}" if emp else ''
+    name = emp.directory_name if emp else ''
     return {
         'id': row.id,
         'employee_id': row.employee_id,
@@ -2140,7 +2903,7 @@ def _jo_cos_extend_service_row_dict(row: JoCosExtendService) -> dict:
 def _overtime_authorization_row_dict(row: OvertimeAuthorization) -> dict:
     emp = row.employee
     code = (emp.employee_id or '') if emp else ''
-    name = f"{emp.last_name}, {emp.first_name}" if emp else ''
+    name = emp.directory_name if emp else ''
     return {
         'id': row.id,
         'employee_id': row.employee_id,
@@ -2163,6 +2926,7 @@ def _parse_quincena_schedule_entries_json(
     *,
     require_plantilla: bool = False,
     require_jo_cos: bool = False,
+    allowed_department_id: int | None = None,
 ) -> list[dict]:
     raw = (raw or '').strip()
     if not raw:
@@ -2188,6 +2952,11 @@ def _parse_quincena_schedule_entries_json(
             raise ValueError(f'Row {idx}: employee must be plantilla (leave-credits status).')
         if require_jo_cos and not _is_jo_cos_employee(emp):
             raise ValueError(f'Row {idx}: employee must be Job Order or Contract of Service.')
+        if allowed_department_id is not None and emp.department_id != allowed_department_id:
+            raise ValueError(
+                f'Row {idx}: employee is outside your department. '
+                'Payroll Maker may only manage X-Service for their department.'
+            )
         try:
             d0 = datetime.strptime((item.get('date_start') or '').strip(), '%Y-%m-%d').date()
             d1 = datetime.strptime((item.get('date_end') or '').strip(), '%Y-%m-%d').date()
@@ -2230,6 +2999,7 @@ def _employee_dtr_worktime_day_rows(
     quincena_half: str | None = None,
 ) -> list[dict]:
     """Per-calendar-day worktime breakdown for one employee over a date range."""
+    _prefetch_flexi_schedule_rows_for_range(emp, start_d, end_d)
     rows = _dtr_rows_for_employee(emp, start_d, end_d)
     by_date = {r.record_date: r for r in rows}
     approved = _approved_leave_dates_for_employee(emp.id, start_d, end_d)
@@ -2272,6 +3042,26 @@ def _employee_dtr_worktime_day_rows(
                 day_rows.append({
                     'work_date': curr,
                     'remarks': (remarks or '')[:100] or None,
+                    'gross_work_mins': 0,
+                    'late_mins': 0,
+                    'undertime_mins': 0,
+                    'absence_mins': 0,
+                    'net_rendered_mins': 0,
+                })
+                curr += timedelta(days=1)
+                continue
+            if flexi_sched and _duty_schedule_is_rest(flexi_sched):
+                # Explicit flexi rest day: not duty; keep leave/holiday labels if present.
+                if _dtr_is_special_day_remark(remarks) or _dtr_is_paid_leave_remark(remarks):
+                    rest_remarks = remarks
+                else:
+                    rest_remarks = 'REST DAY'
+                if persist_row_undertime and rec:
+                    rec.undertime_hrs = 0
+                    rec.undertime_mins = 0
+                day_rows.append({
+                    'work_date': curr,
+                    'remarks': (rest_remarks or '')[:100] or None,
                     'gross_work_mins': 0,
                     'late_mins': 0,
                     'undertime_mins': 0,
@@ -2480,7 +3270,10 @@ def _dtr_for_upload_employee_day(emp: Employee, rec_date: date):
 
 
 def _dtr_save_payload_from_upload_rows(parsed_rows):
-    """Minimal serializable rows for compact POST (JSON in one field)."""
+    """
+    Minimal serializable rows for compact POST (JSON in one field).
+    Raw ``punches`` are carried through so duplicate-slot flags can be created on commit.
+    """
     return [
         {
             'employee_id': str(r.get('employee_id') or '').strip(),
@@ -2489,9 +3282,40 @@ def _dtr_save_payload_from_upload_rows(parsed_rows):
             'break_out': str(r.get('break_out') or '').strip(),
             'break_in': str(r.get('break_in') or '').strip(),
             'check_out': str(r.get('check_out') or '').strip(),
+            'punches': r.get('punches') or [],
+            'duplicate_slots': r.get('duplicate_slots') or [],
+            'has_duplicate_punches': bool(r.get('has_duplicate_punches')),
         }
         for r in parsed_rows
     ]
+
+
+def _dtr_upload_owner_key():
+    """Stable per-session key so staged uploads cannot be read by other users."""
+    return str(getattr(current_user, 'get_id', lambda: None)() or getattr(current_user, 'id', None) or 'anon')
+
+
+def _dtr_upload_parse_summary(parsed_rows):
+    """Aggregate stats for the post-parse confirmation panel (no per-row HTML)."""
+    employee_ids = set()
+    dates = []
+    for row in parsed_rows:
+        eid = str(row.get('employee_id') or '').strip()
+        if eid:
+            employee_ids.add(eid)
+        raw = str(row.get('date') or '').strip()
+        if not raw:
+            continue
+        try:
+            dates.append(datetime.strptime(raw, '%Y-%m-%d').date())
+        except ValueError:
+            continue
+    return {
+        'record_count': len(parsed_rows),
+        'employee_count': len(employee_ids),
+        'date_min': min(dates).strftime('%d/%m/%Y') if dates else None,
+        'date_max': max(dates).strftime('%d/%m/%Y') if dates else None,
+    }
 
 
 def _dtr_rows_from_payload_list(rows_raw):
@@ -2504,14 +3328,23 @@ def _dtr_rows_from_payload_list(rows_raw):
     for item in rows_raw:
         if not isinstance(item, dict):
             continue
-        rows.append({
+        punches = item.get('punches')
+        if not isinstance(punches, list):
+            punches = []
+        row = {
             'employee_id': str(item.get('employee_id') or '').strip(),
             'date': str(item.get('date') or '').strip(),
             'check_in': str(item.get('check_in') or '').strip(),
             'break_out': str(item.get('break_out') or '').strip(),
             'break_in': str(item.get('break_in') or '').strip(),
             'check_out': str(item.get('check_out') or '').strip(),
-        })
+            'punches': punches,
+        }
+        dup_slots = item.get('duplicate_slots')
+        if isinstance(dup_slots, list):
+            row['duplicate_slots'] = dup_slots
+            row['has_duplicate_punches'] = bool(dup_slots)
+        rows.append(row)
     return rows, None
 
 
@@ -2560,6 +3393,54 @@ def _dtr_rows_for_employee(emp: Employee, start_d: date, end_d: date):
     return rows
 
 
+def _employee_directory_label(last_name, first_name, middle_name, name_extension=None) -> str:
+    last = (last_name or '').strip()
+    first = (first_name or '').strip()
+    middle = (middle_name or '').strip()
+    ext = Employee.normalize_name_extension(name_extension)
+    given_parts = []
+    if first:
+        given_parts.append(first)
+    if ext:
+        given_parts.append(ext)
+    if middle:
+        given_parts.append(middle)
+    given = ' '.join(given_parts)
+    if last and given:
+        return f'{last}, {given}'
+    return last or given
+
+
+def _dtr_employee_picker_rows(employee_q) -> list:
+    """
+    Lightweight employee dropdown rows (no full Employee/PDS ORM load).
+
+    directory_name on Employee lazy-loads employee_pds per option; PDS is a very
+    wide table, so that N+1 dominated Load DTR for Admin/HR.
+    """
+    q = (
+        employee_q
+        .outerjoin(EmployeePDS, EmployeePDS.employee_id == Employee.id)
+        .with_entities(
+            Employee.id,
+            Employee.employee_id,
+            Employee.last_name,
+            Employee.first_name,
+            Employee.middle_name,
+            EmployeePDS.name_extension,
+        )
+        .order_by(Employee.last_name.asc(), Employee.first_name.asc())
+    )
+    out = []
+    for eid, badge, last, first, middle, ext in q.all():
+        out.append(SimpleNamespace(
+            id=eid,
+            employee_id=badge,
+            directory_name=_employee_directory_label(last, first, middle, ext),
+        ))
+    return out
+
+
 def _resolve_employee_from_scoped_list(employees, selected_raw):
     if not employees:
         return None
@@ -2581,11 +3462,290 @@ def _resolve_employee_from_scoped_list(employees, selected_raw):
 
 
 _DTR_UPLOAD_ALLOWED_ROLES = frozenset({'admin', 'hr', 'dtr_uploader'})
+_DTR_PUNCH_FLAG_REVIEW_ROLES = frozenset({'admin', 'hr', 'payroll_maker'})
+_FLEXIBLE_WORKTIME_ROLES = frozenset({'admin', 'hr', 'payroll_maker'})
+
+
+def _user_is_admin_or_hr(user=None):
+    from app.portal_auth import is_portal_admin_session
+    from app.portal_config import is_admin_or_hr_role
+    if is_portal_admin_session():
+        return True
+    user = user or current_user
+    return is_admin_or_hr_role(getattr(user, 'role', None))
+
+
+def _user_can_manage_flexible_worktime(user=None):
+    """Admin/HR (and Portal Admin) or Payroll Maker may manage Flexible Worktime."""
+    from app.portal_auth import is_portal_admin_session
+    if is_portal_admin_session():
+        return True
+    role = (getattr(user or current_user, 'role', None) or '').strip().lower()
+    return role in _FLEXIBLE_WORKTIME_ROLES
+
+
+def _require_flexible_worktime_manager():
+    """If current user cannot manage Flexible Worktime, flash and return redirect; else None."""
+    if _user_can_manage_flexible_worktime():
+        return None
+    flash('Access denied. This section is for Admin, HR, and Payroll Maker.', 'error')
+    return redirect(url_for(_dashboard_for_user(current_user)))
+
+
+def _require_x_service_manager():
+    """X-Service uses the same Admin/HR/Payroll Maker role policy."""
+    if _user_can_manage_flexible_worktime():
+        return None
+    flash('Access denied. This section is for Admin, HR, and Payroll Maker.', 'error')
+    return redirect(url_for(_dashboard_for_user(current_user)))
+
+
+def _user_can_review_dtr_punch_flags(user=None):
+    """Admin/HR (and Portal Admin) or Payroll Maker may review duplicate punch flags."""
+    from app.portal_auth import is_portal_admin_session
+    if is_portal_admin_session():
+        return True
+    role = (getattr(user or current_user, 'role', None) or '').strip().lower()
+    return role in _DTR_PUNCH_FLAG_REVIEW_ROLES
+
+
+def _require_dtr_punch_flag_reviewer():
+    """If current user cannot review punch flags, flash and return redirect; else None."""
+    if _user_can_review_dtr_punch_flags():
+        return None
+    flash('Access denied. This section is for Admin, HR, and Payroll Maker.', 'error')
+    return redirect(url_for(_dashboard_for_user(current_user)))
+
+
+def _payroll_maker_department_id(user=None):
+    """Return the linked department id for a payroll_maker user, else None."""
+    user = user or current_user
+    role = (getattr(user, 'role', None) or '').strip().lower()
+    if role != 'payroll_maker':
+        return None
+    viewer_emp = _current_employee_for_user()
+    return getattr(viewer_emp, 'department_id', None) if viewer_emp else None
+
+
+def _user_can_access_punch_flag_employee(emp, user=None) -> bool:
+    """Admin/HR: any employee. Payroll Maker: same department only."""
+    if emp is None:
+        return False
+    if _user_is_admin_or_hr(user):
+        return True
+    role = (getattr(user or current_user, 'role', None) or '').strip().lower()
+    if role != 'payroll_maker':
+        return False
+    dept_id = _payroll_maker_department_id(user)
+    return bool(dept_id and emp.department_id == dept_id)
 
 
 def _user_can_upload_dtr_log(user=None):
     role = (getattr(user or current_user, 'role', None) or '').strip().lower()
     return role in _DTR_UPLOAD_ALLOWED_ROLES
+
+
+def _dtr_upload_commit_rows(
+    row_data,
+    upload_quincena,
+    *,
+    filename='',
+    record_count=0,
+    merge_strategy=DTR_UPLOAD_MERGE_FILL_BLANKS,
+    force_processed=False,
+):
+    """
+    Persist parsed upload rows to daily_time_record with batch audit log.
+    Also retains raw punches and opens duplicate-slot flags for HR review.
+    Returns dict: saved, errors, error_count, batch_id, created_count, merged_count,
+    unchanged_count, merge_strategy, punch_flag_count.
+    Raises on DB failure (caller should rollback).
+    """
+    merge_strategy = _normalize_dtr_upload_merge_strategy(merge_strategy)
+    batch = create_upload_batch(
+        quincena=upload_quincena,
+        filename=filename,
+        record_count=record_count or len(row_data),
+    )
+    seen_normalized = set()
+    saved = 0
+    created_count = 0
+    merged_count = 0
+    unchanged_count = 0
+    punch_flag_count = 0
+    errors = []
+
+    def parse_t(s):
+        if not s:
+            return None
+        s = s.strip()
+        for fmt in ('%H:%M', '%H:%M:%S'):
+            try:
+                return datetime.strptime(s, fmt).time()
+            except ValueError:
+                continue
+        return None
+
+    for r in row_data:
+        eid_raw = (r.get('employee_id') or '').strip()
+        date_raw = (r.get('date') or '').strip()
+        if not eid_raw or not date_raw:
+            continue
+        emp = Employee.query.filter_by(employee_id=eid_raw).first()
+        if not emp:
+            errors.append(f'Employee ID {eid_raw} not found.')
+            continue
+        rec_date = _parse_dtr_upload_form_date(date_raw)
+        if rec_date is None:
+            errors.append(f'Invalid date {date_raw!r} for employee {eid_raw}.')
+            continue
+        norm_key = (emp.id, rec_date)
+        if norm_key in seen_normalized:
+            continue
+        seen_normalized.add(norm_key)
+
+        am_in_u = parse_t(r.get('check_in'))
+        am_out_u = parse_t(r.get('break_out'))
+        pm_in_u = parse_t(r.get('break_in'))
+        pm_out_u = parse_t(r.get('check_out'))
+        dtr = _dtr_for_upload_employee_day(emp, rec_date)
+        if dtr:
+            am_in, am_out, pm_in, pm_out = _merge_dtr_times_with_upload(
+                dtr.am_in,
+                dtr.am_out,
+                dtr.pm_in,
+                dtr.pm_out,
+                am_in_u,
+                am_out_u,
+                pm_in_u,
+                pm_out_u,
+                strategy=merge_strategy,
+            )
+            if (
+                am_in == dtr.am_in
+                and am_out == dtr.am_out
+                and pm_in == dtr.pm_in
+                and pm_out == dtr.pm_out
+            ):
+                unchanged_count += 1
+            else:
+                before = snapshot_dtr_row(dtr)
+                dtr.am_in = am_in
+                dtr.am_out = am_out
+                dtr.pm_in = pm_in
+                dtr.pm_out = pm_out
+                log_batch_item(
+                    batch,
+                    employee_id=emp.id,
+                    record_date=rec_date,
+                    action='merged',
+                    dtr_record_id=dtr.id,
+                    before=before,
+                )
+                merged_count += 1
+            selected_times = {
+                'am_in': am_in_u,
+                'am_out': am_out_u,
+                'pm_in': pm_in_u,
+                'pm_out': pm_out_u,
+            }
+        else:
+            am_out_u, pm_in_u = _resolve_dtr_am_out_pm_in_conflict(am_out_u, pm_in_u)
+            dtr = DailyTimeRecord(
+                employee_id=emp.id,
+                record_date=rec_date,
+                am_in=am_in_u,
+                am_out=am_out_u,
+                pm_in=pm_in_u,
+                pm_out=pm_out_u,
+            )
+            db.session.add(dtr)
+            db.session.flush()
+            log_batch_item(
+                batch,
+                employee_id=emp.id,
+                record_date=rec_date,
+                action='created',
+                dtr_record_id=dtr.id,
+            )
+            created_count += 1
+            selected_times = {
+                'am_in': am_in_u,
+                'am_out': am_out_u,
+                'pm_in': pm_in_u,
+                'pm_out': pm_out_u,
+            }
+        punch_flag_count += persist_upload_punches_and_flags(
+            batch,
+            employee_id=emp.id,
+            badge_employee_id=eid_raw,
+            record_date=rec_date,
+            punches=r.get('punches') or [],
+            selected_times=selected_times,
+        )
+        saved += 1
+
+    batch.saved_count = saved
+    batch.error_count = len(errors)
+    batch.created_count = created_count
+    batch.merged_count = merged_count
+
+    try:
+        qy, qm, qh = _parse_quincena_upload_value(upload_quincena)
+        period_label = upload_quincena
+        if qy is not None and qm is not None and qh is not None:
+            period_label = _jo_cos_payslip_period_label(qy, qm, str(qh))
+        changed = created_count + merged_count
+        msg = (
+            f'DTR upload processed {saved} record(s) for {period_label} '
+            f'({created_count} new, {merged_count} updated, {unchanged_count} unchanged).'
+        )
+        if punch_flag_count:
+            msg += f' {punch_flag_count} duplicate punch flag(s) need review.'
+        if errors:
+            msg += f' {len(errors)} row(s) had errors.'
+        _create_hrms_notification(
+            getattr(current_user, 'id', None),
+            'DTR upload completed',
+            msg,
+            link_url=url_for(
+                'routes.dtr_upload_punch_flags',
+                batch_id=batch.id,
+            ) if punch_flag_count else url_for(
+                'routes.dtr_records',
+                mode='quincena',
+                year=qy or date.today().year,
+                month=qm or date.today().month,
+                quincena=str(qh or '1'),
+            ),
+            related_type='dtr_upload',
+            related_id=batch.id,
+        )
+        if qy is not None and qm is not None and qh is not None and changed > 0:
+            period = dtr_period.get_period(qy, qm, str(qh))
+            status = ((period.status if period else '') or '').strip() or dtr_period.STATUS_DRAFT
+            was_locked = dtr_period.is_period_locked(period)
+            if was_locked or status == dtr_period.STATUS_DRAFT or period is None:
+                dtr_period.mark_uploaded(qy, qm, str(qh), getattr(current_user, 'id', None))
+                dtr_period.notify_employees_dtr_review_open(qy, qm, str(qh))
+            elif status == dtr_period.STATUS_REVIEW_CLOSED:
+                dtr_period.open_review(period)
+    except Exception:
+        pass
+
+    db.session.commit()
+    return {
+        'saved': saved,
+        'errors': errors,
+        'error_count': len(errors),
+        'batch_id': batch.id,
+        'created_count': created_count,
+        'merged_count': merged_count,
+        'unchanged_count': unchanged_count,
+        'merge_strategy': merge_strategy,
+        'force_processed': bool(force_processed),
+        'punch_flag_count': punch_flag_count,
+    }
 
 
 @bp.route('/dtr-upload', methods=['GET', 'POST'])
@@ -2595,29 +3755,33 @@ def dtr_upload():
         flash('Access denied.', 'error')
         return redirect(url_for(_dashboard_for_user(current_user)))
     employee = current_user.employee if current_user.employee else None
-    parsed_rows = []
+    save_result = None
     today = date.today()
     quincena_options = _build_quincena_upload_options(today)
     default_quincena = f'{today.year:04d}-{today.month:02d}-{"1" if today.day <= 15 else "2"}'
     selected_quincena = default_quincena
-    quincena_missing_dates = []
+    selected_merge_strategy = DTR_UPLOAD_MERGE_FILL_BLANKS
+    can_force_processed = _dtr_upload_force_processed_allowed()
     if request.method == 'POST':
         selected_quincena = (request.form.get('upload_quincena') or '').strip() or default_quincena
+        selected_merge_strategy = _normalize_dtr_upload_merge_strategy(
+            request.form.get('merge_strategy')
+        )
+        force_processed = bool(request.form.get('force_processed')) and can_force_processed
         q_year, q_month, q_half = _parse_quincena_upload_value(selected_quincena)
         if q_year is None:
             flash('Invalid quincena selection.', 'error')
             q_year, q_month, q_half = _parse_quincena_upload_value(default_quincena)
             selected_quincena = default_quincena
+        period_err = _dtr_upload_period_gate(selected_quincena, force_processed=force_processed)
         f = request.files.get('dtr_file')
-        if f and f.filename:
+        if period_err:
+            flash(period_err, 'error')
+        elif f and f.filename:
+            uploaded_filename = f.filename or ''
             try:
                 content = f.read()
-                parsed_rows = _parse_dtr_dat_file(content, f.filename or '')
-                for row in parsed_rows:
-                    row['check_in_12h'] = _time_24_to_12(row.get('check_in', ''))
-                    row['break_out_12h'] = _time_24_to_12(row.get('break_out', ''))
-                    row['break_in_12h'] = _time_24_to_12(row.get('break_in', ''))
-                    row['check_out_12h'] = _time_24_to_12(row.get('check_out', ''))
+                parsed_rows = _parse_dtr_dat_file(content, uploaded_filename)
                 if not parsed_rows:
                     flash('No valid DTR records found in the file.', 'warning')
                 else:
@@ -2627,27 +3791,479 @@ def dtr_upload():
                             row_dates.add(datetime.strptime(row.get('date', ''), '%Y-%m-%d').date())
                         except ValueError:
                             continue
-                    quincena_missing_dates = _missing_dates_for_quincena(row_dates, q_year, q_month, q_half)
-                    if quincena_missing_dates:
+                    parse_summary = _dtr_upload_parse_summary(parsed_rows)
+                    row_payload = _dtr_save_payload_from_upload_rows(parsed_rows)
+                    filtered_payload, outside_dates, skipped_outside, filter_err = _filter_upload_rows_for_quincena(
+                        row_payload, selected_quincena,
+                    )
+                    if filter_err:
+                        flash(filter_err, 'error')
+                    elif not filtered_payload:
                         flash(
-                            'Selected quincena has calendar day(s) not present in this file: '
-                            + ', '.join(d.strftime('%Y-%m-%d') for d in quincena_missing_dates)
-                            + '. You can still save the parsed rows to DTR.',
-                            'info',
+                            'No records in the file fall within the selected quincena '
+                            '(including ±1 day for night shift / flexitime). Nothing was saved.',
+                            'warning',
                         )
-                    flash(f'Parsed {len(parsed_rows)} record(s). Review and edit below, then click Save to DTR.', 'success')
+                    else:
+                        in_quincena_dates = _row_dates_in_core_quincena(
+                            filtered_payload, q_year, q_month, q_half,
+                        )
+                        quincena_missing_dates = _missing_dates_for_quincena(
+                            in_quincena_dates, q_year, q_month, q_half,
+                        )
+                        accept_start, accept_end, core_start, core_end = quincena_upload_accept_range(
+                            q_year, q_month, q_half,
+                        )
+                        core_row_count = sum(
+                            1 for row in filtered_payload
+                            if (_d := _parse_dtr_upload_form_date(str(row.get('date') or '').strip()))
+                            and core_start <= _d <= core_end
+                        )
+                        try:
+                            commit = _dtr_upload_commit_rows(
+                                filtered_payload,
+                                selected_quincena,
+                                filename=uploaded_filename,
+                                record_count=len(filtered_payload),
+                                merge_strategy=selected_merge_strategy,
+                                force_processed=force_processed,
+                            )
+                            qy, qm, qh = _parse_quincena_upload_value(selected_quincena)
+                            batch = DtrUploadBatch.query.get(commit['batch_id'])
+                            item_count = batch.items.count() if batch else 0
+                            can_undo = can_undo_dtr_batch(batch)
+                            save_result = {
+                                **parse_summary,
+                                'saved': commit['saved'],
+                                'error_count': commit['error_count'],
+                                'batch_id': commit['batch_id'],
+                                'created_count': commit['created_count'],
+                                'merged_count': commit['merged_count'],
+                                'unchanged_count': commit.get('unchanged_count', 0),
+                                'merge_strategy': commit.get('merge_strategy', selected_merge_strategy),
+                                'punch_flag_count': commit.get('punch_flag_count', 0),
+                                'can_undo': can_undo,
+                                'show_undo': can_undo and item_count > 0,
+                                'filename': uploaded_filename,
+                                'quincena': selected_quincena,
+                                'quincena_label': (
+                                    _jo_cos_payslip_period_label(qy, qm, str(qh))
+                                    if qy is not None else selected_quincena
+                                ),
+                                'records_in_quincena': core_row_count,
+                                'records_accepted': len(filtered_payload),
+                                'buffer_records': len(filtered_payload) - core_row_count,
+                                'accept_range_label': (
+                                    f'{accept_start.strftime("%b %d, %Y")} – '
+                                    f'{accept_end.strftime("%b %d, %Y")}'
+                                ),
+                                'skipped_outside_rows': skipped_outside,
+                                'outside_dates': [d.strftime('%Y-%m-%d') for d in outside_dates],
+                                'missing_dates': [d.strftime('%Y-%m-%d') for d in quincena_missing_dates],
+                                'punch_flags_url': url_for(
+                                    'routes.dtr_upload_punch_flags',
+                                    batch_id=commit['batch_id'],
+                                ),
+                                'dtr_records_url': url_for(
+                                    'routes.dtr_records',
+                                    mode='quincena',
+                                    year=qy or today.year,
+                                    month=qm or today.month,
+                                    quincena=str(qh or '1'),
+                                ),
+                            }
+                            if commit['errors']:
+                                for e in commit['errors'][:20]:
+                                    flash(e, 'error')
+                                if len(commit['errors']) > 20:
+                                    flash(f'…and {len(commit["errors"]) - 20} more row error(s).', 'error')
+                        except Exception as e:
+                            db.session.rollback()
+                            flash(f'Error saving DTR: {str(e)}', 'error')
             except Exception as e:
                 flash(f'Error reading file: {str(e)}', 'error')
+    recent_batches = []
+    is_admin_hr = _user_is_admin_or_hr()
+    can_review_punch_flags = _user_can_review_dtr_punch_flags()
+    for b in list_recent_dtr_upload_batches(limit=15):
+        item_count = b.items.count()
+        can_undo = can_undo_dtr_batch(b)
+        open_flags = count_open_punch_flags(b.id) if (b.status or '').strip().lower() == 'active' else 0
+        recent_batches.append({
+            'id': b.id,
+            'filename': b.filename,
+            'quincena_label': _dtr_upload_batch_label(b),
+            'uploaded_at': b.uploaded_at,
+            'uploaded_by': b.uploaded_by_username,
+            'saved_count': b.saved_count,
+            'created_count': b.created_count,
+            'merged_count': b.merged_count,
+            'item_count': item_count,
+            'punch_flag_count': open_flags,
+            'status': (b.status or 'active').strip().lower(),
+            'can_undo': can_undo,
+            'show_undo': can_undo and item_count > 0,
+        })
+    sqy, sqm, sqh = _parse_quincena_upload_value(selected_quincena)
+    selected_period = (
+        dtr_period.get_period(sqy, sqm, str(sqh))
+        if sqy is not None and sqm is not None and sqh is not None
+        else None
+    )
+    selected_period_locked = dtr_period.is_period_locked(selected_period)
     return render_template(
         'dtr_upload.html',
         employee=employee,
-        parsed_rows=parsed_rows,
-        dtr_rows_save_payload=_dtr_save_payload_from_upload_rows(parsed_rows),
+        save_result=save_result,
+        recent_batches=recent_batches,
+        is_admin_hr=is_admin_hr,
+        can_review_punch_flags=can_review_punch_flags,
+        can_force_processed=can_force_processed,
+        selected_period_locked=selected_period_locked,
+        selected_merge_strategy=selected_merge_strategy,
         quincena_options=quincena_options,
         selected_quincena=selected_quincena,
-        quincena_missing_dates=quincena_missing_dates,
-        quincena_missing_dates_text=[d.strftime('%Y-%m-%d') for d in quincena_missing_dates],
     )
+
+
+@bp.route('/dtr-upload/batch/<int:batch_id>/undo', methods=['POST'])
+@login_required
+def dtr_upload_batch_undo(batch_id):
+    if not _user_can_upload_dtr_log():
+        flash('Access denied.', 'error')
+        return redirect(url_for(_dashboard_for_user(current_user)))
+    try:
+        ok, msg, _stats = undo_dtr_upload_batch(batch_id)
+        flash(msg, 'success' if ok else 'error')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Undo failed: {str(e)}', 'error')
+    return redirect(url_for('routes.dtr_upload'))
+
+
+@bp.route('/dtr-upload/batch/<int:batch_id>/punch-flags')
+@login_required
+def dtr_upload_punch_flags(batch_id):
+    """Admin/HR/Payroll Maker review of duplicate punches retained from an upload batch."""
+    denied = _require_dtr_punch_flag_reviewer()
+    if denied:
+        return denied
+    batch = DtrUploadBatch.query.get_or_404(batch_id)
+    flags = list_punch_flags_for_batch(batch_id)
+
+    emp_ids = {f.employee_id for f in flags}
+    emp_map = {}
+    if emp_ids:
+        emp_map = {
+            e.id: e
+            for e in (
+                Employee.query
+                .options(db.joinedload(Employee.department))
+                .filter(Employee.id.in_(emp_ids))
+                .all()
+            )
+        }
+
+    # Payroll Maker only sees employees in their own department
+    dept_id = _payroll_maker_department_id()
+    if dept_id is not None:
+        flags = [
+            f for f in flags
+            if (emp_map.get(f.employee_id) and emp_map[f.employee_id].department_id == dept_id)
+        ]
+        open_count = sum(1 for f in flags if (f.status or '').strip().lower() == 'open')
+    else:
+        open_count = count_open_punch_flags(batch_id)
+
+    status_filter = (request.args.get('status') or 'open').strip().lower()
+    if status_filter in ('open', 'resolved', 'inactive'):
+        flags = [f for f in flags if (f.status or '').strip().lower() == status_filter]
+    elif status_filter != 'all':
+        status_filter = 'open'
+        flags = [f for f in flags if (f.status or '').strip().lower() == 'open']
+
+    # DTR "Multiple punches" link passes employee_id (badge) — filter server-side
+    # so we do not build/render the entire batch for one person.
+    filter_badge = (request.args.get('employee_id') or request.args.get('q') or '').strip()
+    if filter_badge:
+        badge_l = filter_badge.lower()
+        matched_emp_ids = set()
+        for eid, emp in emp_map.items():
+            badge = (emp.employee_id or '').strip().lower()
+            name = (emp.directory_name or '').lower()
+            if badge_l == badge or badge_l in badge or badge_l in name:
+                matched_emp_ids.add(eid)
+        if matched_emp_ids:
+            flags = [f for f in flags if f.employee_id in matched_emp_ids]
+
+    qy, qm, qh = _parse_quincena_upload_value(batch.quincena or '')
+    period = (
+        dtr_period.get_period(qy, qm, str(qh))
+        if qy is not None and qm is not None and qh is not None
+        else None
+    )
+    period_locked = dtr_period.is_period_locked(period)
+
+    # Group flags by employee-day for one four-slot assignment editor per day
+    day_groups = {}
+    for flag in flags:
+        day_groups.setdefault((flag.employee_id, flag.record_date), []).append(flag)
+
+    scoped_emp_ids = {emp_id for emp_id, _ in day_groups.keys()}
+    punches_by_day = punches_by_employee_day_for_batch(
+        batch_id,
+        employee_ids=scoped_emp_ids,
+    )
+
+    dtr_by_day = {}
+    if day_groups:
+        day_dates = [rec_date for _, rec_date in day_groups.keys()]
+        min_d, max_d = min(day_dates), max(day_dates)
+        dtr_rows = (
+            DailyTimeRecord.query
+            .filter(DailyTimeRecord.employee_id.in_(scoped_emp_ids))
+            .filter(DailyTimeRecord.record_date >= min_d)
+            .filter(DailyTimeRecord.record_date <= max_d)
+            .all()
+        )
+        dtr_by_day = {(r.employee_id, r.record_date): r for r in dtr_rows}
+
+    day_rows = []
+    for (emp_id, rec_date), day_flags in sorted(
+        day_groups.items(),
+        key=lambda item: (item[0][1], item[0][0]),
+    ):
+        emp = emp_map.get(emp_id)
+        punches = punches_by_day.get((emp_id, rec_date), [])
+        dtr = dtr_by_day.get((emp_id, rec_date))
+        current_slots = {
+            'am_in': dtr.am_in if dtr else None,
+            'am_out': dtr.am_out if dtr else None,
+            'pm_in': dtr.pm_in if dtr else None,
+            'pm_out': dtr.pm_out if dtr else None,
+        }
+        statuses = {(f.status or '').strip().lower() for f in day_flags}
+        if 'open' in statuses:
+            day_status = 'open'
+        elif 'resolved' in statuses and len(statuses) == 1:
+            day_status = 'resolved'
+        elif 'inactive' in statuses and len(statuses) == 1:
+            day_status = 'inactive'
+        else:
+            day_status = 'mixed'
+        punch_count = len(punches)
+        slot_labels_flagged = [
+            DTR_PUNCH_SLOT_LABELS.get(f.slot, f.slot) for f in day_flags
+        ]
+        day_key = f'{emp_id}-{rec_date.isoformat()}'
+        day_rows.append({
+            'day_key': day_key,
+            'employee_id': emp_id,
+            'record_date': rec_date,
+            'employee': emp,
+            'employee_name': (
+                emp.directory_name if emp else f'#{emp_id}'
+            ),
+            'badge_id': (emp.employee_id if emp else ''),
+            'flags': day_flags,
+            'flagged_slots': slot_labels_flagged,
+            'punch_count': punch_count,
+            'punches': punches,
+            'current_slots': current_slots,
+            'day_status': day_status,
+            'can_edit': (
+                day_status in ('open', 'resolved', 'mixed')
+                and not period_locked
+                and (batch.status or '').strip().lower() == 'active'
+            ),
+            'dtr_records_url': url_for(
+                'routes.dtr_records',
+                employee_id=emp_id,
+                mode='quincena' if qh else 'month',
+                year=rec_date.year,
+                month=rec_date.month,
+                quincena=str(qh or ('1' if rec_date.day <= 15 else '2')),
+            ),
+        })
+
+    employee = current_user.employee if current_user.employee else None
+    back_url = (
+        url_for('routes.dtr_upload')
+        if _user_can_upload_dtr_log() or _user_is_admin_or_hr()
+        else url_for('routes.dtr_records')
+    )
+    return render_template(
+        'dtr_upload_punch_flags.html',
+        employee=employee,
+        batch=batch,
+        batch_label=_dtr_upload_batch_label(batch),
+        day_rows=day_rows,
+        status_filter=status_filter,
+        open_count=open_count,
+        period_locked=period_locked,
+        slot_labels=DTR_PUNCH_SLOT_LABELS,
+        back_url=back_url,
+        can_review_punch_flags=True,
+        is_payroll_maker_scope=dept_id is not None,
+        filter_badge=filter_badge,
+    )
+
+
+@bp.route(
+    '/dtr-upload/batch/<int:batch_id>/punch-flags/day/<int:employee_id>/<string:record_date>/resolve',
+    methods=['POST'],
+)
+@login_required
+def dtr_upload_punch_flag_day_resolve(batch_id, employee_id, record_date):
+    """Assign retained punches across all four DTR slots for one employee-day."""
+    denied = _require_dtr_punch_flag_reviewer()
+    if denied:
+        return denied
+    batch = DtrUploadBatch.query.get_or_404(batch_id)
+    emp = Employee.query.get_or_404(employee_id)
+    if not _user_can_access_punch_flag_employee(emp):
+        flash('Access denied for this employee punch flag.', 'error')
+        return redirect(url_for('routes.dtr_upload_punch_flags', batch_id=batch.id))
+
+    try:
+        record_date = datetime.strptime(str(record_date).strip(), '%Y-%m-%d').date()
+    except ValueError:
+        flash('Invalid record date.', 'error')
+        return redirect(url_for('routes.dtr_upload_punch_flags', batch_id=batch.id))
+
+    qy, qm, qh = _parse_quincena_upload_value(batch.quincena or '')
+    if qy is not None and qm is not None and qh is not None:
+        period = dtr_period.get_period(qy, qm, str(qh))
+        if dtr_period.is_period_locked(period):
+            flash(
+                'This quincena has been processed. Reopen it from Quincena Processing before correcting punches.',
+                'error',
+            )
+            return redirect(url_for('routes.dtr_upload_punch_flags', batch_id=batch.id))
+
+    slot_choices = {}
+    for slot in DTR_PUNCH_SLOT_LABELS:
+        raw = (request.form.get(f'slot_{slot}') or 'keep').strip()
+        if raw.lower() in ('keep', 'clear'):
+            slot_choices[slot] = raw.lower()
+        else:
+            try:
+                slot_choices[slot] = int(raw)
+            except ValueError:
+                flash(f'Invalid selection for {DTR_PUNCH_SLOT_LABELS[slot]}.', 'error')
+                return redirect(url_for(
+                    'routes.dtr_upload_punch_flags',
+                    batch_id=batch.id,
+                    status=(request.form.get('return_status') or 'open').strip() or 'open',
+                    employee_id=(emp.employee_id or ''),
+                ))
+
+    try:
+        ok, msg = apply_day_punch_assignments(
+            batch_id=batch.id,
+            employee_id=employee_id,
+            record_date=record_date,
+            slot_choices=slot_choices,
+            user=current_user,
+        )
+        if not ok:
+            db.session.rollback()
+            flash(msg, 'error')
+            return redirect(url_for(
+                'routes.dtr_upload_punch_flags',
+                batch_id=batch.id,
+                status='open',
+                employee_id=(emp.employee_id or ''),
+            ))
+
+        sched = _pick_late_undertime_schedule(emp, record_date)
+        dtr = DailyTimeRecord.query.filter_by(
+            employee_id=employee_id,
+            record_date=record_date,
+        ).first()
+        if dtr:
+            late_m, ut_m = _late_undertime_minutes_for_record(dtr, sched)
+            tot = late_m + ut_m
+            dtr.undertime_hrs = tot // 60
+            dtr.undertime_mins = tot % 60
+        db.session.commit()
+        flash(msg, 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Could not assign punches: {str(e)}', 'error')
+    return redirect(url_for(
+        'routes.dtr_upload_punch_flags',
+        batch_id=batch.id,
+        status=(request.form.get('return_status') or 'open').strip() or 'open',
+        employee_id=(emp.employee_id or ''),
+    ))
+
+
+@bp.route('/dtr-upload/punch-flags/<int:flag_id>/resolve', methods=['POST'])
+@login_required
+def dtr_upload_punch_flag_resolve(flag_id):
+    """Legacy single-slot resolve — still supported via day assignment wrapper."""
+    denied = _require_dtr_punch_flag_reviewer()
+    if denied:
+        return denied
+    flag = DtrUploadPunchFlag.query.get_or_404(flag_id)
+    batch = DtrUploadBatch.query.get(flag.batch_id)
+    if not batch:
+        flash('Upload batch not found.', 'error')
+        return redirect(url_for('routes.dtr_records'))
+
+    emp = Employee.query.get(flag.employee_id)
+    if not _user_can_access_punch_flag_employee(emp):
+        flash('Access denied for this employee punch flag.', 'error')
+        return redirect(url_for('routes.dtr_upload_punch_flags', batch_id=batch.id))
+
+    qy, qm, qh = _parse_quincena_upload_value(batch.quincena or '')
+    if qy is not None and qm is not None and qh is not None:
+        period = dtr_period.get_period(qy, qm, str(qh))
+        if dtr_period.is_period_locked(period):
+            flash(
+                'This quincena has been processed. Reopen it from Quincena Processing before correcting punches.',
+                'error',
+            )
+            return redirect(url_for('routes.dtr_upload_punch_flags', batch_id=batch.id))
+
+    try:
+        punch_id = int((request.form.get('punch_id') or '0').strip())
+    except ValueError:
+        punch_id = 0
+    punch = DtrUploadPunch.query.get(punch_id) if punch_id else None
+    if not punch:
+        flash('Select a punch timestamp to apply.', 'error')
+        return redirect(url_for('routes.dtr_upload_punch_flags', batch_id=batch.id, status='open'))
+
+    try:
+        ok, msg = apply_selected_punch_to_dtr(flag, punch, user=current_user)
+        if not ok:
+            db.session.rollback()
+            flash(msg, 'error')
+            return redirect(url_for('routes.dtr_upload_punch_flags', batch_id=batch.id, status='open'))
+
+        if emp:
+            sched = _pick_late_undertime_schedule(emp, flag.record_date)
+            dtr = DailyTimeRecord.query.filter_by(
+                employee_id=flag.employee_id,
+                record_date=flag.record_date,
+            ).first()
+            if dtr:
+                late_m, ut_m = _late_undertime_minutes_for_record(dtr, sched)
+                tot = late_m + ut_m
+                dtr.undertime_hrs = tot // 60
+                dtr.undertime_mins = tot % 60
+        db.session.commit()
+        flash(msg, 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Could not resolve punch flag: {str(e)}', 'error')
+    return redirect(url_for(
+        'routes.dtr_upload_punch_flags',
+        batch_id=batch.id,
+        status=(request.form.get('return_status') or 'open').strip() or 'open',
+    ))
 
 
 @bp.route('/dtr-upload/save', methods=['POST'])
@@ -2661,15 +4277,26 @@ def dtr_upload_save():
         return redirect(url_for(_dashboard_for_user(current_user)))
     ct = (request.content_type or '').lower()
     wants_json = ct.startswith('application/json')
+    upload_token = ''
 
+    merge_strategy = DTR_UPLOAD_MERGE_FILL_BLANKS
+    force_processed = False
     if wants_json:
         body = request.get_json(silent=True)
         if not isinstance(body, dict):
             return jsonify(ok=False, error='Invalid JSON body'), 400
         upload_quincena = (body.get('upload_quincena') or '').strip()
-        row_data, parse_err = _dtr_rows_from_payload_list(body.get('rows'))
+        upload_token = (body.get('upload_token') or '').strip()
+        merge_strategy = _normalize_dtr_upload_merge_strategy(body.get('merge_strategy'))
+        force_processed = bool(body.get('force_processed')) and _dtr_upload_force_processed_allowed()
+        if upload_token:
+            row_data, parse_err = load_staged_dtr_upload_rows(upload_token, _dtr_upload_owner_key())
+        else:
+            row_data, parse_err = _dtr_rows_from_payload_list(body.get('rows'))
     else:
         upload_quincena = (request.form.get('upload_quincena') or '').strip()
+        merge_strategy = _normalize_dtr_upload_merge_strategy(request.form.get('merge_strategy'))
+        force_processed = bool(request.form.get('force_processed')) and _dtr_upload_force_processed_allowed()
         row_data, parse_err = _dtr_upload_save_parse_form_rows(request)
 
     if _parse_quincena_upload_value(upload_quincena)[0] is None:
@@ -2685,81 +4312,58 @@ def dtr_upload_save():
         flash(parse_err, 'error')
         return redirect(url_for('routes.dtr_upload'))
 
-    try:
-        # Dedupe by (employees.id, record_date)—raw form pairs can duplicate the same day
-        # (e.g. 2026-03-29 vs 29/03/2026) and caused duplicate INSERT unique violations.
-        seen_normalized = set()
-        saved = 0
-        errors = []
-
-        def parse_t(s):
-            if not s:
-                return None
-            s = s.strip()
-            for fmt in ('%H:%M', '%H:%M:%S'):
-                try:
-                    return datetime.strptime(s, fmt).time()
-                except ValueError:
-                    continue
-            return None
-
-        for r in row_data:
-            eid_raw = (r.get('employee_id') or '').strip()
-            date_raw = (r.get('date') or '').strip()
-            if not eid_raw or not date_raw:
-                continue
-            emp = Employee.query.filter_by(employee_id=eid_raw).first()
-            if not emp:
-                errors.append(f"Employee ID {eid_raw} not found.")
-                continue
-            rec_date = _parse_dtr_upload_form_date(date_raw)
-            if rec_date is None:
-                errors.append(f"Invalid date {date_raw!r} for employee {eid_raw}.")
-                continue
-            norm_key = (emp.id, rec_date)
-            if norm_key in seen_normalized:
-                continue
-            seen_normalized.add(norm_key)
-
-            am_in_u = parse_t(r.get('check_in'))
-            am_out_u = parse_t(r.get('break_out'))
-            pm_in_u = parse_t(r.get('break_in'))
-            pm_out_u = parse_t(r.get('check_out'))
-            dtr = _dtr_for_upload_employee_day(emp, rec_date)
-            if dtr:
-                am_in, am_out, pm_in, pm_out = _merge_dtr_times_with_upload(
-                    dtr.am_in,
-                    dtr.am_out,
-                    dtr.pm_in,
-                    dtr.pm_out,
-                    am_in_u,
-                    am_out_u,
-                    pm_in_u,
-                    pm_out_u,
-                )
-                dtr.am_in = am_in
-                dtr.am_out = am_out
-                dtr.pm_in = pm_in
-                dtr.pm_out = pm_out
-            else:
-                am_out_u, pm_in_u = _resolve_dtr_am_out_pm_in_conflict(am_out_u, pm_in_u)
-                dtr = DailyTimeRecord(
-                    employee_id=emp.id,
-                    record_date=rec_date,
-                    am_in=am_in_u,
-                    am_out=am_out_u,
-                    pm_in=pm_in_u,
-                    pm_out=pm_out_u,
-                )
-                db.session.add(dtr)
-            saved += 1
-        if errors:
-            for e in errors:
-                flash(e, 'error')
-        db.session.commit()
-        flash(f'Saved {saved} DTR record(s).', 'success')
+    period_err = _dtr_upload_period_gate(upload_quincena, force_processed=force_processed)
+    if period_err:
         if wants_json:
-            return jsonify(ok=True, redirect=url_for('routes.dtr_upload'))
+            return jsonify(ok=False, error=period_err), 400
+        flash(period_err, 'error')
+        return redirect(url_for('routes.dtr_upload'))
+
+    quincena_err = None
+    filtered_rows, outside_dates, skipped_outside, filter_err = _filter_upload_rows_for_quincena(row_data, upload_quincena)
+    if filter_err:
+        quincena_err = filter_err
+    elif not filtered_rows:
+        quincena_err = (
+            'No records fall within the selected quincena '
+            '(including ±1 day for night shift / flexitime). Nothing was saved.'
+        )
+    if quincena_err:
+        if wants_json:
+            return jsonify(ok=False, error=quincena_err), 400
+        flash(quincena_err, 'error' if filter_err else 'warning')
+        return redirect(url_for('routes.dtr_upload'))
+
+    try:
+        commit = _dtr_upload_commit_rows(
+            filtered_rows,
+            upload_quincena,
+            merge_strategy=merge_strategy,
+            force_processed=force_processed,
+        )
+        if commit['errors']:
+            for e in commit['errors']:
+                flash(e, 'error')
+        if wants_json and upload_token:
+            discard_staged_dtr_upload(upload_token)
+        saved = commit['saved']
+        flash(
+            f'Processed {saved} DTR record(s) '
+            f'({commit["created_count"]} new, {commit["merged_count"]} updated, '
+            f'{commit.get("unchanged_count", 0)} unchanged).',
+            'success',
+        )
+        if wants_json:
+            return jsonify(
+                ok=True,
+                redirect=url_for('routes.dtr_upload'),
+                saved=saved,
+                created_count=commit['created_count'],
+                merged_count=commit['merged_count'],
+                unchanged_count=commit.get('unchanged_count', 0),
+                merge_strategy=commit.get('merge_strategy'),
+                error_count=commit['error_count'],
+            )
         return redirect(url_for('routes.dtr_upload'))
     except Exception as e:
         db.session.rollback()
@@ -2777,56 +4381,31 @@ def dtr_generate():
         flash('Access denied.', 'error')
         return redirect(url_for(_dashboard_for_user(current_user)))
 
-    mode = (request.form.get('mode') or '').strip().lower()  # quincena|month
+    mode = (request.form.get('mode') or 'quincena').strip().lower()
     month = int((request.form.get('month') or str(date.today().month)).strip())
     year = int((request.form.get('year') or str(date.today().year)).strip())
     quincena = (request.form.get('quincena') or '1').strip()
-    arrangement_model = (request.form.get('arrangement_model') or '').strip().lower()
-    arrangement_applies_to = (request.form.get('arrangement_applies_to') or 'all').strip().lower()
-    arrangement_start_raw = (request.form.get('arrangement_start_date') or '').strip()
-    arrangement_end_raw = (request.form.get('arrangement_end_date') or '').strip()
-
-    if mode not in ('quincena', 'month'):
-        flash('Invalid generation mode.', 'error')
+    if quincena not in ('1', '2'):
+        flash('Invalid quincena.', 'error')
+        return redirect(url_for('routes.dashboard'))
+    if mode == 'month':
+        flash('Monthly DTR generation is no longer supported. Use quincena preparation for all employees.', 'error')
         return redirect(url_for('routes.dashboard'))
 
-    arrangement_start = None
-    arrangement_end = None
     try:
-        if arrangement_model:
-            if arrangement_model not in _DTR_DUTY_MODELS:
-                flash('Invalid work arrangement model.', 'error')
-                return redirect(url_for('routes.dashboard'))
-            if arrangement_applies_to not in ('all', 'regular', 'jo_cos'):
-                flash('Invalid work arrangement target group.', 'error')
-                return redirect(url_for('routes.dashboard'))
-            if not arrangement_start_raw or not arrangement_end_raw:
-                flash('Work arrangement start and end dates are required.', 'error')
-                return redirect(url_for('routes.dashboard'))
-            try:
-                arrangement_start = datetime.strptime(arrangement_start_raw, '%Y-%m-%d').date()
-                arrangement_end = datetime.strptime(arrangement_end_raw, '%Y-%m-%d').date()
-            except ValueError:
-                flash('Invalid work arrangement date format.', 'error')
-                return redirect(url_for('routes.dashboard'))
-            if arrangement_end < arrangement_start:
-                flash('Work arrangement end date must be on/after start date.', 'error')
-                return redirect(url_for('routes.dashboard'))
-            db.session.add(DtrWorkArrangementSetting(
-                model_code=arrangement_model,
-                applies_to=arrangement_applies_to,
-                start_date=arrangement_start,
-                end_date=arrangement_end,
-                notes=f'Set from DTR Generate ({mode})',
-                created_by_user_id=current_user.id if current_user and getattr(current_user, "id", None) else None,
-            ))
+        start_d, end_d = _quincena_date_range(year, month, quincena)
+        employees = Employee.query.filter_by(status='active').all()
 
-        if mode == 'quincena':
-            start_d, end_d = _quincena_date_range(year, month, quincena)
-            employees = [e for e in Employee.query.filter_by(status='active').all() if _is_jo_cos_employee(e)]
-        else:
-            start_d, end_d = _month_date_range(year, month)
-            employees = [e for e in Employee.query.filter_by(status='active').all() if _is_regular_employee(e)]
+        workweek_segments, seg_err = dtr_wa.parse_segments_from_form(request.form, start_d, end_d)
+        if seg_err:
+            flash(seg_err, 'error')
+            return redirect(url_for('routes.dashboard'))
+
+        if workweek_segments:
+            dtr_wa.save_workweek_segments(
+                workweek_segments,
+                current_user.id if current_user and getattr(current_user, 'id', None) else None,
+            )
 
         # One entry per employee id (avoids duplicate INSERT same key in one batch).
         employees = list({e.id: e for e in employees}.values())
@@ -2849,86 +4428,24 @@ def dtr_generate():
                         created += 1
                 curr += timedelta(days=1)
 
-        # 4-day compressed: Fridays in the arrangement window are rest days (remarks), not absences.
-        if arrangement_model == '4day' and arrangement_start is not None and arrangement_end is not None:
-            db.session.flush()
-            rng_start = max(start_d, arrangement_start)
-            rng_end = min(end_d, arrangement_end)
-            d = rng_start
-            while d <= rng_end:
-                if d.weekday() == 4 and d not in special_dates:  # Friday rest day (not holiday/suspension)
-                    for emp in employees:
-                        if not _employee_matches_dtr_applies_to(emp, arrangement_applies_to):
-                            continue
-                        rec = _dtr_find_row_by_employee_day_readonly(emp, d)
-                        if not rec or _dtr_skip_arrangement_stamp_for_row(rec, d, special_dates):
-                            continue
-                        if not any([rec.am_in, rec.am_out, rec.pm_in, rec.pm_out]):
-                            rec.remarks = 'REST DAY'
-                d += timedelta(days=1)
-
-            # 4-day: default AM/PM anchors on Mon–Thu in arrangement window (Fri = REST DAY above).
-            # Quincena — JO only: 8:00 / 17:00; COS: same as plantilla 7:00 / 18:00.
-            # Month (plantilla): 7:00 / 18:00.
-            db.session.flush()
-            t_jo_am, t_jo_pm = time(8, 0), time(17, 0)
-            t_four_am, t_four_pm = time(7, 0), time(18, 0)
-            wd0 = max(start_d, arrangement_start)
-            wd1 = min(end_d, arrangement_end)
-            d = wd0
-            while d <= wd1:
-                if d.weekday() >= 5 or d.weekday() == 4 or d in special_dates:
-                    d += timedelta(days=1)
-                    continue
-                for emp in employees:
-                    if not _employee_matches_dtr_applies_to(emp, arrangement_applies_to):
-                        continue
-                    if getattr(emp, 'flexible_worktime', False):
-                        continue
-                    rec = _dtr_find_row_by_employee_day_readonly(emp, d)
-                    if not rec or _dtr_skip_arrangement_stamp_for_row(rec, d, special_dates):
-                        continue
-                    if any([rec.am_in, rec.am_out, rec.pm_in, rec.pm_out]):
-                        continue
-                    if mode == 'quincena':
-                        if _is_jo_only_employee(emp):
-                            rec.am_in, rec.pm_out = t_jo_am, t_jo_pm
-                        else:
-                            rec.am_in, rec.pm_out = t_four_am, t_four_pm
-                    else:
-                        rec.am_in, rec.pm_out = t_four_am, t_four_pm
-                d += timedelta(days=1)
-
-        # 5-day compressed: all employees in batch — 8:00 / 17:00 on weekdays (Mon–Fri).
-        if arrangement_model == '5day' and arrangement_start is not None and arrangement_end is not None:
-            db.session.flush()
-            t8, t17 = time(8, 0), time(17, 0)
-            w0 = max(start_d, arrangement_start)
-            w1 = min(end_d, arrangement_end)
-            d = w0
-            while d <= w1:
-                if d.weekday() >= 5 or d in special_dates:
-                    d += timedelta(days=1)
-                    continue
-                for emp in employees:
-                    if not _employee_matches_dtr_applies_to(emp, arrangement_applies_to):
-                        continue
-                    if getattr(emp, 'flexible_worktime', False):
-                        continue
-                    rec = _dtr_find_row_by_employee_day_readonly(emp, d)
-                    if not rec or _dtr_skip_arrangement_stamp_for_row(rec, d, special_dates):
-                        continue
-                    if any([rec.am_in, rec.am_out, rec.pm_in, rec.pm_out]):
-                        continue
-                    rec.am_in, rec.pm_out = t8, t17
-                d += timedelta(days=1)
+        if workweek_segments:
+            dtr_wa.apply_workweek_segments_to_dtr(
+                workweek_segments,
+                employees,
+                start_d,
+                end_d,
+                special_dates,
+                find_row=_dtr_find_row_by_employee_day_readonly,
+                skip_stamp=_dtr_skip_arrangement_stamp_for_row,
+                matches_applies=_employee_matches_dtr_applies_to,
+                skip_duty_stamp=_is_jo_cos_employee,
+            )
 
         holiday_marked = 0
         suspension_marked = 0
         if holiday_entries or suspension_entries:
             db.session.flush()
-            # Holidays / work suspensions are org-wide — all active employees, not only
-            # the quincena (JO/COS) or month (plantilla) batch being generated.
+            # Holidays / work suspensions are org-wide — all active employees.
             all_active = (
                 Employee.query.filter_by(status='active')
                 .order_by(Employee.last_name.asc(), Employee.first_name.asc())
@@ -2950,13 +4467,15 @@ def dtr_generate():
                     suspension_marked += 1
 
         db.session.commit()
-        if arrangement_model:
-            msg = (
-                f'DTR generated for {len(employees)} employee(s). New rows created: {created}. '
-                f'Work arrangement saved: {arrangement_model.upper()} ({arrangement_start_raw} to {arrangement_end_raw}, {arrangement_applies_to}).'
-            )
-        else:
-            msg = f'DTR generated for {len(employees)} employee(s). New rows created: {created}.'
+        q_label = '1st' if quincena == '1' else '2nd'
+        msg = (
+            f'DTR generated for {len(employees)} employee(s) ({q_label} quincena, '
+            f'{start_d.strftime("%Y-%m-%d")} to {end_d.strftime("%Y-%m-%d")}). '
+            f'New rows created: {created}.'
+        )
+        seg_msg = dtr_wa.format_segments_flash_message(workweek_segments)
+        if seg_msg:
+            msg += f' {seg_msg}'
         if holiday_entries:
             msg += f' Holidays marked: {len(holiday_entries)} entry/entries, {holiday_marked} row(s).'
         if suspension_entries:
@@ -2966,6 +4485,586 @@ def dtr_generate():
         db.session.rollback()
         flash(f'Error generating DTR: {str(e)}', 'error')
     return redirect(url_for('routes.dashboard'))
+
+
+def _build_dtr_view_rows(emp: Employee, start_d: date, end_d: date) -> tuple[list, dict, dict]:
+    """Build DTR grid rows, summary counts, and justification map for one employee."""
+    rows = []
+    summary = {'lates': 0, 'undertimes': 0, 'absences': 0, 'duplicate_punches': 0}
+    _prefetch_flexi_schedule_rows_for_range(emp, start_d, end_d)
+    dtr_rows = _dtr_rows_for_employee(emp, start_d, end_d)
+    by_date = {r.record_date: r for r in dtr_rows}
+    approved_leave_dates = _approved_leave_dates_for_employee(emp.id, start_d, end_d)
+    just_map = {
+        j.record_date: j for j in (
+            DtrJustification.query
+            .filter(DtrJustification.employee_id == emp.id)
+            .filter(DtrJustification.record_date >= start_d)
+            .filter(DtrJustification.record_date <= end_d)
+            .all()
+        )
+    }
+    punch_flags_by_date = reviewable_punch_flags_by_date(emp.id, start_d, end_d)
+    curr = start_d
+    while curr <= end_d:
+        rec = by_date.get(curr)
+        dow = curr.weekday()
+        is_weekend = dow >= 5
+        remarks = (rec.remarks if rec and rec.remarks else ('SATURDAY' if dow == 5 else ('SUNDAY' if dow == 6 else '')))
+        if curr in approved_leave_dates and not remarks:
+            remarks = 'APPROVED LEAVE'
+        elif (
+            not remarks
+            and curr.weekday() == 4
+            and _arrangement_model_code_for_date(emp, curr) == '4day'
+            and not (rec and any([rec.am_in, rec.am_out, rec.pm_in, rec.pm_out]))
+            and not (rec and _dtr_is_special_day_remark(rec.remarks))
+        ):
+            remarks = 'REST DAY'
+        late = False
+        undertime = False
+        absent = False
+        late_mins = 0
+        undertime_mins = 0
+        flexi_shift_code = None
+        flexi_assigned = False
+        flexi_rest_day = False
+        sched_am_in = sched_am_out = sched_pm_in = sched_pm_out = ''
+        show_flexi_slots = _employee_is_flexible_for_date(emp, curr)
+        flexi_list_sched = _flexible_worktime_duty_schedule_for_date(emp, curr)
+        flexi_row = _flexi_schedule_row_for_employee_date(emp, curr)
+        if flexi_row:
+            flexi_assigned = True
+            flexi_shift_code = (flexi_row.shift_code or '').strip() or None
+        if flexi_list_sched and _duty_schedule_is_rest(flexi_list_sched):
+            flexi_rest_day = True
+            if not remarks or remarks in ('SATURDAY', 'SUNDAY'):
+                remarks = 'REST DAY'
+            show_flexi_slots = True
+        elif not is_weekend or flexi_list_sched:
+            # Weekdays always; weekends only when a flexi duty schedule covers the date.
+            schedule = flexi_list_sched or _pick_late_undertime_schedule(emp, curr)
+            if show_flexi_slots and schedule and not _duty_schedule_is_rest(schedule):
+                sched_am_in, sched_am_out, sched_pm_in, sched_pm_out = _duty_schedule_time_strings(schedule)
+            if schedule and not _duty_schedule_is_rest(schedule):
+                if rec:
+                    late_mins, undertime_mins = _late_undertime_minutes_for_record(rec, schedule)
+                    late = late_mins > 0
+                    undertime = undertime_mins > 0
+                absent = (
+                    (not rec or not any([rec.am_in, rec.am_out, rec.pm_in, rec.pm_out]))
+                    and not remarks
+                )
+            if late:
+                summary['lates'] += 1
+            if absent:
+                summary['absences'] += 1
+            if undertime:
+                summary['undertimes'] += 1
+        day_punch_flags = punch_flags_by_date.get(curr) or []
+        has_duplicate_punches = bool(day_punch_flags)
+        if has_duplicate_punches:
+            summary['duplicate_punches'] += 1
+        day_flag_statuses = {(f.status or '').strip().lower() for f in day_punch_flags}
+        if 'open' in day_flag_statuses:
+            punch_review_status = 'open'
+        elif day_punch_flags:
+            punch_review_status = 'resolved'
+        else:
+            punch_review_status = 'open'
+        just_row = just_map.get(curr)
+        rows.append({
+            'date': curr,
+            'am_in': rec.am_in if rec else None,
+            'am_out': rec.am_out if rec else None,
+            'pm_in': rec.pm_in if rec else None,
+            'pm_out': rec.pm_out if rec else None,
+            'undertime': (
+                f"{((late_mins + undertime_mins) // 60):02d} / {((late_mins + undertime_mins) % 60):02d}"
+                if rec else ''
+            ),
+            'remarks': remarks,
+            'late': late,
+            'undertime_flag': undertime,
+            'absent': absent,
+            'has_justification': curr in just_map,
+            'justification_status': (just_row.status if just_row else ''),
+            'justification_reason': (just_row.reason if just_row else ''),
+            'is_flagged': late or undertime or absent,
+            'has_duplicate_punches': has_duplicate_punches,
+            'duplicate_punch_count': len(day_punch_flags),
+            'duplicate_punch_slots': [
+                DTR_PUNCH_SLOT_LABELS.get(f.slot, f.slot) for f in day_punch_flags
+            ],
+            'duplicate_punch_batch_id': day_punch_flags[0].batch_id if day_punch_flags else None,
+            'duplicate_punch_review_status': punch_review_status,
+            'show_flexi_slots': show_flexi_slots and (not is_weekend or bool(flexi_list_sched)),
+            'flexi_rest_day': flexi_rest_day,
+            'sched_am_in': sched_am_in,
+            'sched_am_out': sched_am_out,
+            'sched_pm_in': sched_pm_in,
+            'sched_pm_out': sched_pm_out,
+            'flexi_shift_code': flexi_shift_code,
+            'flexi_assigned': flexi_assigned,
+            'stored_remarks': (rec.remarks or '') if rec else '',
+            'has_saved_row': rec is not None,
+        })
+        curr += timedelta(days=1)
+    return rows, summary, just_map
+
+
+def _csc_dtr_employee_name(emp: Employee) -> str:
+    first = (emp.first_name or '').strip()
+    mid = (emp.middle_name or '').strip()
+    last = (emp.last_name or '').strip()
+    if mid:
+        return f'{first} {mid[0].upper()}. {last}'.upper()
+    return f'{first} {last}'.upper().strip()
+
+
+def _csc_dtr_period_label(start_d: date, end_d: date) -> str:
+    return f'{start_d.strftime("%B %d")} - {end_d.strftime("%d, %Y")}'
+
+
+def _csc_dtr_working_hours_lines(emp: Employee, start_d: date, end_d: date) -> list[str]:
+    """Working Hours lines from quincena workweek segments (4-day / 5-day).
+
+    Example:
+      4-day workweek (May 01 - 15, 2026 | 7AM - 12PM | 1PM - 6PM)
+      5-day workweek (May 01 - 07, 2026 | 8AM - 12PM | 1PM - 5PM)
+    """
+    day_codes: list[tuple[date, str]] = []
+    curr = start_d
+    while curr <= end_d:
+        code = (_arrangement_model_code_for_date(emp, curr) or '5day').strip().lower()
+        if code not in ('4day', '5day'):
+            code = '5day'
+        day_codes.append((curr, code))
+        curr += timedelta(days=1)
+
+    if not day_codes:
+        return [
+            f'5-day workweek ({_csc_dtr_period_label(start_d, end_d)} | 8AM - 12PM | 1PM - 5PM)'
+        ]
+
+    ranges: list[tuple[date, date, str]] = []
+    seg_start, seg_code = day_codes[0]
+    prev = day_codes[0][0]
+    for d, code in day_codes[1:]:
+        if code == seg_code and d == prev + timedelta(days=1):
+            prev = d
+            continue
+        ranges.append((seg_start, prev, seg_code))
+        seg_start, seg_code = d, code
+        prev = d
+    ranges.append((seg_start, prev, seg_code))
+
+    def _hours(code: str) -> str:
+        if code == '4day':
+            return '7AM - 12PM | 1PM - 6PM'
+        return '8AM - 12PM | 1PM - 5PM'
+
+    def _week(code: str) -> str:
+        return '4-day workweek' if code == '4day' else '5-day workweek'
+
+    lines = []
+    for s, e, code in ranges:
+        lines.append(
+            f'{_week(code)} ({_csc_dtr_period_label(s, e)} | {_hours(code)})'
+        )
+    return lines
+
+
+def _csc_dtr_time_str(t) -> str:
+    """Display punch times as hours:minutes only (no seconds)."""
+    if not t:
+        return ''
+    return t.strftime('%I:%M %p')
+
+
+@bp.app_template_filter('dtr_punch_time')
+def dtr_punch_time_filter(t) -> str:
+    return _csc_dtr_time_str(t)
+
+
+def _csc_dtr_span_status(remarks: str) -> str | None:
+    """Weekends / holidays / rest show as centered text across AM/PM columns."""
+    r = (remarks or '').strip().upper()
+    if not r:
+        return None
+    if r in ('SATURDAY', 'SUNDAY', 'HOLIDAY', 'REST DAY', 'APPROVED LEAVE', 'WORK SUSPENSION'):
+        return r
+    if r.startswith('HOLIDAY') or r.startswith('WORK SUSPENSION'):
+        return r
+    return None
+
+
+def _dtr_csc_form48_pdf_bytes(
+    emp: Employee,
+    rows: list[dict],
+    *,
+    start_d: date,
+    end_d: date,
+) -> io.BytesIO:
+    """Civil Service Form No. 48 layout (JO/COS), matching municipal DTR print style.
+
+    Scales row height so a full-month printout fits on a single letter page.
+    """
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=letter)
+    width, height = letter
+
+    left = 28
+    right = width - 28
+    table_w = right - left
+    # DATE | AM IN | AM OUT | PM IN | PM OUT | UNDERTIME | Remarks/Accomplishment
+    col_w = [32, 64, 64, 64, 64, 66, table_w - (32 + 64 * 4 + 66)]
+    col_x = [left]
+    for w in col_w[:-1]:
+        col_x.append(col_x[-1] + w)
+
+    name = _csc_dtr_employee_name(emp)
+    period = _csc_dtr_period_label(start_d, end_d)
+    hours_lines = _csc_dtr_working_hours_lines(emp, start_d, end_d)
+    n_rows = max(len(rows), 1)
+    compact = n_rows > 16
+
+    # --- Header (compact when printing a full month) ---
+    y = height - (36 if compact else 48)
+    c.setFont('Helvetica', 7 if compact else 8)
+    c.drawCentredString(width / 2, y, 'CIVIL SERVICE FORM NO. 48')
+    y -= 11 if compact else 14
+    c.setFont('Helvetica-Bold', 10 if compact else 12)
+    c.drawCentredString(width / 2, y, 'DAILY TIME RECORD')
+    y -= 10 if compact else 12
+    c.setFont('Helvetica-Bold', 7 if compact else 8)
+    c.drawCentredString(width / 2, y, 'MUNICIPALITY OF JAGNA')
+    y -= 14 if compact else 20
+    c.setFont('Helvetica-Bold', 11 if compact else 14)
+    c.drawCentredString(width / 2, y, name)
+    y -= 12 if compact else 15
+
+    meta_size = 8 if compact else 9
+    c.setFont('Helvetica', meta_size)
+    id_label = 'ID Number: '
+    id_val = str(emp.employee_id or '')
+    id_full_w = c.stringWidth(id_label, 'Helvetica', meta_size) + c.stringWidth(id_val, 'Helvetica-Bold', meta_size)
+    id_x = (width - id_full_w) / 2
+    c.drawString(id_x, y, id_label)
+    c.setFont('Helvetica-Bold', meta_size)
+    c.drawString(id_x + c.stringWidth(id_label, 'Helvetica', meta_size), y, id_val)
+    y -= 11 if compact else 13
+
+    c.setFont('Helvetica', meta_size)
+    prefix = 'For the period of '
+    pre_w = c.stringWidth(prefix, 'Helvetica', meta_size)
+    per_w = c.stringWidth(period, 'Helvetica-Bold', meta_size)
+    px0 = (width - (pre_w + per_w)) / 2
+    c.drawString(px0, y, prefix)
+    c.setFont('Helvetica-Bold', meta_size)
+    c.drawString(px0 + pre_w, y, period)
+    y -= 11 if compact else 13
+
+    wh_prefix = 'Working Hours: '
+    first = hours_lines[0] if hours_lines else '5-day workweek'
+    font_size = 7 if (compact or len(first) > 70 or len(hours_lines) > 1) else 9
+    c.setFont('Helvetica', font_size)
+    wh_pre_w = c.stringWidth(wh_prefix, 'Helvetica', font_size)
+    wh_val_w = c.stringWidth(first, 'Helvetica-Bold', font_size)
+    wx0 = (width - (wh_pre_w + wh_val_w)) / 2
+    c.drawString(wx0, y, wh_prefix)
+    c.setFont('Helvetica-Bold', font_size)
+    c.drawString(wx0 + wh_pre_w, y, first)
+    for extra in hours_lines[1:]:
+        y -= 9 if compact else 11
+        c.setFont('Helvetica-Bold', font_size)
+        c.drawCentredString(width / 2, y, extra)
+    y -= 10 if compact else 14
+
+    header_h = 20 if compact else 28
+    # Leave room for certification + signature; size rows to fit remaining height
+    footer_reserve = 108 if compact else 145
+    table_top = y
+    header_bottom = table_top - header_h
+    available = max(header_bottom - footer_reserve, n_rows * 8.5)
+    row_h = min(16.0 if not compact else 13.5, available / n_rows)
+    row_h = max(row_h, 8.8)
+    text_dy = max(2.2, row_h * 0.30)
+
+    def _vline(x, y0, y1):
+        c.line(x, y0, x, y1)
+
+    def _hline(y_line, x0=left, x1=right):
+        c.line(x0, y_line, x1, y_line)
+
+    def _remarks_accomplishment_cell(row: dict, *, span_status: str | None) -> str:
+        parts: list[str] = []
+        just = (row.get('justification_reason') or '').strip()
+        if just:
+            parts.append(just)
+        acc = (row.get('accomplishment_text') or '').strip()
+        if acc:
+            parts.append(acc)
+        if not parts:
+            rem = (row.get('remarks') or '').strip()
+            if rem and not span_status:
+                parts.append(rem)
+        return ' | '.join(parts)
+
+    c.setStrokeColorRGB(0, 0, 0)
+    c.setLineWidth(0.55 if compact else 0.7)
+    c.rect(left, header_bottom, table_w, header_h, stroke=1, fill=0)
+    mid_y = table_top - (10 if compact else 14)
+    _hline(mid_y, col_x[1], col_x[5])
+    _vline(col_x[1], header_bottom, table_top)
+    _vline(col_x[2], header_bottom, mid_y)
+    _vline(col_x[3], header_bottom, table_top)
+    _vline(col_x[4], header_bottom, mid_y)
+    _vline(col_x[5], header_bottom, table_top)
+    _vline(col_x[6], header_bottom, table_top)
+
+    hdr_main = 6.5 if compact else 7.5
+    hdr_sub = 6 if compact else 7
+    c.setFont('Helvetica-Bold', hdr_main)
+    c.drawCentredString(col_x[0] + col_w[0] / 2, table_top - (12 if compact else 17), 'DATE')
+    c.drawCentredString((col_x[1] + col_x[3]) / 2, table_top - (7 if compact else 10), 'AM')
+    c.drawCentredString((col_x[3] + col_x[5]) / 2, table_top - (7 if compact else 10), 'PM')
+    c.drawCentredString(col_x[5] + col_w[5] / 2, table_top - (8 if compact else 11), 'UNDERTIME')
+    c.drawCentredString(col_x[5] + col_w[5] / 2, table_top - (15 if compact else 20), '(Hrs / Mins)')
+    c.drawCentredString(col_x[6] + col_w[6] / 2, table_top - (11 if compact else 14), 'Remarks / Accomplishment')
+    c.setFont('Helvetica-Bold', hdr_sub)
+    c.drawCentredString(col_x[1] + col_w[1] / 2, header_bottom + 3, 'IN')
+    c.drawCentredString(col_x[2] + col_w[2] / 2, header_bottom + 3, 'OUT')
+    c.drawCentredString(col_x[3] + col_w[3] / 2, header_bottom + 3, 'IN')
+    c.drawCentredString(col_x[4] + col_w[4] / 2, header_bottom + 3, 'OUT')
+
+    y = header_bottom
+    day_font = 7 if compact else 8
+    time_font = 6 if compact else 7
+    span_font = 7 if compact else 8
+    ut_font = 6.5 if compact else 7.5
+    rem_font = 5.5 if compact else 6
+
+    for r in rows:
+        row_bottom = y - row_h
+        remarks = (r.get('remarks') or '').strip()
+        span = _csc_dtr_span_status(remarks)
+        am_in = _csc_dtr_time_str(r.get('am_in'))
+        am_out = _csc_dtr_time_str(r.get('am_out'))
+        pm_in = _csc_dtr_time_str(r.get('pm_in'))
+        pm_out = _csc_dtr_time_str(r.get('pm_out'))
+        has_punch = any([am_in, am_out, pm_in, pm_out])
+        merge_ampm = bool(span and not has_punch)
+
+        c.rect(left, row_bottom, table_w, row_h, stroke=1, fill=0)
+        _vline(col_x[1], row_bottom, y)
+        if not merge_ampm:
+            _vline(col_x[2], row_bottom, y)
+            _vline(col_x[3], row_bottom, y)
+            _vline(col_x[4], row_bottom, y)
+        _vline(col_x[5], row_bottom, y)
+        _vline(col_x[6], row_bottom, y)
+
+        day_num = f"{r['date'].day:02d}"
+        c.setFont('Helvetica', day_font)
+        c.drawCentredString(col_x[0] + col_w[0] / 2, row_bottom + text_dy, day_num)
+
+        if merge_ampm:
+            c.setFont('Helvetica', span_font)
+            c.drawCentredString((col_x[1] + col_x[5]) / 2, row_bottom + text_dy, span)
+            undertime = ''
+            remarks_cell = _remarks_accomplishment_cell(r, span_status=span)
+        else:
+            c.setFont('Helvetica', time_font)
+            c.drawCentredString(col_x[1] + col_w[1] / 2, row_bottom + text_dy, am_in)
+            c.drawCentredString(col_x[2] + col_w[2] / 2, row_bottom + text_dy, am_out)
+            c.drawCentredString(col_x[3] + col_w[3] / 2, row_bottom + text_dy, pm_in)
+            c.drawCentredString(col_x[4] + col_w[4] / 2, row_bottom + text_dy, pm_out)
+            if has_punch:
+                undertime = (r.get('undertime') or '00 / 00').strip() or '00 / 00'
+            elif (r['date'].weekday() < 5) and not span:
+                undertime = '08 / 00'
+            else:
+                undertime = (r.get('undertime') or '').strip()
+            remarks_cell = _remarks_accomplishment_cell(r, span_status=span)
+
+        c.setFont('Helvetica', ut_font)
+        c.drawCentredString(col_x[5] + col_w[5] / 2, row_bottom + text_dy, undertime)
+
+        if remarks_cell:
+            c.setFont('Helvetica', rem_font)
+            max_w = col_w[6] - 3
+            text = remarks_cell
+            while c.stringWidth(text, 'Helvetica', rem_font) > max_w and len(text) > 3:
+                text = text[:-2]
+            if text != remarks_cell:
+                text = text[:-1] + '…'
+            c.drawCentredString(col_x[6] + col_w[6] / 2, row_bottom + text_dy, text)
+
+        y = row_bottom
+
+    # Certification footer — kept on same page
+    y -= 14 if compact else 24
+    cert_size = 7.5 if compact else 9
+    c.setFont('Helvetica', cert_size)
+    c.drawCentredString(width / 2, y, 'I certify on my honor that the above is a true and correct report of')
+    y -= 10 if compact else 12
+    c.drawCentredString(width / 2, y, 'the hours of work performed, record of which was made daily')
+    y -= 10 if compact else 12
+    c.drawCentredString(width / 2, y, 'at the time of arrival and departure from office.')
+    y -= 16 if compact else 24
+    c.setFont('Helvetica-Bold', 10 if compact else 12)
+    c.drawCentredString(width / 2, y, name)
+    y -= 16 if compact else 24
+    c.setFont('Helvetica', cert_size)
+    c.drawCentredString(width / 2, y, 'Verified as to prescribed office hours')
+    y -= 22 if compact else 32
+    sig_w = 200 if compact else 220
+    c.setLineWidth(0.8)
+    c.line(width / 2 - sig_w / 2, y, width / 2 + sig_w / 2, y)
+    y -= 10 if compact else 12
+    c.setFont('Helvetica-Bold', 8 if compact else 9)
+    c.drawCentredString(width / 2, y, 'Supervisor')
+
+    c.save()
+    buf.seek(0)
+    return buf
+
+
+def _dtr_records_pdf_bytes(emp: Employee, rows: list, period_label: str, include_justifications: bool) -> io.BytesIO:
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=letter)
+    width, height = letter
+    y = height - 50
+    c.setFont('Helvetica-Bold', 12)
+    c.drawString(40, y, 'Daily Time Record')
+    y -= 16
+    c.setFont('Helvetica', 9)
+    c.drawString(40, y, emp.full_name)
+    y -= 12
+    c.drawString(40, y, f'ID: {emp.employee_id}  |  Period: {period_label}')
+    y -= 18
+    c.setFont('Helvetica-Bold', 8)
+    c.drawString(40, y, 'Day')
+    c.drawString(70, y, 'AM In')
+    c.drawString(120, y, 'AM Out')
+    c.drawString(170, y, 'PM In')
+    c.drawString(220, y, 'PM Out')
+    c.drawString(270, y, 'Late/UT')
+    c.drawString(320, y, 'Remarks')
+    if include_justifications:
+        c.drawString(420, y, 'Justification')
+    y -= 10
+    c.setFont('Helvetica', 7)
+    for r in rows:
+        if y < 50:
+            c.showPage()
+            y = height - 40
+            c.setFont('Helvetica', 7)
+        def _t(t):
+            return t.strftime('%I:%M %p').lstrip('0') if t else ''
+        c.drawString(40, y, str(r['date'].day))
+        c.drawString(70, y, _t(r['am_in']))
+        c.drawString(120, y, _t(r['am_out']))
+        c.drawString(170, y, _t(r['pm_in']))
+        c.drawString(220, y, _t(r['pm_out']))
+        c.drawString(270, y, (r['undertime'] or '')[:8])
+        c.drawString(320, y, (r['remarks'] or '')[:18])
+        if include_justifications and r.get('has_justification'):
+            st = (r.get('justification_status') or 'submitted').title()
+            c.drawString(420, y, st[:14])
+        y -= 10
+    c.showPage()
+    c.save()
+    buf.seek(0)
+    return buf
+
+
+def _pdf_wrap_text(text: str, max_chars: int) -> list[str]:
+    words = (text or '').split()
+    if not words:
+        return ['']
+    lines: list[str] = []
+    current = words[0]
+    for word in words[1:]:
+        candidate = f'{current} {word}'
+        if len(candidate) <= max_chars:
+            current = candidate
+        else:
+            lines.append(current)
+            current = word
+    lines.append(current)
+    return lines
+
+
+def _dtr_accomplishment_pdf_bytes(emp: Employee, export_rows: list[dict], period_label: str) -> io.BytesIO:
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=letter)
+    width, height = letter
+    y = height - 50
+    c.setFont('Helvetica-Bold', 13)
+    c.drawString(40, y, 'Accomplishment Report')
+    y -= 16
+    c.setFont('Helvetica', 9)
+    c.drawString(40, y, emp.full_name)
+    y -= 12
+    c.drawString(40, y, f'Employee ID: {emp.employee_id}  |  Period: {period_label}')
+    y -= 12
+    c.drawString(40, y, 'Days shown: approved DTR justifications only.')
+    y -= 20
+    for row in export_rows:
+        if y < 120:
+            c.showPage()
+            y = height - 50
+        d = row['date']
+        c.setFont('Helvetica-Bold', 8)
+        c.drawString(40, y, d.strftime('%A, %B %d, %Y'))
+        y -= 12
+        c.setFont('Helvetica', 8)
+
+        def _t(t):
+            return t.strftime('%I:%M %p').lstrip('0') if t else '—'
+
+        schedule = (
+            f"AM {_t(row.get('am_in'))} – {_t(row.get('am_out'))}"
+            f"  |  PM {_t(row.get('pm_in'))} – {_t(row.get('pm_out'))}"
+        )
+        for line in _pdf_wrap_text(schedule, 88):
+            c.drawString(48, y, line)
+            y -= 10
+        if row.get('justification_reason'):
+            c.setFont('Helvetica-Bold', 8)
+            c.drawString(48, y, 'Justification:')
+            y -= 10
+            c.setFont('Helvetica', 8)
+            for line in _pdf_wrap_text(row['justification_reason'], 82):
+                c.drawString(56, y, line)
+                y -= 10
+        c.setFont('Helvetica-Bold', 8)
+        c.drawString(48, y, 'Accomplishment:')
+        y -= 10
+        c.setFont('Helvetica', 8)
+        body = row.get('accomplishment_text') or '(No report entered)'
+        for line in _pdf_wrap_text(body, 82):
+            if y < 60:
+                c.showPage()
+                y = height - 50
+                c.setFont('Helvetica', 8)
+            c.drawString(56, y, line)
+            y -= 10
+        y -= 8
+    c.showPage()
+    c.save()
+    buf.seek(0)
+    return buf
 
 
 @bp.route('/dtr/records')
@@ -2980,15 +5079,42 @@ def dtr_records():
     mode = (request.args.get('mode') or 'month').strip().lower()
     quincena = (request.args.get('quincena') or '1').strip()
     selected_employee_id = (request.args.get('employee_id') or '').strip()
+    my_dtr_mode = (request.args.get('my') or '').strip() == '1'
+    justify_date_raw = (request.args.get('justify_date') or '').strip()
 
-    dtr_edit_mode = role in ('admin', 'hr') and (request.args.get('edit') or '').strip() == '1'
+    # Admin/HR/Payroll Maker may edit remarks only (edit=1). Punch times are never
+    # free-edited; corrections go through duplicate-punch Use & Resolve.
+    dtr_edit_mode = (
+        role in ('admin', 'hr', 'payroll_maker')
+        and (request.args.get('edit') or '').strip() == '1'
+        and not my_dtr_mode
+    )
+    can_review_punch_flags = _user_can_review_dtr_punch_flags() and not my_dtr_mode
 
     if mode == 'quincena':
         start_d, end_d = _quincena_date_range(year, month, quincena)
     else:
         start_d, end_d = _month_date_range(year, month)
 
-    if role in ('admin', 'hr'):
+    quincena_period = None
+    if mode == 'quincena':
+        quincena_period = dtr_period.get_period(year, month, quincena)
+
+    if my_dtr_mode:
+        if not viewer_emp:
+            flash('Employee record not linked to your account.', 'error')
+            return redirect(url_for(_dashboard_for_user(current_user)))
+        employee_q = Employee.query.filter_by(id=viewer_emp.id)
+        req_mode = (request.args.get('mode') or 'quincena').strip().lower()
+        if req_mode == 'month':
+            mode = 'month'
+            start_d, end_d = _month_date_range(year, month)
+            quincena_period = None
+        else:
+            mode = 'quincena'
+            start_d, end_d = _quincena_date_range(year, month, quincena)
+            quincena_period = dtr_period.get_period(year, month, quincena)
+    elif role in ('admin', 'hr'):
         employee_q = Employee.query.filter_by(status='active')
     elif role == 'payroll_maker':
         if not viewer_emp or not viewer_emp.department_id:
@@ -3011,93 +5137,53 @@ def dtr_records():
             return redirect(url_for(_dashboard_for_user(current_user)))
         employee_q = Employee.query.filter_by(id=viewer_emp.id)
 
-    employees = employee_q.order_by(Employee.last_name.asc(), Employee.first_name.asc()).all()
-    selected_employee = _resolve_employee_from_scoped_list(employees, selected_employee_id)
+    employees = _dtr_employee_picker_rows(employee_q)
+    if my_dtr_mode and viewer_emp:
+        selected_employee = viewer_emp
+    else:
+        picked = _resolve_employee_from_scoped_list(employees, selected_employee_id)
+        selected_employee = Employee.query.get(picked.id) if picked else None
 
     rows = []
-    summary = {'lates': 0, 'undertimes': 0, 'absences': 0}
+    summary = {'lates': 0, 'undertimes': 0, 'absences': 0, 'duplicate_punches': 0}
+    monthly_checklist = None
+    is_plantilla_viewer = False
+    is_jo_cos_viewer = False
+    accomplishment_export_allowed = False
     if selected_employee:
-        dtr_rows = _dtr_rows_for_employee(selected_employee, start_d, end_d)
-        by_date = {r.record_date: r for r in dtr_rows}
-        approved_leave_dates = _approved_leave_dates_for_employee(selected_employee.id, start_d, end_d)
-        just_map = {
-            j.record_date: j for j in (DtrJustification.query
-                                       .filter(DtrJustification.employee_id == selected_employee.id)
-                                       .filter(DtrJustification.record_date >= start_d)
-                                       .filter(DtrJustification.record_date <= end_d)
-                                       .all())
-        }
-        curr = start_d
-        while curr <= end_d:
-            rec = by_date.get(curr)
-            dow = curr.weekday()
-            is_weekend = dow >= 5
-            remarks = (rec.remarks if rec and rec.remarks else ('SATURDAY' if dow == 5 else ('SUNDAY' if dow == 6 else '')))
-            if curr in approved_leave_dates and not remarks:
-                remarks = 'APPROVED LEAVE'
-            elif (
-                not remarks
-                and curr.weekday() == 4
-                and _arrangement_model_code_for_date(selected_employee, curr) == '4day'
-                and not (rec and any([rec.am_in, rec.am_out, rec.pm_in, rec.pm_out]))
-                and not (rec and _dtr_is_special_day_remark(rec.remarks))
-            ):
-                remarks = 'REST DAY'
-            late = False
-            undertime = False
-            absent = False
-            late_mins = 0
-            undertime_mins = 0
-            flexi_shift_code = None
-            flexi_assigned = False
-            sched_am_in = sched_am_out = sched_pm_in = sched_pm_out = ''
-            show_flexi_slots = bool(getattr(selected_employee, 'flexible_worktime', False))
-            if not is_weekend:
-                schedule = _pick_late_undertime_schedule(selected_employee, curr)
-                if show_flexi_slots and schedule:
-                    sched_am_in, sched_am_out, sched_pm_in, sched_pm_out = _duty_schedule_time_strings(schedule)
-                flexi_row = _flexi_schedule_row_for_employee_date(selected_employee, curr)
-                if flexi_row:
-                    flexi_assigned = True
-                    flexi_shift_code = (flexi_row.shift_code or '').strip() or None
-                if rec:
-                    late_mins, undertime_mins = _late_undertime_minutes_for_record(rec, schedule)
-                    late = late_mins > 0
-                    undertime = undertime_mins > 0
-                absent = (not rec or not any([rec.am_in, rec.am_out, rec.pm_in, rec.pm_out])) and not remarks
-                if late:
-                    summary['lates'] += 1
-                if absent:
-                    summary['absences'] += 1
-                if undertime:
-                    summary['undertimes'] += 1
+        rows, summary, _ = _build_dtr_view_rows(selected_employee, start_d, end_d)
+        for r in rows:
+            r['can_justify'] = dtr_monthly.can_justify_date_for_employee(selected_employee, r['date'])
+        if _is_jo_cos_employee(selected_employee):
+            is_jo_cos_viewer = True
+            enrich_jo_cos_dtr_rows(selected_employee.id, rows, start_d, end_d)
+            if my_dtr_mode:
+                accomplishment_export_allowed = has_approved_justification_for_export(rows)
+        if my_dtr_mode and viewer_emp and dtr_monthly.is_plantilla_employee(viewer_emp):
+            is_plantilla_viewer = True
+            if mode == 'month':
+                dtr_monthly.maybe_notify_monthly_reminder(viewer_emp, year, month)
+                monthly_checklist = dtr_monthly.monthly_checklist(viewer_emp, year, month, rows)
+                try:
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
 
-            rows.append({
-                'date': curr,
-                'am_in': rec.am_in if rec else None,
-                'am_out': rec.am_out if rec else None,
-                'pm_in': rec.pm_in if rec else None,
-                'pm_out': rec.pm_out if rec else None,
-                'undertime': (
-                    f"{((late_mins + undertime_mins) // 60):02d} / {((late_mins + undertime_mins) % 60):02d}"
-                    if rec else ''
-                ),
-                'remarks': remarks,
-                'late': late,
-                'undertime_flag': undertime,
-                'absent': absent,
-                'has_justification': curr in just_map,
-                'show_flexi_slots': show_flexi_slots and not is_weekend,
-                'sched_am_in': sched_am_in,
-                'sched_am_out': sched_am_out,
-                'sched_pm_in': sched_pm_in,
-                'sched_pm_out': sched_pm_out,
-                'flexi_shift_code': flexi_shift_code,
-                'flexi_assigned': flexi_assigned,
-                'stored_remarks': (rec.remarks or '') if rec else '',
-                'has_saved_row': rec is not None,
-            })
-            curr += timedelta(days=1)
+    can_submit_justification = dtr_period.can_employee_submit_justification(quincena_period)
+    if mode == 'month' and my_dtr_mode and is_plantilla_viewer:
+        can_submit_justification = bool(
+            monthly_checklist and monthly_checklist.get('window_open')
+            and (monthly_checklist.get('submission_status') != dtr_monthly.STATUS_ACCEPTED)
+        )
+    period_locked = dtr_period.is_period_locked(quincena_period)
+
+    justify_date_allowed = False
+    if justify_date_raw and selected_employee:
+        try:
+            jd = datetime.strptime(justify_date_raw, '%Y-%m-%d').date()
+            justify_date_allowed = dtr_monthly.can_justify_date_for_employee(selected_employee, jd)
+        except ValueError:
+            justify_date_allowed = False
 
     return render_template(
         'dtr_records.html',
@@ -3113,15 +5199,33 @@ def dtr_records():
         start_d=start_d,
         end_d=end_d,
         dtr_edit_mode=dtr_edit_mode,
+        my_dtr_mode=my_dtr_mode,
+        is_plantilla_viewer=is_plantilla_viewer,
+        is_jo_cos_viewer=is_jo_cos_viewer,
+        accomplishment_export_allowed=accomplishment_export_allowed,
+        quincena_period=quincena_period,
+        monthly_checklist=monthly_checklist,
+        period_status_label=dtr_period.STATUS_LABELS.get(
+            (quincena_period.status if quincena_period else ''), 'Not started'
+        ),
+        can_submit_justification=can_submit_justification,
+        period_locked=period_locked,
+        justify_date=justify_date_raw if justify_date_allowed else '',
+        justify_date_allowed=justify_date_allowed,
+        dtr_justification_reasons=DTR_JUSTIFICATION_REASONS,
+        dtr_justification_reason_others=DTR_JUSTIFICATION_REASON_OTHERS,
+        can_review_punch_flags=can_review_punch_flags,
     )
 
 
 @bp.route('/dtr/records/save', methods=['POST'])
 @login_required
 def dtr_records_save():
-    denied = _require_admin_or_hr()
-    if denied:
-        return denied
+    """Admin/HR/Payroll Maker remarks-only save. Punch times cannot be changed here."""
+    role = (getattr(current_user, 'role', None) or '').strip().lower()
+    if role not in ('admin', 'hr', 'payroll_maker') and not _user_is_admin_or_hr():
+        flash('Access denied. This section is for Admin, HR, and Payroll Maker.', 'error')
+        return redirect(url_for(_dashboard_for_user(current_user)))
     try:
         emp_id = int((request.form.get('employee_id') or '0').strip())
     except ValueError:
@@ -3131,65 +5235,192 @@ def dtr_records_save():
     if not emp:
         flash('Employee not found.', 'error')
         return redirect(url_for('routes.dtr_records', edit=1))
+    if role == 'payroll_maker' and not _user_can_access_punch_flag_employee(emp):
+        flash('Access denied. Payroll Maker may only edit remarks for employees in their department.', 'error')
+        return redirect(url_for('routes.dtr_records', edit=1))
 
     today = date.today()
     month = int((request.form.get('month') or str(today.month)).strip())
     year = int((request.form.get('year') or str(today.year)).strip())
     mode = (request.form.get('mode') or 'month').strip().lower()
     quincena = (request.form.get('quincena') or '1').strip()
+    redir_kw = {'employee_id': emp_id, 'month': month, 'year': year, 'mode': mode, 'quincena': quincena, 'edit': 1}
 
     if mode == 'quincena':
         start_d, end_d = _quincena_date_range(year, month, quincena)
+        period = dtr_period.get_period(year, month, quincena)
+        if dtr_period.is_period_locked(period):
+            flash('This quincena has been processed. Reopen it from Quincena Processing before adjusting DTR.', 'error')
+            return redirect(url_for('routes.dtr_records', **{k: v for k, v in redir_kw.items() if k != 'edit'}))
     else:
         start_d, end_d = _month_date_range(year, month)
-
-    redir_kw = {'employee_id': emp_id, 'month': month, 'year': year, 'mode': mode, 'quincena': quincena, 'edit': 1}
 
     try:
         curr = start_d
         while curr <= end_d:
             dkey = curr.isoformat()
-            want_delete = (request.form.get(f'del_{dkey}', '') or '').strip().lower() in ('1', 'on', 'true', 'yes')
-            rec = DailyTimeRecord.query.filter_by(employee_id=emp.id, record_date=curr).first()
-            if want_delete and rec:
-                db.session.delete(rec)
-                curr += timedelta(days=1)
-                continue
-
-            am_in = _parse_dtr_edit_time_field(request.form.get(f't_{dkey}_am_in'))
-            am_out = _parse_dtr_edit_time_field(request.form.get(f't_{dkey}_am_out'))
-            pm_in = _parse_dtr_edit_time_field(request.form.get(f't_{dkey}_pm_in'))
-            pm_out = _parse_dtr_edit_time_field(request.form.get(f't_{dkey}_pm_out'))
             rem_raw = (request.form.get(f'rem_{dkey}', '') or '').strip()
             rem = (rem_raw[:100] if rem_raw else None)
-            has_times = any(x is not None for x in (am_in, am_out, pm_in, pm_out))
+            rec = DailyTimeRecord.query.filter_by(employee_id=emp.id, record_date=curr).first()
 
-            if rec and not has_times and not rem_raw:
-                db.session.delete(rec)
+            if not rec:
+                if rem_raw:
+                    rec = DailyTimeRecord(employee_id=emp.id, record_date=curr, remarks=rem)
+                    db.session.add(rec)
                 curr += timedelta(days=1)
                 continue
 
-            if not rec and (has_times or rem_raw):
-                rec = DailyTimeRecord(employee_id=emp.id, record_date=curr)
-                db.session.add(rec)
-            if rec:
-                rec.am_in = am_in
-                rec.am_out = am_out
-                rec.pm_in = pm_in
-                rec.pm_out = pm_out
-                rec.remarks = rem
-                sched = _pick_late_undertime_schedule(emp, curr)
-                late_m, ut_m = _late_undertime_minutes_for_record(rec, sched)
-                tot = late_m + ut_m
-                rec.undertime_hrs = tot // 60
-                rec.undertime_mins = tot % 60
+            # Remarks only — never mutate punch times or delete rows from this form.
+            rec.remarks = rem
             curr += timedelta(days=1)
         db.session.commit()
-        flash('DTR updated.', 'success')
+        flash('DTR remarks updated. Punch times can only be corrected from duplicate-punch review.', 'success')
     except Exception as e:
         db.session.rollback()
-        flash(f'Error saving DTR: {str(e)}', 'error')
+        flash(f'Error saving DTR remarks: {str(e)}', 'error')
     return redirect(url_for('routes.dtr_records', **redir_kw))
+
+
+@bp.route('/attendance', methods=['GET'])
+@login_required
+def event_attendance_list():
+    """HR/Admin: view Flag Raising / Flag Retreat / Meeting attendance."""
+    if not _user_is_admin_or_hr():
+        flash('Access denied. This section is for Admin and HR.', 'error')
+        return redirect(url_for(_dashboard_for_user(current_user)))
+
+    from app.event_attendance_service import category_label, fill_missing_locations, normalize_category
+
+    today = date.today()
+    category = normalize_category(request.args.get('category')) or ''
+    q = (request.args.get('q') or '').strip()
+    date_from_raw = (request.args.get('date_from') or '').strip()
+    date_to_raw = (request.args.get('date_to') or '').strip()
+    try:
+        date_from = datetime.strptime(date_from_raw, '%Y-%m-%d').date() if date_from_raw else None
+    except ValueError:
+        date_from = None
+    try:
+        date_to = datetime.strptime(date_to_raw, '%Y-%m-%d').date() if date_to_raw else None
+    except ValueError:
+        date_to = None
+
+    query = EventAttendance.query.outerjoin(
+        Employee, Employee.id == EventAttendance.employee_id
+    )
+    if category:
+        query = query.filter(EventAttendance.category == category)
+    if date_from:
+        query = query.filter(EventAttendance.event_date >= date_from)
+    if date_to:
+        query = query.filter(EventAttendance.event_date <= date_to)
+    if q:
+        like = f'%{q}%'
+        query = query.filter(db.or_(
+            EventAttendance.badge_employee_id.ilike(like),
+            EventAttendance.location_text.ilike(like),
+            EventAttendance.barangay.ilike(like),
+            EventAttendance.municipality.ilike(like),
+            EventAttendance.province.ilike(like),
+            Employee.employee_id.ilike(like),
+            Employee.first_name.ilike(like),
+            Employee.last_name.ilike(like),
+            Employee.middle_name.ilike(like),
+        ))
+
+    rows = (
+        query
+        .options(db.joinedload(EventAttendance.employee).joinedload(Employee.pds))
+        .order_by(
+            EventAttendance.event_date.desc(),
+            EventAttendance.category.asc(),
+            EventAttendance.punched_at.asc(),
+            EventAttendance.id.asc(),
+        )
+        .limit(2000)
+        .all()
+    )
+    # Resolve lat/long → barangay, town, province for rows still missing location.
+    try:
+        fill_missing_locations(rows, max_lookups=25)
+    except Exception:
+        db.session.rollback()
+
+    recent_batches = (
+        EventAttendanceBatch.query
+        .order_by(EventAttendanceBatch.uploaded_at.desc())
+        .limit(10)
+        .all()
+    )
+    employee = current_user.employee if current_user.employee else None
+    return render_template(
+        'attendance/event_attendance.html',
+        rows=rows,
+        recent_batches=recent_batches,
+        filters={
+            'category': category,
+            'q': q,
+            'date_from': date_from.isoformat() if date_from else '',
+            'date_to': date_to.isoformat() if date_to else '',
+        },
+        categories=EVENT_ATTENDANCE_CATEGORIES,
+        category_labels=EVENT_ATTENDANCE_CATEGORY_LABELS,
+        category_label=category_label,
+        default_event_date=today.isoformat(),
+        employee=employee,
+    )
+
+
+@bp.route('/attendance/upload', methods=['POST'])
+@login_required
+def event_attendance_upload():
+    if not _user_is_admin_or_hr():
+        flash('Access denied. This section is for Admin and HR.', 'error')
+        return redirect(url_for(_dashboard_for_user(current_user)))
+
+    from app.event_attendance_service import category_label, normalize_category, upload_event_attendance
+
+    category = (request.form.get('category') or '').strip()
+    date_raw = (request.form.get('event_date') or '').strip()
+    file = request.files.get('attendance_file')
+    try:
+        event_date = datetime.strptime(date_raw, '%Y-%m-%d').date()
+    except ValueError:
+        flash('Valid event date is required.', 'error')
+        return redirect(url_for('routes.event_attendance_list'))
+    if not file or not file.filename:
+        flash('Please choose an Excel (.xlsx) file.', 'error')
+        return redirect(url_for('routes.event_attendance_list'))
+    fname = secure_filename(file.filename)
+    if not fname.lower().endswith(('.xlsx', '.xlsm')):
+        flash('Upload an Excel file (.xlsx).', 'error')
+        return redirect(url_for('routes.event_attendance_list'))
+    try:
+        batch = upload_event_attendance(
+            file_storage=file,
+            category=category,
+            event_date=event_date,
+            filename=fname,
+        )
+        flash(
+            f'Uploaded {category_label(batch.category)} for {batch.event_date.isoformat()}: '
+            f'{batch.inserted_count} added, {batch.skipped_count} duplicate(s) skipped'
+            + (f', {batch.unmatched_count} unmatched badge(s)' if batch.unmatched_count else '')
+            + '.',
+            'success' if batch.inserted_count else 'info',
+        )
+    except ValueError as e:
+        db.session.rollback()
+        flash(str(e), 'error')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Upload failed: {e}', 'error')
+    return redirect(url_for(
+        'routes.event_attendance_list',
+        category=normalize_category(category) or '',
+        date_from=date_raw,
+        date_to=date_raw,
+    ))
 
 
 @bp.route('/dtr/justifications', methods=['GET', 'POST'])
@@ -3204,21 +5435,25 @@ def dtr_justifications():
             flash('Your account is not linked to an employee.', 'error')
             return redirect(url_for(_dashboard_for_user(current_user)))
         rec_date_raw = (request.form.get('record_date') or '').strip()
-        reason = (request.form.get('reason') or '').strip()
-        if not rec_date_raw or not reason:
-            flash('Date and reason are required.', 'error')
-            return redirect(url_for('routes.dtr_justifications'))
+        reason, reason_err = _dtr_justification_reason_from_form(request.form)
+        if not rec_date_raw or reason_err or not reason:
+            flash(reason_err or 'Date and reason are required.', 'error')
+            return _redirect_after_dtr_justify_error(role, request.form)
         try:
             rec_date = datetime.strptime(rec_date_raw, '%Y-%m-%d').date()
         except ValueError:
             flash('Invalid date.', 'error')
-            return redirect(url_for('routes.dtr_justifications'))
+            return _redirect_after_dtr_justify_error(role, request.form)
+        q_year, q_month = rec_date.year, rec_date.month
+        if not dtr_monthly.can_justify_date_for_employee(viewer_emp, rec_date):
+            flash('The review period for this date is closed. Contact HR if you need to submit a justification.', 'error')
+            return _redirect_after_dtr_justify_error(role, request.form)
         attachment = request.files.get('attachment')
         attachment_name = None
         if attachment and attachment.filename:
             if not _is_allowed_justification_filename(attachment.filename):
                 flash('Unsupported attachment type. Allowed: PDF, PNG, JPG, DOC, DOCX.', 'error')
-                return redirect(url_for('routes.dtr_justifications'))
+                return _redirect_after_dtr_justify_error(role, request.form)
             safe_name = secure_filename(attachment.filename)
             stamp = datetime.utcnow().strftime('%Y%m%d%H%M%S')
             attachment_name = f'just_{viewer_emp.id}_{rec_date.strftime("%Y%m%d")}_{stamp}_{safe_name}'
@@ -3242,7 +5477,10 @@ def dtr_justifications():
                 row.attachment_name = attachment_name
             row.submitted_by_user_id = current_user.id if getattr(current_user, 'id', None) else None
         db.session.commit()
+        dtr_period.notify_hr_justification_submitted(row)
         flash('Justification submitted.', 'success')
+        if role == 'employee':
+            return redirect(url_for('routes.dtr_my_records'))
         return redirect(url_for('routes.dtr_justifications'))
 
     q = DtrJustification.query.join(Employee, Employee.id == DtrJustification.employee_id)
@@ -3321,6 +5559,407 @@ def dtr_justification_forward(id):
     db.session.commit()
     flash('Justification forwarded to HR/Admin.', 'success')
     return redirect(url_for('routes.dtr_justifications'))
+
+
+@bp.route('/dtr/justifications/<int:id>/approve', methods=['POST'])
+@login_required
+def dtr_justification_approve(id):
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    row = DtrJustification.query.get_or_404(id)
+    row.status = 'approved'
+    row.reviewed_by_user_id = current_user.id if getattr(current_user, 'id', None) else None
+    reverse_lwop_for_approved_justification(
+        row, created_by_user_id=getattr(current_user, 'id', None),
+    )
+    db.session.commit()
+    dtr_period.notify_employee_justification_decided(row, approved=True)
+    flash('Justification approved.', 'success')
+    return redirect(url_for('routes.dtr_justifications'))
+
+
+@bp.route('/dtr/justifications/<int:id>/reject', methods=['POST'])
+@login_required
+def dtr_justification_reject(id):
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    row = DtrJustification.query.get_or_404(id)
+    row.status = 'rejected'
+    row.reviewed_by_user_id = current_user.id if getattr(current_user, 'id', None) else None
+    db.session.commit()
+    dtr_period.notify_employee_justification_decided(row, approved=False)
+    flash('Justification rejected.', 'success')
+    return redirect(url_for('routes.dtr_justifications'))
+
+
+@bp.route('/dtr/monthly-submission', methods=['POST'])
+@login_required
+def dtr_monthly_submission_submit():
+    viewer_emp = _current_employee_for_user()
+    if not viewer_emp or not dtr_monthly.is_plantilla_employee(viewer_emp):
+        flash('Monthly DTR submission is for plantilla employees only.', 'error')
+        return redirect(url_for('routes.dtr_my_records'))
+    try:
+        year = int((request.form.get('year') or '0').strip())
+        month = int((request.form.get('month') or '0').strip())
+    except ValueError:
+        flash('Invalid period.', 'error')
+        return redirect(url_for('routes.dtr_my_records'))
+    if month < 1 or month > 12:
+        flash('Invalid period.', 'error')
+        return redirect(url_for('routes.dtr_my_records'))
+    start_d, end_d = _month_date_range(year, month)
+    rows, _, _ = _build_dtr_view_rows(viewer_emp, start_d, end_d)
+    ok, msg = dtr_monthly.submit_monthly(
+        viewer_emp,
+        current_user.id if getattr(current_user, 'id', None) else None,
+        year,
+        month,
+        rows,
+    )
+    if ok:
+        db.session.commit()
+        flash(msg, 'success')
+    else:
+        db.session.rollback()
+        flash(msg, 'error')
+    return redirect(url_for('routes.dtr_my_records', year=year, month=month, mode='month'))
+
+
+@bp.route('/dtr/monthly-submissions', methods=['GET', 'POST'])
+@login_required
+def dtr_monthly_submissions():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    today = date.today()
+    year = int((request.args.get('year') or request.form.get('year') or str(today.year)).strip())
+    month = int((request.args.get('month') or request.form.get('month') or str(today.month)).strip())
+    department_id_raw = (request.args.get('department_id') or request.form.get('department_id') or '').strip()
+    department_id = None
+    if department_id_raw:
+        try:
+            department_id = int(department_id_raw)
+        except ValueError:
+            department_id = None
+
+    if request.method == 'POST':
+        action = (request.form.get('action') or '').strip()
+        try:
+            sub_id = int((request.form.get('submission_id') or '0').strip())
+        except ValueError:
+            sub_id = 0
+        sub = DtrMonthlySubmission.query.get(sub_id)
+        if not sub:
+            flash('Submission not found.', 'error')
+        elif action == 'accept':
+            notes = (request.form.get('review_notes') or '').strip()
+            dtr_monthly.accept_submission(sub, getattr(current_user, 'id', None), notes)
+            db.session.commit()
+            flash('Monthly DTR accepted.', 'success')
+        elif action == 'reject':
+            notes = (request.form.get('review_notes') or '').strip()
+            if not notes:
+                flash('Review notes are required when rejecting a monthly submission.', 'error')
+                return redirect(url_for(
+                    'routes.dtr_monthly_submissions',
+                    year=year, month=month, department_id=department_id or '',
+                ))
+            dtr_monthly.reject_submission(sub, getattr(current_user, 'id', None), notes)
+            db.session.commit()
+            flash('Monthly DTR returned to employee for resubmission.', 'success')
+        return redirect(url_for(
+            'routes.dtr_monthly_submissions',
+            year=year, month=month, department_id=department_id or '',
+        ))
+
+    submissions = dtr_monthly.plantilla_submissions_for_month(year, month, department_id)
+    departments = Department.query.order_by(Department.name.asc()).all()
+    pending_count = sum(1 for s in submissions if s['status'] in (dtr_monthly.STATUS_PENDING, dtr_monthly.STATUS_REJECTED))
+    submitted_count = sum(1 for s in submissions if s['status'] == dtr_monthly.STATUS_SUBMITTED)
+    accepted_count = sum(1 for s in submissions if s['status'] == dtr_monthly.STATUS_ACCEPTED)
+    employee = current_user.employee if current_user.employee else None
+    return render_template(
+        'dtr_monthly_submissions.html',
+        employee=employee,
+        submissions=submissions,
+        year=year,
+        month=month,
+        department_id=department_id_raw,
+        departments=departments,
+        period_label=dtr_monthly.monthly_period_label(year, month),
+        deadline=dtr_monthly.submission_deadline(year, month),
+        window_open=dtr_monthly.is_monthly_window_open(year, month),
+        pending_count=pending_count,
+        submitted_count=submitted_count,
+        accepted_count=accepted_count,
+    )
+
+
+@bp.route('/dtr/my')
+@login_required
+def dtr_my_records():
+    viewer_emp = _current_employee_for_user()
+    if not viewer_emp:
+        flash('Employee record not linked to your account.', 'error')
+        return redirect(url_for(_dashboard_for_user(current_user)))
+    today = date.today()
+    year = int((request.args.get('year') or str(today.year)).strip())
+    month = int((request.args.get('month') or str(today.month)).strip())
+    quincena = (request.args.get('quincena') or ('1' if today.day <= 15 else '2')).strip()
+    justify_date = (request.args.get('justify_date') or '').strip()
+    mode = (request.args.get('mode') or 'quincena').strip().lower()
+    if mode not in ('quincena', 'month'):
+        mode = 'quincena'
+    if not dtr_monthly.is_plantilla_employee(viewer_emp):
+        mode = 'quincena'
+    return redirect(url_for(
+        'routes.dtr_records',
+        my=1,
+        employee_id=viewer_emp.id,
+        mode=mode,
+        year=year,
+        month=month,
+        quincena=quincena,
+        justify_date=justify_date or None,
+    ))
+
+
+@bp.route('/dtr/records/print')
+@login_required
+def dtr_records_print():
+    viewer_emp = _current_employee_for_user()
+    role = (getattr(current_user, 'role', None) or '').strip().lower()
+    today = date.today()
+    month = int((request.args.get('month') or str(today.month)).strip())
+    year = int((request.args.get('year') or str(today.year)).strip())
+    quincena = (request.args.get('quincena') or '1').strip()
+    mode = (request.args.get('mode') or 'quincena').strip().lower()
+    emp_id_raw = (request.args.get('employee_id') or '').strip()
+    my_only = (request.args.get('my') or '').strip() == '1'
+
+    if mode == 'quincena':
+        start_d, end_d = _quincena_date_range(year, month, quincena)
+        period_label = dtr_period.quincena_period_label(year, month, quincena)
+    else:
+        start_d, end_d = _month_date_range(year, month)
+        period_label = date(year, month, 1).strftime('%B %Y')
+
+    if my_only or role == 'employee':
+        if not viewer_emp:
+            abort(403)
+        emp = viewer_emp
+    elif role in ('admin', 'hr', 'payroll_maker', 'manager'):
+        try:
+            emp_id = int(emp_id_raw)
+        except ValueError:
+            flash('Select an employee to print.', 'error')
+            return redirect(url_for('routes.dtr_records'))
+        emp = Employee.query.get_or_404(emp_id)
+        if role == 'payroll_maker' and not _user_can_access_punch_flag_employee(emp):
+            flash('Access denied. Payroll Maker may only print DTR for employees in their department.', 'error')
+            return redirect(url_for('routes.dtr_records'))
+        if role == 'manager':
+            dept_ids = _managed_department_ids_for_manager()
+            if not emp.department_id or emp.department_id not in dept_ids:
+                flash('Access denied. You may only print DTR for employees in your managed department(s).', 'error')
+                return redirect(url_for('routes.dtr_records'))
+    else:
+        abort(403)
+
+    rows, _, _ = _build_dtr_view_rows(emp, start_d, end_d)
+    if my_only and dtr_monthly.is_plantilla_employee(emp) and mode == 'month':
+        dtr_monthly.mark_printed(emp, year, month)
+    if _is_jo_cos_employee(emp):
+        enrich_jo_cos_dtr_rows(emp.id, rows, start_d, end_d)
+        buf = _dtr_csc_form48_pdf_bytes(emp, rows, start_d=start_d, end_d=end_d)
+    else:
+        buf = _dtr_records_pdf_bytes(emp, rows, period_label, include_justifications=True)
+    fname = f'dtr_{emp.employee_id}_{year}_{month:02d}'
+    if mode == 'quincena':
+        fname += f'_Q{quincena}'
+    return send_file(buf, mimetype='application/pdf', as_attachment=True, download_name=f'{fname}.pdf')
+
+
+@bp.route('/dtr/my/accomplishment-reports', methods=['POST'])
+@login_required
+def dtr_accomplishment_reports_save():
+    viewer_emp = _current_employee_for_user()
+    if not viewer_emp or not _is_jo_cos_employee(viewer_emp):
+        flash('Accomplishment reports are for JO/COS employees only.', 'error')
+        return redirect(url_for('routes.dtr_my_records'))
+    today = date.today()
+    month = int((request.form.get('month') or str(today.month)).strip())
+    year = int((request.form.get('year') or str(today.year)).strip())
+    quincena = (request.form.get('quincena') or '1').strip()
+    mode = (request.form.get('mode') or 'quincena').strip().lower()
+    if mode == 'quincena':
+        start_d, end_d = _quincena_date_range(year, month, quincena)
+    else:
+        start_d, end_d = _month_date_range(year, month)
+
+    reports_by_date: dict[date, str] = {}
+    prefix = 'accomplishment_'
+    for key, val in request.form.items():
+        if not key.startswith(prefix):
+            continue
+        raw_date = key[len(prefix):]
+        try:
+            record_date = datetime.strptime(raw_date, '%Y-%m-%d').date()
+        except ValueError:
+            continue
+        if start_d <= record_date <= end_d:
+            reports_by_date[record_date] = val
+
+    try:
+        count = save_accomplishment_reports(
+            viewer_emp.id,
+            reports_by_date,
+            updated_by_user_id=getattr(current_user, 'id', None),
+        )
+        db.session.commit()
+        flash('Accomplishment report(s) saved.', 'success')
+    except Exception as exc:
+        db.session.rollback()
+        flash(f'Could not save accomplishment reports: {exc}', 'error')
+
+    return redirect(url_for(
+        'routes.dtr_my_records',
+        year=year,
+        month=month,
+        mode=mode,
+        quincena=quincena,
+    ))
+
+
+@bp.route('/dtr/records/accomplishment-pdf')
+@login_required
+def dtr_accomplishment_pdf():
+    viewer_emp = _current_employee_for_user()
+    role = (getattr(current_user, 'role', None) or '').strip().lower()
+    today = date.today()
+    month = int((request.args.get('month') or str(today.month)).strip())
+    year = int((request.args.get('year') or str(today.year)).strip())
+    quincena = (request.args.get('quincena') or '1').strip()
+    mode = (request.args.get('mode') or 'quincena').strip().lower()
+    inline = (request.args.get('inline') or '').strip() == '1'
+
+    if mode == 'quincena':
+        start_d, end_d = _quincena_date_range(year, month, quincena)
+        period_label = dtr_period.quincena_period_label(year, month, quincena)
+    else:
+        start_d, end_d = _month_date_range(year, month)
+        period_label = date(year, month, 1).strftime('%B %Y')
+
+    my_only = (request.args.get('my') or '').strip() == '1'
+    if my_only or role == 'employee':
+        if not viewer_emp:
+            abort(403)
+        emp = viewer_emp
+    elif role in ('admin', 'hr', 'payroll_maker'):
+        try:
+            emp_id = int((request.args.get('employee_id') or '').strip())
+        except ValueError:
+            flash('Select an employee.', 'error')
+            return redirect(url_for('routes.dtr_records'))
+        emp = Employee.query.get_or_404(emp_id)
+    else:
+        abort(403)
+
+    if not _is_jo_cos_employee(emp):
+        flash('Accomplishment reports apply to JO/COS employees only.', 'error')
+        return redirect(url_for('routes.dtr_my_records'))
+
+    rows, _, _ = _build_dtr_view_rows(emp, start_d, end_d)
+    enrich_jo_cos_dtr_rows(emp.id, rows, start_d, end_d)
+    export_rows = approved_accomplishment_export_rows(emp.id, rows)
+    if not export_rows:
+        flash('No approved justifications in this period to export.', 'warning')
+        return redirect(url_for(
+            'routes.dtr_my_records',
+            year=year,
+            month=month,
+            mode=mode,
+            quincena=quincena,
+        ))
+
+    buf = _dtr_accomplishment_pdf_bytes(emp, export_rows, period_label)
+    fname = f'accomplishment_{emp.employee_id}_{year}_{month:02d}'
+    if mode == 'quincena':
+        fname += f'_Q{quincena}'
+    return send_file(
+        buf,
+        mimetype='application/pdf',
+        as_attachment=not inline,
+        download_name=f'{fname}.pdf',
+    )
+
+
+@bp.route('/dtr/quincena-processing', methods=['GET', 'POST'])
+@login_required
+def dtr_quincena_processing():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    anchor = date.today()
+    opts = _build_quincena_upload_options(anchor)
+    default_period = f'{anchor.year:04d}-{anchor.month:02d}-{"1" if anchor.day <= 15 else "2"}'
+    selected = (request.args.get('period') or request.form.get('period') or default_period).strip()
+    year, month, quincena = _parse_quincena_upload_value(selected)
+    if year is None:
+        year, month, quincena = _parse_quincena_upload_value(default_period)
+
+    if request.method == 'POST':
+        action = (request.form.get('action') or '').strip()
+        py, pm, pq = _parse_quincena_upload_value((request.form.get('period') or '').strip())
+        if py is None:
+            flash('Invalid quincena.', 'error')
+            return redirect(url_for('routes.dtr_quincena_processing'))
+        period = dtr_period.get_or_create_period(py, pm, pq)
+        if action == 'open_review':
+            deadline_raw = (request.form.get('review_deadline') or '').strip()
+            deadline = None
+            if deadline_raw:
+                try:
+                    deadline = datetime.strptime(deadline_raw, '%Y-%m-%d').date()
+                except ValueError:
+                    flash('Invalid review deadline.', 'error')
+                    return redirect(url_for('routes.dtr_quincena_processing', period=request.form.get('period')))
+            dtr_period.open_review(period, deadline)
+            db.session.commit()
+            flash('Employee review period opened.', 'success')
+        elif action == 'close_review':
+            dtr_period.close_review(period)
+            db.session.commit()
+            flash('Employee review period closed. You may adjust DTR and process worktime.', 'success')
+        elif action == 'reopen':
+            dtr_period.reopen_for_adjustment(period)
+            db.session.commit()
+            flash('Quincena reopened for DTR adjustment.', 'success')
+        return redirect(url_for('routes.dtr_quincena_processing', period=request.form.get('period')))
+
+    period = dtr_period.get_or_create_period(year, month, quincena)
+    stats = dtr_period.period_dashboard_stats(year, month, quincena)
+    period_label = dtr_period.quincena_period_label(year, month, quincena)
+    status = (period.status or dtr_period.STATUS_DRAFT).strip()
+    employee = current_user.employee if current_user.employee else None
+    return render_template(
+        'dtr_quincena_processing.html',
+        quincena_options=opts,
+        selected_period=selected,
+        period=period,
+        period_label=period_label,
+        period_status=status,
+        period_status_label=dtr_period.STATUS_LABELS.get(status, status.title()),
+        stats=stats,
+        employee=employee,
+        is_locked=dtr_period.is_period_locked(period),
+        can_close_review=status == dtr_period.STATUS_REVIEW_OPEN,
+        can_open_review=status in (dtr_period.STATUS_DRAFT, dtr_period.STATUS_UPLOADED, dtr_period.STATUS_REVIEW_CLOSED),
+        can_process=status in (dtr_period.STATUS_REVIEW_CLOSED, dtr_period.STATUS_REVIEW_OPEN, dtr_period.STATUS_UPLOADED),
+    )
 
 
 _DTR_REGEN_REMARKS_PREFIX = 'DTR_REGEN:'
@@ -3402,7 +6041,7 @@ def _worktime_summary_filter_label(filters: dict, dept_by_id: dict[int, Departme
         try:
             emp = Employee.query.get(int(filters['employee_id']))
             if emp:
-                parts.append(f"Employee: {emp.last_name}, {emp.first_name}")
+                parts.append(f"Employee: {emp.directory_name}")
         except ValueError:
             pass
     return ' · '.join(parts)
@@ -3471,7 +6110,7 @@ def _worktime_summary_daily_row_dict(wh: WorkHours) -> dict:
     emp = wh.employee
     dept = wh.department
     code = (emp.employee_id or '') if emp else ''
-    name = f"{emp.last_name}, {emp.first_name}" if emp else ''
+    name = emp.directory_name if emp else ''
     dept_name = dept.name if dept else ''
     remarks = (wh.remarks or '').strip()
     return {
@@ -3503,7 +6142,7 @@ def _worktime_summary_by_employee_rows(filters: dict) -> list[dict]:
     for emp in eligible:
         dept = emp.department
         code = emp.employee_id or ''
-        name = f"{emp.last_name}, {emp.first_name}"
+        name = emp.directory_name
         dept_name = dept.name if dept else ''
         buckets[emp.id] = {
             'employee_code': code,
@@ -3755,22 +6394,50 @@ GSIS_CONTRIBUTION_DEDUCTIBLE_QUINCENA = '2'
 PHIC_CONTRIBUTION_DEDUCTIBLE_QUINCENA = '2'
 
 
-def _phic_share_from_salary(basic_salary) -> Decimal:
-    """PhilHealth share from monthly basic salary (same formula for PS and GS)."""
+def _phic_total_premium_from_salary(basic_salary) -> Decimal:
+    """
+    PhilHealth total monthly premium (EE + ER).
+
+    Tier (2024+ rate table used in this module):
+      basic < 10,000      → ₱500.00 total (₱250 each)
+      10,000–100,000     → 5% of basic
+      basic > 100,000     → ₱5,000.00 total (₱2,500 each)
+    """
     basic_d = _money_decimal(basic_salary)
     if basic_d < Decimal('10000'):
-        return Decimal('250.00')
+        return Decimal('500.00')
     if basic_d <= Decimal('100000'):
-        return (basic_d * Decimal('0.025')).quantize(Decimal('0.01'))
-    return Decimal('2500.00')
+        return (basic_d * Decimal('0.05')).quantize(Decimal('0.01'))
+    return Decimal('5000.00')
+
+
+def _phic_ps_gs_split(total_premium) -> tuple[Decimal, Decimal]:
+    """
+    Equal EE/ER split of PhilHealth premium.
+
+    Same accounting convention as loan/quincena odd-cent splits: the floor half
+    goes to PS; any leftover centavo goes to GS.
+    Example: total 1,708.85 → PS 854.42, GS 854.43.
+    """
+    total = _money_decimal(total_premium)
+    if total <= 0:
+        return Decimal('0.00'), Decimal('0.00')
+    ps = (total / Decimal('2')).quantize(Decimal('0.01'), rounding=ROUND_FLOOR)
+    gs = (total - ps).quantize(Decimal('0.01'))
+    return ps, gs
+
+
+def _phic_share_from_salary(basic_salary) -> Decimal:
+    """Employee (PS) share from monthly basic salary."""
+    ps, _gs = _phic_ps_gs_split(_phic_total_premium_from_salary(basic_salary))
+    return ps
 
 
 def _phic_contribution_amounts(basic_salary) -> dict:
     """Compute PHIC contribution amounts from monthly basic salary."""
     basic_d = _money_decimal(basic_salary)
-    share = _phic_share_from_salary(basic_d)
-    ps = share
-    gs = share
+    total = _phic_total_premium_from_salary(basic_d)
+    ps, gs = _phic_ps_gs_split(total)
     month_amount = ps
     return {
         'basic_salary': basic_d,
@@ -3789,7 +6456,7 @@ def _phic_contribution_row_dict(emp: Employee) -> dict:
     return {
         'employee_pk': emp.id,
         'employee_id': emp.employee_id,
-        'employee_name': f"{emp.last_name}, {emp.first_name}",
+        'employee_name': emp.directory_name,
         'department_name': (emp.department.name if emp.department else ''),
         'basic_salary': _money_str(amounts['basic_salary']),
         'ps': _money_str(amounts['ps_amount']),
@@ -3920,7 +6587,7 @@ def _parse_gsis_loan_xls(file_bytes: bytes) -> dict:
             'bpno': bpno,
             'employee_pk': emp.id if emp else None,
             'employee_id': emp.employee_id if emp else '',
-            'employee_name': f"{emp.last_name}, {emp.first_name}" if emp else '',
+            'employee_name': emp.directory_name if emp else '',
             'department_name': (emp.department.name if emp and emp.department else ''),
             'matched': emp is not None,
             **{k: str(v) for k, v in amounts.items()},
@@ -4033,7 +6700,7 @@ def _gsis_loan_load_rows(year: int, month: int, department_id: int | None) -> li
         rows.append({
             'employee_pk': emp.id,
             'employee_id': emp.employee_id,
-            'employee_name': f"{emp.last_name}, {emp.first_name}",
+            'employee_name': emp.directory_name,
             'department_name': (emp.department.name if emp.department else ''),
             'loan_type': loan_type,
             'loan_types_label': loan_types_label,
@@ -4052,6 +6719,624 @@ def _gsis_loan_load_rows(year: int, month: int, department_id: int | None) -> li
     return rows
 
 
+LBP_BILLING_LABEL = 'LBP'
+
+
+def _normalize_employee_no(val) -> str:
+    """Normalize employee number from spreadsheet cells for matching."""
+    if val is None:
+        return ''
+    try:
+        import pandas as pd
+        if pd.isna(val):
+            return ''
+    except Exception:
+        pass
+    if isinstance(val, (int, float)):
+        if isinstance(val, float) and val == int(val):
+            return str(int(val))
+        return str(int(val)) if isinstance(val, float) else str(val)
+    s = str(val).strip()
+    if re.fullmatch(r'\d+\.0+', s):
+        s = s.split('.')[0]
+    return s
+
+
+def _payroll_billing_employee_by_no() -> dict[str, Employee]:
+    """Map normalized employee number to active plantilla employees."""
+    out: dict[str, Employee] = {}
+    rows = (Employee.query
+            .options(db.joinedload(Employee.department))
+            .filter_by(status='active')
+            .all())
+    for emp in rows:
+        if _is_jo_cos_employee(emp):
+            continue
+        key = _normalize_employee_no(emp.employee_id)
+        if key:
+            out[key] = emp
+    return out
+
+
+def _payroll_billing_col_index(col_index: dict[str, int], *aliases: str) -> int | None:
+    norm_map = {
+        re.sub(r'[^A-Z0-9]', '', k.upper()): idx
+        for k, idx in col_index.items()
+    }
+    for alias in aliases:
+        key = re.sub(r'[^A-Z0-9]', '', alias.upper())
+        if key in norm_map:
+            return norm_map[key]
+    return None
+
+
+def _lbp_billing_employee_by_no() -> dict[str, Employee]:
+    return _payroll_billing_employee_by_no()
+
+
+def _lbp_billing_col_index(col_index: dict[str, int], *aliases: str) -> int | None:
+    return _payroll_billing_col_index(col_index, *aliases)
+
+
+def _lbp_billing_sheet_name(sheet_names: list[str]) -> str | None:
+    for name in sheet_names:
+        if name.strip().lower() == 'lbp billing':
+            return name
+    return None
+
+
+def _parse_lbp_billing_xls(file_bytes: bytes) -> dict:
+    import pandas as pd
+
+    xl = pd.ExcelFile(io.BytesIO(file_bytes))
+    sheet_name = _lbp_billing_sheet_name(list(xl.sheet_names))
+    if not sheet_name:
+        raise ValueError('Could not find sheet "lbp billing" in the uploaded file.')
+
+    df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name, header=None)
+    header_row = None
+    col_index: dict[str, int] = {}
+    for i in range(min(25, len(df))):
+        row_vals = [str(x).strip() for x in df.iloc[i].tolist()]
+        upper_vals = [v.upper() for v in row_vals]
+        has_emp = any(v in ('EMPLOYEE NO.', 'EMPLOYEE NO') for v in upper_vals)
+        has_percov = any(v == 'PERCOV' for v in upper_vals)
+        if has_emp and has_percov:
+            header_row = i
+            for j, val in enumerate(row_vals):
+                key = str(val).strip().upper()
+                if key:
+                    col_index[key] = j
+            break
+    if header_row is None:
+        raise ValueError('Could not find header row (Employee No., PERCOV) in the LBP billing sheet.')
+
+    emp_no_idx = _lbp_billing_col_index(col_index, 'Employee No.', 'Employee No')
+    percov_idx = _lbp_billing_col_index(col_index, 'PERCOV')
+    q1_idx = _lbp_billing_col_index(col_index, 'Q1')
+    q2_idx = _lbp_billing_col_index(col_index, 'Q2')
+    total_idx = _lbp_billing_col_index(col_index, 'Total Payable')
+    if emp_no_idx is None or percov_idx is None:
+        raise ValueError('Employee No. and PERCOV columns are required in the LBP billing sheet.')
+    if q1_idx is None or q2_idx is None or total_idx is None:
+        raise ValueError('Q1, Q2, and Total Payable columns are required in the LBP billing sheet.')
+
+    year, month = date.today().year, date.today().month
+    emp_by_no = _lbp_billing_employee_by_no()
+    parsed_rows = []
+    unmatched = 0
+    period_set = False
+
+    for i in range(header_row + 1, len(df)):
+        emp_no_raw = df.iloc[i, emp_no_idx]
+        if pd.isna(emp_no_raw) or str(emp_no_raw).strip() == '':
+            continue
+        emp_no = _normalize_employee_no(emp_no_raw)
+        percov_raw = df.iloc[i, percov_idx]
+        percov = re.sub(r'\D', '', str(percov_raw or '').strip())
+        if not period_set:
+            py, pm = _parse_hdmf_percov(percov_raw)
+            if py and pm:
+                year, month = py, pm
+                period_set = True
+
+        def _cell_amount(idx: int) -> Decimal:
+            cell = df.iloc[i, idx]
+            if pd.isna(cell):
+                return Decimal('0.00')
+            try:
+                return _money_decimal(cell)
+            except Exception:
+                return Decimal('0.00')
+
+        q1_amt = _cell_amount(q1_idx)
+        q2_amt = _cell_amount(q2_idx)
+        total_amt = _cell_amount(total_idx)
+        emp = emp_by_no.get(emp_no)
+        row = {
+            'employee_no': emp_no,
+            'percov': percov or None,
+            'employee_pk': emp.id if emp else None,
+            'employee_id': emp.employee_id if emp else '',
+            'employee_name': emp.directory_name if emp else '',
+            'department_name': (emp.department.name if emp and emp.department else ''),
+            'matched': emp is not None,
+            'q1_amount': str(q1_amt),
+            'q2_amount': str(q2_amt),
+            'total_payable': str(total_amt),
+            'q1_display': _money_str_or_blank(q1_amt),
+            'q2_display': _money_str_or_blank(q2_amt),
+            'total_display': _money_str_or_blank(total_amt),
+        }
+        if not emp:
+            unmatched += 1
+        parsed_rows.append(row)
+
+    if not parsed_rows:
+        raise ValueError('No data rows found in the LBP billing sheet.')
+
+    parsed_rows.sort(key=lambda r: (r.get('employee_name') or 'zzz', r.get('employee_no') or ''))
+    return {
+        'year': year,
+        'month': month,
+        'rows': parsed_rows,
+        'matched_count': sum(1 for r in parsed_rows if r.get('matched')),
+        'unmatched_count': unmatched,
+        'total_count': len(parsed_rows),
+    }
+
+
+def _lbp_billing_details(rec: LbpBillingRecord) -> list[dict]:
+    return [
+        {
+            'label': 'Q1',
+            'amount': str(_money_decimal(rec.q1_amount)),
+            'amount_display': _money_str(rec.q1_amount),
+        },
+        {
+            'label': 'Q2',
+            'amount': str(_money_decimal(rec.q2_amount)),
+            'amount_display': _money_str(rec.q2_amount),
+        },
+        {
+            'label': 'Total Payable',
+            'amount': str(_money_decimal(rec.total_payable)),
+            'amount_display': _money_str(rec.total_payable),
+        },
+    ]
+
+
+def _lbp_billing_load_rows(year: int, month: int, department_id: int | None) -> list[dict]:
+    q = (LbpBillingRecord.query
+         .join(Employee, Employee.id == LbpBillingRecord.employee_id)
+         .options(db.joinedload(LbpBillingRecord.employee).joinedload(Employee.department))
+         .filter(LbpBillingRecord.year == year, LbpBillingRecord.month == month))
+    if department_id:
+        q = q.filter(Employee.department_id == department_id)
+    records = q.order_by(Employee.last_name.asc(), Employee.first_name.asc()).all()
+
+    all_deds = LbpBillingDeduction.query.filter_by(year=year, month=month).all()
+    ded_by_emp = {d.employee_id: d for d in all_deds}
+
+    rows = []
+    for rec in records:
+        emp = rec.employee
+        if not emp or _is_jo_cos_employee(emp):
+            continue
+        total_amt = _money_decimal(rec.total_payable)
+        if total_amt <= 0:
+            continue
+
+        ded = ded_by_emp.get(emp.id)
+        if ded:
+            month_amt = _money_decimal(ded.month_amount)
+            q1_amt = _money_decimal(ded.q1_amount)
+            q2_amt = _money_decimal(ded.q2_amount)
+            q1_on = bool(ded.q1_enabled)
+            q2_on = bool(ded.q2_enabled)
+        else:
+            month_amt = total_amt
+            q1_amt = _money_decimal(rec.q1_amount)
+            q2_amt = _money_decimal(rec.q2_amount)
+            q1_on = q2_on = True
+
+        billing_details = _lbp_billing_details(rec)
+        rows.append({
+            'employee_pk': emp.id,
+            'employee_id': emp.employee_id,
+            'employee_name': emp.directory_name,
+            'department_name': (emp.department.name if emp.department else ''),
+            'billing_label': LBP_BILLING_LABEL,
+            'billing_details': billing_details,
+            'percov': rec.percov or '',
+            'month_amount': _money_str(month_amt),
+            'month_amount_raw': str(month_amt),
+            'q1_amount': _money_str(q1_amt),
+            'q1_amount_raw': str(q1_amt),
+            'q2_amount': _money_str(q2_amt),
+            'q2_amount_raw': str(q2_amt),
+            'q1_enabled': q1_on,
+            'q2_enabled': q2_on,
+            'search_text': f"{emp.employee_id} {emp.last_name} {emp.first_name} {LBP_BILLING_LABEL}".lower(),
+        })
+    return rows
+
+
+JOFEMCO_BILLING_LABEL = 'JOFEMCO'
+
+JOFEMCO_DETAIL_FIELDS = (
+    ('loan_q1', 'LOAN Q1'),
+    ('loan_q2', 'LOAN Q2'),
+    ('canteen_q1', 'CANTEEN Q1'),
+    ('canteen_q2', 'CANTEEN Q2'),
+)
+
+
+def _jofemco_billing_types_label(rec: JofemcoBillingRecord) -> str:
+    labels: list[str] = []
+    if _money_decimal(rec.loan_q1) + _money_decimal(rec.loan_q2) > 0:
+        labels.append('LOAN')
+    if _money_decimal(rec.canteen_q1) + _money_decimal(rec.canteen_q2) > 0:
+        labels.append('CANTEEN')
+    return ', '.join(labels) if labels else JOFEMCO_BILLING_LABEL
+
+
+def _jofemco_quincena_totals(rec: JofemcoBillingRecord) -> tuple[Decimal, Decimal, Decimal]:
+    loan_q1 = _money_decimal(rec.loan_q1)
+    loan_q2 = _money_decimal(rec.loan_q2)
+    canteen_q1 = _money_decimal(rec.canteen_q1)
+    canteen_q2 = _money_decimal(rec.canteen_q2)
+    q1 = (loan_q1 + canteen_q1).quantize(Decimal('0.01'))
+    q2 = (loan_q2 + canteen_q2).quantize(Decimal('0.01'))
+    total = (q1 + q2).quantize(Decimal('0.01'))
+    return q1, q2, total
+
+
+def _jofemco_find_header(df) -> tuple[int, dict[str, int]] | None:
+    for i in range(min(30, len(df))):
+        row_vals = [str(x).strip() for x in df.iloc[i].tolist()]
+        upper_vals = [v.upper() for v in row_vals]
+        has_emp = any(v in ('EMPLOYEE NO.', 'EMPLOYEE NO', 'EMPLOYEE ID') for v in upper_vals)
+        has_percov = any(v == 'PERCOV' for v in upper_vals)
+        has_loan_q1 = any(v == 'LOAN Q1' for v in upper_vals)
+        if has_emp and has_percov and has_loan_q1:
+            col_index: dict[str, int] = {}
+            for j, val in enumerate(row_vals):
+                key = str(val).strip().upper()
+                if key:
+                    col_index[key] = j
+            return i, col_index
+    return None
+
+
+def _parse_jofemco_billing_xls(file_bytes: bytes) -> dict:
+    import pandas as pd
+
+    xl = pd.ExcelFile(io.BytesIO(file_bytes))
+    sheet_name = None
+    df = None
+    header_row = None
+    col_index: dict[str, int] = {}
+    for candidate in xl.sheet_names:
+        candidate_df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=candidate, header=None)
+        found = _jofemco_find_header(candidate_df)
+        if found:
+            sheet_name = candidate
+            df = candidate_df
+            header_row, col_index = found
+            break
+    if sheet_name is None or df is None or header_row is None:
+        raise ValueError(
+            'Could not find header row (Employee No./ID, PERCOV, LOAN Q1) in the JOFEMCO file.'
+        )
+
+    emp_no_idx = _payroll_billing_col_index(
+        col_index, 'Employee No.', 'Employee No', 'Employee ID',
+    )
+    percov_idx = _payroll_billing_col_index(col_index, 'PERCOV')
+    loan_q1_idx = _payroll_billing_col_index(col_index, 'LOAN Q1')
+    loan_q2_idx = _payroll_billing_col_index(col_index, 'LOAN Q2')
+    canteen_q1_idx = _payroll_billing_col_index(col_index, 'CANTEEN Q1')
+    canteen_q2_idx = _payroll_billing_col_index(col_index, 'CANTEEN Q2')
+    if emp_no_idx is None or percov_idx is None:
+        raise ValueError('Employee No./ID and PERCOV columns are required in the JOFEMCO file.')
+    if None in (loan_q1_idx, loan_q2_idx, canteen_q1_idx, canteen_q2_idx):
+        raise ValueError('LOAN Q1, LOAN Q2, CANTEEN Q1, and CANTEEN Q2 columns are required.')
+
+    year, month = date.today().year, date.today().month
+    emp_by_no = _payroll_billing_employee_by_no()
+    parsed_rows = []
+    unmatched = 0
+    period_set = False
+
+    for i in range(header_row + 1, len(df)):
+        emp_no_raw = df.iloc[i, emp_no_idx]
+        if pd.isna(emp_no_raw) or str(emp_no_raw).strip() == '':
+            continue
+        emp_no = _normalize_employee_no(emp_no_raw)
+        percov_raw = df.iloc[i, percov_idx]
+        percov = re.sub(r'\D', '', str(percov_raw or '').strip())
+        if not period_set:
+            py, pm = _parse_hdmf_percov(percov_raw)
+            if py and pm:
+                year, month = py, pm
+                period_set = True
+
+        def _cell_amount(idx: int) -> Decimal:
+            cell = df.iloc[i, idx]
+            if pd.isna(cell):
+                return Decimal('0.00')
+            try:
+                return _money_decimal(cell)
+            except Exception:
+                return Decimal('0.00')
+
+        loan_q1 = _cell_amount(loan_q1_idx)
+        loan_q2 = _cell_amount(loan_q2_idx)
+        canteen_q1 = _cell_amount(canteen_q1_idx)
+        canteen_q2 = _cell_amount(canteen_q2_idx)
+        q1_amt = (loan_q1 + canteen_q1).quantize(Decimal('0.01'))
+        q2_amt = (loan_q2 + canteen_q2).quantize(Decimal('0.01'))
+        total_amt = (q1_amt + q2_amt).quantize(Decimal('0.01'))
+        if total_amt <= 0:
+            continue
+
+        emp = emp_by_no.get(emp_no)
+        row = {
+            'employee_no': emp_no,
+            'percov': percov or None,
+            'employee_pk': emp.id if emp else None,
+            'employee_id': emp.employee_id if emp else '',
+            'employee_name': emp.directory_name if emp else '',
+            'department_name': (emp.department.name if emp and emp.department else ''),
+            'matched': emp is not None,
+            'loan_q1': str(loan_q1),
+            'loan_q2': str(loan_q2),
+            'canteen_q1': str(canteen_q1),
+            'canteen_q2': str(canteen_q2),
+            'q1_amount': str(q1_amt),
+            'q2_amount': str(q2_amt),
+            'total_payable': str(total_amt),
+            'loan_q1_display': _money_str_or_blank(loan_q1),
+            'loan_q2_display': _money_str_or_blank(loan_q2),
+            'canteen_q1_display': _money_str_or_blank(canteen_q1),
+            'canteen_q2_display': _money_str_or_blank(canteen_q2),
+            'total_display': _money_str_or_blank(total_amt),
+        }
+        if not emp:
+            unmatched += 1
+        parsed_rows.append(row)
+
+    if not parsed_rows:
+        raise ValueError('No data rows found in the JOFEMCO file.')
+
+    parsed_rows.sort(key=lambda r: (r.get('employee_name') or 'zzz', r.get('employee_no') or ''))
+    return {
+        'year': year,
+        'month': month,
+        'sheet_name': sheet_name,
+        'rows': parsed_rows,
+        'matched_count': sum(1 for r in parsed_rows if r.get('matched')),
+        'unmatched_count': unmatched,
+        'total_count': len(parsed_rows),
+    }
+
+
+def _jofemco_billing_details(rec: JofemcoBillingRecord) -> list[dict]:
+    details = []
+    for field, label in JOFEMCO_DETAIL_FIELDS:
+        amt = _money_decimal(getattr(rec, field, 0))
+        if amt > 0:
+            details.append({
+                'label': label,
+                'amount': str(amt),
+                'amount_display': _money_str(amt),
+            })
+    total = _money_decimal(rec.total_payable)
+    details.append({
+        'label': 'Total Payable',
+        'amount': str(total),
+        'amount_display': _money_str(total),
+    })
+    return details
+
+
+def _jofemco_billing_load_rows(year: int, month: int, department_id: int | None) -> list[dict]:
+    q = (JofemcoBillingRecord.query
+         .join(Employee, Employee.id == JofemcoBillingRecord.employee_id)
+         .options(db.joinedload(JofemcoBillingRecord.employee).joinedload(Employee.department))
+         .filter(JofemcoBillingRecord.year == year, JofemcoBillingRecord.month == month))
+    if department_id:
+        q = q.filter(Employee.department_id == department_id)
+    records = q.order_by(Employee.last_name.asc(), Employee.first_name.asc()).all()
+
+    all_deds = JofemcoBillingDeduction.query.filter_by(year=year, month=month).all()
+    ded_by_emp = {d.employee_id: d for d in all_deds}
+
+    rows = []
+    for rec in records:
+        emp = rec.employee
+        if not emp or _is_jo_cos_employee(emp):
+            continue
+        upload_q1, upload_q2, total_amt = _jofemco_quincena_totals(rec)
+        if total_amt <= 0:
+            continue
+
+        ded = ded_by_emp.get(emp.id)
+        if ded:
+            month_amt = _money_decimal(ded.month_amount)
+            q1_amt = _money_decimal(ded.q1_amount)
+            q2_amt = _money_decimal(ded.q2_amount)
+            q1_on = bool(ded.q1_enabled)
+            q2_on = bool(ded.q2_enabled)
+        else:
+            month_amt = total_amt
+            q1_amt = upload_q1
+            q2_amt = upload_q2
+            q1_on = q2_on = True
+
+        billing_label = _jofemco_billing_types_label(rec)
+        rows.append({
+            'employee_pk': emp.id,
+            'employee_id': emp.employee_id,
+            'employee_name': emp.directory_name,
+            'department_name': (emp.department.name if emp.department else ''),
+            'billing_label': billing_label,
+            'billing_details': _jofemco_billing_details(rec),
+            'percov': rec.percov or '',
+            'month_amount': _money_str(month_amt),
+            'month_amount_raw': str(month_amt),
+            'q1_amount': _money_str(q1_amt),
+            'q1_amount_raw': str(q1_amt),
+            'q2_amount': _money_str(q2_amt),
+            'q2_amount_raw': str(q2_amt),
+            'q1_enabled': q1_on,
+            'q2_enabled': q2_on,
+            'search_text': f"{emp.employee_id} {emp.last_name} {emp.first_name} {billing_label}".lower(),
+        })
+    return rows
+
+
+WITHHOLDING_TAX_LABEL = 'Withholding Tax'
+
+
+def _withholding_tax_find_header(df) -> tuple[int, dict[str, int]] | None:
+    for i in range(min(35, len(df))):
+        row_vals = [str(x).strip() for x in df.iloc[i].tolist()]
+        upper_vals = [v.upper() for v in row_vals]
+        has_emp = any(v in ('EMPLOYEE NO.', 'EMPLOYEE NO', 'EMPLOYEE ID') for v in upper_vals)
+        has_percov = any(v == 'PERCOV' for v in upper_vals)
+        has_q1 = any(v in ('Q1 ONLY', 'Q1ONLY') for v in upper_vals)
+        if has_emp and has_percov and has_q1:
+            col_index: dict[str, int] = {}
+            for j, val in enumerate(row_vals):
+                key = str(val).strip().upper()
+                if key:
+                    col_index[key] = j
+            return i, col_index
+    return None
+
+
+def _parse_withholding_tax_xlsx(file_bytes: bytes) -> dict:
+    import pandas as pd
+
+    df = pd.read_excel(io.BytesIO(file_bytes), sheet_name='TAX_SCHEDULE', header=None)
+    found = _withholding_tax_find_header(df)
+    if not found:
+        raise ValueError('Could not find header row (Employee No., PERCOV, Q1 ONLY) in TAX_SCHEDULE sheet.')
+    header_row, col_index = found
+
+    emp_no_idx = _payroll_billing_col_index(col_index, 'Employee No.', 'Employee No', 'Employee ID')
+    percov_idx = _payroll_billing_col_index(col_index, 'PERCOV')
+    q1_idx = _payroll_billing_col_index(col_index, 'Q1 ONLY', 'Q1ONLY')
+    if emp_no_idx is None or percov_idx is None or q1_idx is None:
+        raise ValueError('Employee No., PERCOV, and Q1 ONLY columns are required in TAX_SCHEDULE.')
+
+    year, month = date.today().year, date.today().month
+    emp_by_no = _payroll_billing_employee_by_no()
+    parsed_rows = []
+    unmatched = 0
+    period_set = False
+
+    for i in range(header_row + 1, len(df)):
+        emp_no_raw = df.iloc[i, emp_no_idx]
+        if pd.isna(emp_no_raw) or str(emp_no_raw).strip() == '':
+            continue
+        emp_no = _normalize_employee_no(emp_no_raw)
+        percov_raw = df.iloc[i, percov_idx]
+        percov = re.sub(r'\D', '', str(percov_raw or '').strip())
+        if not period_set:
+            py, pm = _parse_hdmf_percov(percov_raw)
+            if py and pm:
+                year, month = py, pm
+                period_set = True
+
+        cell = df.iloc[i, q1_idx]
+        if pd.isna(cell):
+            q1_amt = Decimal('0.00')
+        else:
+            try:
+                q1_amt = _money_decimal(cell)
+            except Exception:
+                q1_amt = Decimal('0.00')
+        if q1_amt <= 0:
+            continue
+
+        emp = emp_by_no.get(emp_no)
+        row = {
+            'employee_no': emp_no,
+            'percov': percov or None,
+            'employee_pk': emp.id if emp else None,
+            'employee_id': emp.employee_id if emp else '',
+            'employee_name': emp.directory_name if emp else '',
+            'department_name': (emp.department.name if emp and emp.department else ''),
+            'matched': emp is not None,
+            'q1_amount': str(q1_amt),
+            'q1_display': _money_str_or_blank(q1_amt),
+        }
+        if not emp:
+            unmatched += 1
+        parsed_rows.append(row)
+
+    if not parsed_rows:
+        raise ValueError('No data rows found in the TAX_SCHEDULE sheet.')
+
+    parsed_rows.sort(key=lambda r: (r.get('employee_name') or 'zzz', r.get('employee_no') or ''))
+    return {
+        'year': year,
+        'month': month,
+        'rows': parsed_rows,
+        'matched_count': sum(1 for r in parsed_rows if r.get('matched')),
+        'unmatched_count': unmatched,
+        'total_count': len(parsed_rows),
+    }
+
+
+def _withholding_tax_load_rows(year: int, month: int, department_id: int | None) -> list[dict]:
+    q = (WithholdingTaxRecord.query
+         .join(Employee, Employee.id == WithholdingTaxRecord.employee_id)
+         .options(db.joinedload(WithholdingTaxRecord.employee).joinedload(Employee.department))
+         .filter(WithholdingTaxRecord.year == year, WithholdingTaxRecord.month == month))
+    if department_id:
+        q = q.filter(Employee.department_id == department_id)
+    records = q.order_by(Employee.last_name.asc(), Employee.first_name.asc()).all()
+
+    all_deds = WithholdingTaxDeduction.query.filter_by(year=year, month=month).all()
+    ded_by_emp = {d.employee_id: d for d in all_deds}
+
+    rows = []
+    for rec in records:
+        emp = rec.employee
+        if not emp or _is_jo_cos_employee(emp):
+            continue
+        upload_q1 = _money_decimal(rec.q1_amount)
+        if upload_q1 <= 0:
+            continue
+
+        ded = ded_by_emp.get(emp.id)
+        if ded:
+            q1_amt = _money_decimal(ded.q1_amount)
+            month_amt = _money_decimal(ded.month_amount)
+        else:
+            q1_amt = upload_q1
+            month_amt = upload_q1
+
+        rows.append({
+            'employee_pk': emp.id,
+            'employee_id': emp.employee_id,
+            'employee_name': emp.directory_name,
+            'department_name': (emp.department.name if emp.department else ''),
+            'label': WITHHOLDING_TAX_LABEL,
+            'percov': rec.percov or '',
+            'month_amount': _money_str(month_amt),
+            'month_amount_raw': str(month_amt),
+            'q1_amount': _money_str(q1_amt),
+            'q1_amount_raw': str(q1_amt),
+            'search_text': f"{emp.employee_id} {emp.last_name} {emp.first_name} {WITHHOLDING_TAX_LABEL}".lower(),
+        })
+    return rows
+
+
 def _gsis_contribution_row_dict(emp: Employee) -> dict:
     """Build display + raw payload for one plantilla employee GSIS row."""
     basic = _current_salary_amount(emp) or 0.0
@@ -4059,7 +7344,7 @@ def _gsis_contribution_row_dict(emp: Employee) -> dict:
     return {
         'employee_pk': emp.id,
         'employee_id': emp.employee_id,
-        'employee_name': f"{emp.last_name}, {emp.first_name}",
+        'employee_name': emp.directory_name,
         'department_name': (emp.department.name if emp.department else ''),
         'basic_salary': _money_str(amounts['basic_salary']),
         'ps': _money_str(amounts['ps_amount']),
@@ -4208,7 +7493,7 @@ def _parse_hdmf_contribution_xlsx(file_bytes: bytes, employment_scope: str) -> d
             'ee_share_display': _money_str_or_blank(ee_share),
             'employee_pk': emp.id if emp else None,
             'employee_id': emp.employee_id if emp else '',
-            'employee_name': f"{emp.last_name}, {emp.first_name}" if emp else '',
+            'employee_name': emp.directory_name if emp else '',
             'department_name': (emp.department.name if emp and emp.department else ''),
             'matched': emp is not None,
         }
@@ -4309,7 +7594,7 @@ def _parse_hdmf_loan_xlsx(file_bytes: bytes, employment_scope: str) -> dict:
             'mid_no': mid,
             'employee_pk': emp.id if emp else None,
             'employee_id': emp.employee_id if emp else '',
-            'employee_name': f"{emp.last_name}, {emp.first_name}" if emp else '',
+            'employee_name': emp.directory_name if emp else '',
             'department_name': (emp.department.name if emp and emp.department else ''),
             'matched': emp is not None,
             **{k: str(v) for k, v in amounts.items()},
@@ -4542,7 +7827,7 @@ def _hdmf_contribution_load_rows(
             rows.append({
                 'employee_pk': emp.id,
                 'employee_id': emp.employee_id,
-                'employee_name': f"{emp.last_name}, {emp.first_name}",
+                'employee_name': emp.directory_name,
                 'department_name': (emp.department.name if emp.department else ''),
                 'membership_program': program,
                 'program_label': program_label,
@@ -4573,7 +7858,7 @@ def _hdmf_contribution_load_rows(
             rows.append({
                 'employee_pk': emp.id,
                 'employee_id': emp.employee_id,
-                'employee_name': f"{emp.last_name}, {emp.first_name}",
+                'employee_name': emp.directory_name,
                 'department_name': (emp.department.name if emp.department else ''),
                 'membership_program': program,
                 'program_label': program_label,
@@ -4615,7 +7900,7 @@ def _hdmf_contribution_load_rows(
         rows.append({
             'employee_pk': emp.id,
             'employee_id': emp.employee_id,
-            'employee_name': f"{emp.last_name}, {emp.first_name}",
+            'employee_name': emp.directory_name,
             'department_name': (emp.department.name if emp.department else ''),
             'membership_program': program,
             'program_label': program_opts[0]['label'] if len(program_opts) == 1 else program,
@@ -4723,7 +8008,7 @@ def _hdmf_loan_load_rows(
         rows.append({
             'employee_pk': emp.id,
             'employee_id': emp.employee_id,
-            'employee_name': f"{emp.last_name}, {emp.first_name}",
+            'employee_name': emp.directory_name,
             'department_name': (emp.department.name if emp.department else ''),
             'loan_type': loan_types_label,
             'loan_types_label': loan_types_label,
@@ -4740,6 +8025,39 @@ def _hdmf_loan_load_rows(
             'search_text': f"{emp.employee_id} {emp.last_name} {emp.first_name} {loan_types_label}".lower(),
         })
     return rows
+
+
+def _hdmf_contribution_deduction_for_quincena(
+    ded: HdmfContributionDeduction | None,
+    quincena: str,
+) -> Decimal:
+    if not ded or str(quincena) != str(ded.deductible_quincena):
+        return Decimal('0.00')
+    return _money_decimal(ded.month_amount)
+
+
+def _hdmf_loan_deduction_for_quincena(
+    loan_deds: list[HdmfLoanDeduction],
+    quincena: str,
+) -> Decimal:
+    total = Decimal('0.00')
+    for ded in loan_deds:
+        if quincena == '1' and ded.q1_enabled:
+            total += _money_decimal(ded.q1_amount)
+        elif quincena == '2' and ded.q2_enabled:
+            total += _money_decimal(ded.q2_amount)
+    return total.quantize(Decimal('0.01'))
+
+
+def _jo_cos_hdmf_payroll_deduction(
+    employee_id: int,
+    quincena: str,
+    contrib_by_emp: dict[int, HdmfContributionDeduction],
+    loans_by_emp: dict[int, list[HdmfLoanDeduction]],
+) -> Decimal:
+    contrib = _hdmf_contribution_deduction_for_quincena(contrib_by_emp.get(employee_id), quincena)
+    loans = _hdmf_loan_deduction_for_quincena(loans_by_emp.get(employee_id, []), quincena)
+    return (contrib + loans).quantize(Decimal('0.01'))
 
 
 def _jo_cos_employee_designation(emp: Employee) -> str:
@@ -4794,6 +8112,10 @@ def _jo_cos_ot_mins_for_quincena(emp_id: int, year: int, month: int, quincena: s
 
 
 def _jo_cos_payroll_parse_filters(args) -> dict:
+    return _payroll_quincena_parse_filters(args)
+
+
+def _payroll_quincena_parse_filters(args) -> dict:
     today = date.today()
     try:
         year = int((args.get('year') or str(today.year)).strip())
@@ -4846,6 +8168,25 @@ def _jo_cos_payroll_rows(filters: dict) -> tuple[list[dict], dict]:
 
     year, month, quincena = filters['year'], filters['month'], filters['quincena']
     start_d, end_d = _quincena_date_range(year, month, quincena)
+    emp_ids = [e.id for e in employees]
+    contrib_by_emp: dict[int, HdmfContributionDeduction] = {}
+    loans_by_emp: dict[int, list[HdmfLoanDeduction]] = {}
+    if emp_ids:
+        for d in HdmfContributionDeduction.query.filter(
+            HdmfContributionDeduction.employee_id.in_(emp_ids),
+            HdmfContributionDeduction.year == year,
+            HdmfContributionDeduction.month == month,
+            HdmfContributionDeduction.employment_scope == 'jo_cos',
+        ).all():
+            contrib_by_emp[d.employee_id] = d
+        for d in HdmfLoanDeduction.query.filter(
+            HdmfLoanDeduction.employee_id.in_(emp_ids),
+            HdmfLoanDeduction.year == year,
+            HdmfLoanDeduction.month == month,
+            HdmfLoanDeduction.employment_scope == 'jo_cos',
+        ).all():
+            loans_by_emp.setdefault(d.employee_id, []).append(d)
+
     rows = []
     totals = {
         'gross_salary': Decimal('0'),
@@ -4868,14 +8209,14 @@ def _jo_cos_payroll_rows(filters: dict) -> tuple[list[dict], dict]:
         late_ut_mins = wt['late_mins'] + wt['undertime_mins']
         late_hours = _mins_to_hours_decimal(late_ut_mins)
         late_deduct = ((Decimal(str(late_ut_mins)) / day_mins) * rate_val).quantize(Decimal('0.01'))
-        pagibig = Decimal('0.00')
+        pagibig = _jo_cos_hdmf_payroll_deduction(emp.id, quincena, contrib_by_emp, loans_by_emp)
         net = (gross - late_deduct - pagibig).quantize(Decimal('0.01'))
 
-        name = f'{emp.last_name}, {emp.first_name}'
-        if emp.middle_name:
-            name = f'{emp.last_name}, {emp.first_name} {emp.middle_name[0]}.'
+        name = emp.directory_name_mi
 
         rows.append({
+            'employee_pk': emp.id,
+            'employee_no': emp.employee_id or '',
             'employee_name': name,
             'designation': _jo_cos_employee_designation(emp) or '—',
             'days_worked': days_worked,
@@ -4891,7 +8232,7 @@ def _jo_cos_payroll_rows(filters: dict) -> tuple[list[dict], dict]:
             'late_deduction': late_deduct,
             'late_deduction_display': _money_str(late_deduct) if late_deduct else '',
             'pagibig': pagibig,
-            'pagibig_display': '',
+            'pagibig_display': _money_str(pagibig) if pagibig else '',
             'net_amount': net,
             'net_amount_display': _money_str(net),
             'search_text': f'{name} {_jo_cos_employee_designation(emp)}'.lower(),
@@ -4982,9 +8323,10 @@ def _jo_cos_payroll_pdf_bytes(
     c.line(36, y + 8, width - 36, y + 8)
     c.setFont('Helvetica-Bold', 7)
     c.drawString(36, y - 2, 'TOTAL')
-    c.drawRightString(404, y - 2, totals.get('gross_salary', ''))
-    c.drawRightString(454, y - 2, totals.get('late', ''))
-    c.drawRightString(504, y - 2, totals.get('net', ''))
+    c.drawRightString(360, y - 2, totals.get('gross_salary', ''))
+    c.drawRightString(394, y - 2, totals.get('late', ''))
+    c.drawRightString(424, y - 2, totals.get('pagibig', ''))
+    c.drawRightString(460, y - 2, totals.get('net', ''))
 
     sig_y = 56
     c.setFont('Helvetica', 7)
@@ -5000,6 +8342,1402 @@ def _jo_cos_payroll_pdf_bytes(
     c.line(width - 256, sig_y + 12, width - 36, sig_y + 12)
     c.drawRightString(width - 36, sig_y, 'Name & Signature of Disbursing Officer')
 
+    c.showPage()
+    c.save()
+    buf.seek(0)
+    return buf
+
+
+def _jo_cos_payslip_period_label(year: int, month: int, quincena: str) -> str:
+    month_name = date(year, month, 1).strftime('%B %Y')
+    q_label = '1st' if quincena == '1' else '2nd'
+    return f'{month_name} — {q_label} quincena'
+
+
+def _jo_cos_payslip_view_dict(slip: JoCosPayslip) -> dict:
+    period_label = _jo_cos_payslip_period_label(slip.year, slip.month, slip.quincena_half)
+    days = _money_decimal(slip.days_worked)
+    rate = _money_decimal(slip.rate_per_day)
+    gross = _money_decimal(slip.gross_salary)
+    late_h = _money_decimal(slip.late_hours)
+    late_d = _money_decimal(slip.late_deduction)
+    hdmf = _money_decimal(slip.hdmf_deduction)
+    net = _money_decimal(slip.net_amount)
+    return {
+        'id': slip.id,
+        'year': slip.year,
+        'month': slip.month,
+        'quincena': slip.quincena_half,
+        'department_id': slip.department_id,
+        'employee_name': slip.employee_name,
+        'employee_no': slip.employee_no or '',
+        'designation': slip.designation or '—',
+        'department_name': slip.department_name or '',
+        'period_label': period_label,
+        'days_worked_display': f'{days:.2f}'.rstrip('0').rstrip('.') if days else '0',
+        'rate_per_day_display': _money_str(rate),
+        'gross_salary_display': _money_str(gross),
+        'late_hours_display': f'{late_h:.2f}' if late_h > 0 else '',
+        'late_deduction_display': _money_str(late_d) if late_d else '',
+        'hdmf_display': _money_str(hdmf) if hdmf else '',
+        'net_amount_display': _money_str(net),
+        'generated_at': slip.generated_at,
+    }
+
+
+def _jo_cos_payslip_from_payroll_row(
+    row: dict,
+    filters: dict,
+    department_id: int,
+    department_name: str,
+    generated_by_user_id: int | None,
+) -> JoCosPayslip:
+    return JoCosPayslip(
+        employee_id=row['employee_pk'],
+        department_id=department_id,
+        year=filters['year'],
+        month=filters['month'],
+        quincena_half=filters['quincena'],
+        employee_name=row['employee_name'],
+        employee_no=row.get('employee_no') or '',
+        designation=row.get('designation') or '',
+        department_name=department_name,
+        days_worked=row['days_worked'],
+        rate_per_day=row['rate_per_day'],
+        gross_salary=row['gross_salary'],
+        late_hours=row['late_hours'],
+        late_deduction=row['late_deduction'],
+        hdmf_deduction=row['pagibig'],
+        net_amount=row['net_amount'],
+        generated_by_user_id=generated_by_user_id,
+    )
+
+
+def _jo_cos_payslips_generate(filters: dict, department_name: str, generated_by_user_id: int | None) -> int:
+    rows, _ = _jo_cos_payroll_rows(filters)
+    if not rows:
+        return 0
+    dept_id = int(filters['department_id'])
+    year, month, quincena = filters['year'], filters['month'], filters['quincena']
+    emp_ids = [r['employee_pk'] for r in rows]
+    existing = {
+        p.employee_id: p
+        for p in JoCosPayslip.query.filter(
+            JoCosPayslip.employee_id.in_(emp_ids),
+            JoCosPayslip.year == year,
+            JoCosPayslip.month == month,
+            JoCosPayslip.quincena_half == quincena,
+        ).all()
+    }
+    count = 0
+    notify_rows: list[tuple[int, int]] = []  # (employee_id, payslip_id)
+    for row in rows:
+        slip = existing.get(row['employee_pk'])
+        if slip:
+            slip.department_id = dept_id
+            slip.employee_name = row['employee_name']
+            slip.employee_no = row.get('employee_no') or ''
+            slip.designation = row.get('designation') or ''
+            slip.department_name = department_name
+            slip.days_worked = row['days_worked']
+            slip.rate_per_day = row['rate_per_day']
+            slip.gross_salary = row['gross_salary']
+            slip.late_hours = row['late_hours']
+            slip.late_deduction = row['late_deduction']
+            slip.hdmf_deduction = row['pagibig']
+            slip.net_amount = row['net_amount']
+            slip.generated_at = datetime.utcnow()
+            slip.generated_by_user_id = generated_by_user_id
+            notify_rows.append((slip.employee_id, slip.id))
+        else:
+            new_slip = _jo_cos_payslip_from_payroll_row(
+                row, filters, dept_id, department_name, generated_by_user_id,
+            )
+            db.session.add(new_slip)
+            db.session.flush()  # assign id so we can link notifications
+            notify_rows.append((new_slip.employee_id, new_slip.id))
+        count += 1
+    # Notify employees (best-effort; notification creation shares same transaction)
+    period = _jo_cos_payslip_period_label(filters['year'], filters['month'], filters['quincena'])
+    for emp_id, slip_id in notify_rows:
+        try:
+            emp = Employee.query.get(emp_id)
+            if emp and emp.user_id:
+                _create_hrms_notification(
+                    emp.user_id,
+                    'Payslip available',
+                    f'Your JO/COS payslip is ready for {period}.',
+                    link_url=url_for('routes.payroll_jo_cos_my_payslips', year=filters['year']),
+                    related_type='jo_cos_payslip',
+                    related_id=slip_id,
+                )
+        except Exception:
+            # Do not block payslip generation if notification fails for one row.
+            pass
+    db.session.commit()
+    return count
+
+
+def _can_view_jo_cos_payslip(slip: JoCosPayslip) -> bool:
+    role = (getattr(current_user, 'role', None) or '').strip().lower()
+    if role in ('admin', 'hr'):
+        return True
+    emp = _current_employee_for_user()
+    return emp is not None and emp.id == slip.employee_id
+
+
+def _plantilla_payslip_period_label(year: int, month: int, quincena: str) -> str:
+    month_name = date(year, month, 1).strftime('%B %Y')
+    q_label = '1st' if quincena == '1' else '2nd'
+    return f'{month_name} — {q_label} quincena'
+
+
+def _can_view_plantilla_payslip(slip: PlantillaPayslip) -> bool:
+    role = (getattr(current_user, 'role', None) or '').strip().lower()
+    if role in ('admin', 'hr'):
+        return True
+    emp = _current_employee_for_user()
+    return emp is not None and emp.id == slip.employee_id
+
+
+JO_COS_PAYSLIPS_PER_A4_PAGE = 4
+
+
+def _jo_cos_payslip_cell_bounds(page_w: float, page_h: float, slot: int) -> tuple[float, float, float, float]:
+    """Return (x_left, y_bottom, x_right, y_top) for a 2×2 grid slot (0–3) on A4."""
+    margin = 12
+    gap = 8
+    cell_w = (page_w - 2 * margin - gap) / 2
+    cell_h = (page_h - 2 * margin - gap) / 2
+    col = slot % 2
+    row = slot // 2  # 0 = top row, 1 = bottom row
+    x_left = margin + col * (cell_w + gap)
+    x_right = x_left + cell_w
+    if row == 0:
+        y_bottom = margin + cell_h + gap
+        y_top = page_h - margin
+    else:
+        y_bottom = margin
+        y_top = margin + cell_h
+    return x_left, y_bottom, x_right, y_top
+
+
+def _jo_cos_draw_payslip_on_canvas(
+    c,
+    data: dict,
+    x_left: float,
+    y_bottom: float,
+    x_right: float,
+    y_top: float,
+) -> None:
+    pad = 5
+    inner_l = x_left + pad
+    inner_r = x_right - pad
+    cx = (x_left + x_right) / 2
+    box_w = x_right - x_left
+    box_h = y_top - y_bottom
+
+    c.setLineWidth(0.4)
+    c.rect(x_left, y_bottom, box_w, box_h)
+
+    def _clip(text: str, max_len: int) -> str:
+        text = str(text or '')
+        return text if len(text) <= max_len else text[: max_len - 1] + '…'
+
+    y = y_top - 11
+    c.setFont('Helvetica-Bold', 7)
+    c.drawCentredString(cx, y, 'MUNICIPALITY OF JAGNA')
+    y -= 9
+    c.setFont('Helvetica-Bold', 6.5)
+    c.drawCentredString(cx, y, 'PAYSLIP — DAILY WAGE (JO/COS)')
+    y -= 10
+    c.setFont('Helvetica', 5.5)
+    c.drawString(inner_l, y, f"Name: {_clip(data.get('employee_name', ''), 28)}")
+    c.drawRightString(inner_r, y, f"No.: {_clip(data.get('employee_no', ''), 12)}")
+    y -= 8
+    c.drawString(inner_l, y, f"Desig.: {_clip(data.get('designation', ''), 22)}")
+    y -= 8
+    c.drawString(inner_l, y, f"Dept.: {_clip(data.get('department_name', ''), 24)}")
+    c.drawRightString(inner_r, y, _clip(data.get('period_label', ''), 22))
+    y -= 8
+    c.drawString(inner_l, y, 'Payment: ATM')
+    y -= 9
+    c.line(inner_l, y, inner_r, y)
+    y -= 8
+    c.setFont('Helvetica-Bold', 5.5)
+    c.drawString(inner_l, y, 'Earnings')
+    c.drawRightString(inner_r, y, 'Amount')
+    y -= 7
+    c.setFont('Helvetica', 5.5)
+    earn = (
+        f"Days: {data.get('days_worked_display', '')} · "
+        f"Rate: {data.get('rate_per_day_display', '')}"
+    )
+    c.drawString(inner_l + 4, y, _clip(earn, 38))
+    c.drawRightString(inner_r, y, data.get('gross_salary_display', ''))
+    y -= 8
+    c.setFont('Helvetica-Bold', 5.5)
+    c.drawString(inner_l, y, 'Deductions')
+    y -= 7
+    c.setFont('Helvetica', 5.5)
+    late_h = data.get('late_hours_display') or ''
+    late_label = f"Late{(' (' + late_h + 'h)') if late_h else ''}"
+    c.drawString(inner_l + 4, y, late_label)
+    c.drawRightString(inner_r, y, data.get('late_deduction_display', '') or '—')
+    y -= 7
+    c.drawString(inner_l + 4, y, 'HDMF')
+    c.drawRightString(inner_r, y, data.get('hdmf_display', '') or '—')
+    y -= 8
+    c.line(inner_l, y, inner_r, y)
+    y -= 8
+    c.setFont('Helvetica-Bold', 6.5)
+    c.drawString(inner_l, y, 'NET PAY')
+    c.drawRightString(inner_r, y, data.get('net_amount_display', ''))
+    y -= 10
+    c.setFont('Helvetica', 5)
+    c.drawString(inner_l, y, 'I acknowledge receipt of the net amount above.')
+    sig_w = min(120, (inner_r - inner_l) * 0.55)
+    c.line(inner_l, y - 10, inner_l + sig_w, y - 10)
+    c.drawString(inner_l, y - 17, 'Signature / date')
+
+
+def _jo_cos_payslip_pdf_bytes(slips: list[JoCosPayslip]) -> io.BytesIO:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+
+    buf = io.BytesIO()
+    page_w, page_h = A4
+    c = canvas.Canvas(buf, pagesize=A4)
+    view_rows = [_jo_cos_payslip_view_dict(s) for s in slips]
+    per_page = JO_COS_PAYSLIPS_PER_A4_PAGE
+    for i, data in enumerate(view_rows):
+        if i > 0 and i % per_page == 0:
+            c.showPage()
+        slot = i % per_page
+        x_left, y_bottom, x_right, y_top = _jo_cos_payslip_cell_bounds(page_w, page_h, slot)
+        _jo_cos_draw_payslip_on_canvas(c, data, x_left, y_bottom, x_right, y_top)
+    c.save()
+    buf.seek(0)
+    return buf
+
+
+PLANTILLA_PAYROLL_DEDUCTION_COLUMNS = (
+    ('gsis_mpl', 'MPL'),
+    ('gsis_mpl_lite', 'MPL LITE'),
+    ('gsis_ps', 'PS'),
+    ('gsis_gs', 'GS'),
+    ('gsis_cpl', 'CPL'),
+    ('hdmf', 'HDMF'),
+    ('gsis_emrgyln', 'EMRG LN'),
+    ('gsis_educ', 'EDUC LN'),
+    ('withholding_tax', 'W/TAX'),
+    ('gsis_plreg', 'POLICY'),
+    ('gsis_consoloan', 'CONSO'),
+    ('gsis_gfal', 'GFAL'),
+    ('hdmf_loan', 'HDMF LN'),
+    ('lbp', 'LBP'),
+    ('jofemco', 'JOFEMCO'),
+)
+
+PLANTILLA_PAYROLL_DEDUCTION_SECTIONS = (
+    {
+        'label': 'GSIS',
+        'parts': (
+            {'type': 'column', 'key': 'gsis_ps', 'label': 'PS'},
+            {
+                'type': 'loan_group',
+                'group_label': 'Loans',
+                'columns': (
+                    ('gsis_consoloan', 'Conso'),
+                    ('gsis_emrgyln', 'Emgncy'),
+                    ('gsis_plreg', 'RegPolicy'),
+                    ('gsis_gfal', 'GFAL'),
+                    ('gsis_mpl', 'MPL'),
+                    ('gsis_cpl', 'CPL'),
+                    ('gsis_mpl_lite', 'MPL Lite'),
+                ),
+            },
+        ),
+    },
+    {
+        'label': 'HDMF',
+        'parts': (
+            {'type': 'column', 'key': 'hdmf_ps', 'label': 'PS'},
+            {'type': 'column', 'key': 'hdmf_mp2', 'label': 'MP2'},
+            {
+                'type': 'loan_group',
+                'group_label': 'Loans',
+                'columns': (
+                    ('hdmf_loan_salary', 'Salary'),
+                    ('hdmf_loan_mpl', 'MPL'),
+                    ('hdmf_loan_housing', 'Housing'),
+                    ('hdmf_loan_safe', 'SAFE'),
+                ),
+            },
+        ),
+    },
+    {
+        'label': 'PHIC',
+        'parts': (
+            {'type': 'column', 'key': 'phic_ps', 'label': 'PS'},
+        ),
+    },
+    {
+        'label': 'LBP',
+        'parts': (
+            {'type': 'column', 'key': 'lbp', 'label': 'Loan'},
+        ),
+    },
+    {
+        'label': 'JOFEMCO',
+        'parts': (
+            {'type': 'column', 'key': 'jofemco_loan', 'label': 'Loan'},
+            {'type': 'column', 'key': 'jofemco_canteen', 'label': 'Canteen'},
+        ),
+    },
+    {
+        'label': 'W/Tax',
+        'standalone_header': True,
+        'parts': (
+            {'type': 'column', 'key': 'withholding_tax', 'label': ''},
+        ),
+    },
+    {
+        'label': 'LWOP',
+        'parts': (
+            {'type': 'column', 'key': 'lwop', 'label': 'Deduction'},
+        ),
+    },
+)
+
+PLANTILLA_PAYROLL_GOV_SHARE_SECTIONS = (
+    {
+        'label': 'GSIS',
+        'parts': (
+            {'type': 'column', 'key': 'gov_gsis_gs', 'label': 'GS', 'display_quincena': '2'},
+            {'type': 'column', 'key': 'gov_gsis_ec', 'label': 'EC', 'display_quincena': '1'},
+        ),
+    },
+    {
+        'label': 'HDMF',
+        'parts': (
+            {'type': 'column', 'key': 'gov_hdmf_gs', 'label': 'GS', 'display_quincena_rule': 'hdmf_gs'},
+        ),
+    },
+    {
+        'label': 'PHIC',
+        'parts': (
+            {'type': 'column', 'key': 'gov_phic_gs', 'label': 'GS', 'display_quincena': '2'},
+        ),
+    },
+)
+
+HDMF_GS_Q1_DEPARTMENT_NAMES = frozenset({'SB', 'MHO'})
+
+
+def _plantilla_payroll_gov_share_display_keys() -> list[str]:
+    keys: list[str] = []
+    for section in PLANTILLA_PAYROLL_GOV_SHARE_SECTIONS:
+        for part in section['parts']:
+            if part['type'] == 'column':
+                keys.append(part['key'])
+    return keys
+
+
+def _is_hdmf_gs_q1_department(department_name: str) -> bool:
+    name = (department_name or '').strip().upper()
+    if not name:
+        return False
+    if name in HDMF_GS_Q1_DEPARTMENT_NAMES:
+        return True
+    for token in HDMF_GS_Q1_DEPARTMENT_NAMES:
+        if name.startswith(f'{token} ') or name.endswith(f' {token}') or f' {token} ' in f' {name} ':
+            return True
+    return False
+
+
+def _plantilla_hdmf_gs_display_quincena(department_name: str) -> str:
+    return '1' if _is_hdmf_gs_q1_department(department_name) else '2'
+
+
+def _plantilla_gov_share_part_display_quincena(part: dict, department_name: str) -> str | None:
+    rule = part.get('display_quincena_rule')
+    if rule == 'hdmf_gs':
+        return _plantilla_hdmf_gs_display_quincena(department_name)
+    return part.get('display_quincena')
+
+
+def _plantilla_employee_gov_share_scheduled_for_quincena(
+    quincena: str,
+    key: str,
+    emp_id: int,
+    ded_maps: dict,
+    department_name: str,
+) -> bool:
+    if key == 'gov_gsis_gs':
+        if quincena != '2':
+            return False
+        contrib = _plantilla_contrib_for_quincena(ded_maps['gsis_contrib'].get(emp_id), '2')
+        return contrib is not None and _money_decimal(contrib.gs_amount) > 0
+
+    if key == 'gov_gsis_ec':
+        if quincena != '1':
+            return False
+        loan_rec = ded_maps['gsis_loan_rec'].get(emp_id)
+        return loan_rec is not None and _money_decimal(loan_rec.ec_amount) > 0
+
+    if key == 'gov_hdmf_gs':
+        if quincena != _plantilla_hdmf_gs_display_quincena(department_name):
+            return False
+        contrib = ded_maps['hdmf_contrib'].get(emp_id)
+        return contrib is not None and _money_decimal(contrib.gs_amount) > 0
+
+    if key == 'gov_phic_gs':
+        if quincena != '2':
+            return False
+        phic_by_q = ded_maps['phic'].get(emp_id) or {}
+        phic_row = _plantilla_contrib_for_quincena(phic_by_q, '2')
+        return phic_row is not None and _money_decimal(phic_row.gs_amount) > 0
+
+    return False
+
+
+def _plantilla_gov_share_amounts_for_employee(
+    quincena: str,
+    emp_id: int,
+    ded_maps: dict,
+    department_name: str,
+) -> dict[str, Decimal]:
+    amounts = {key: Decimal('0.00') for key in _plantilla_payroll_gov_share_display_keys()}
+
+    if quincena == '2':
+        gsis_contrib = _plantilla_contrib_for_quincena(ded_maps['gsis_contrib'].get(emp_id), '2')
+        if gsis_contrib is not None:
+            amounts['gov_gsis_gs'] = _money_decimal(gsis_contrib.gs_amount)
+        phic_row = _plantilla_contrib_for_quincena(ded_maps['phic'].get(emp_id), '2')
+        if phic_row is not None:
+            amounts['gov_phic_gs'] = _money_decimal(phic_row.gs_amount)
+
+    if quincena == '1':
+        loan_rec = ded_maps['gsis_loan_rec'].get(emp_id)
+        if loan_rec is not None:
+            amounts['gov_gsis_ec'] = _money_decimal(loan_rec.ec_amount)
+
+    if quincena == _plantilla_hdmf_gs_display_quincena(department_name):
+        hdmf_contrib = ded_maps['hdmf_contrib'].get(emp_id)
+        if hdmf_contrib is not None:
+            amounts['gov_hdmf_gs'] = _money_decimal(hdmf_contrib.gs_amount)
+
+    return amounts
+
+
+def _plantilla_payroll_active_gov_share_keys(
+    quincena: str,
+    emp_ids: list[int],
+    ded_maps: dict,
+    department_name: str,
+) -> list[str]:
+    active: list[str] = []
+    for section in PLANTILLA_PAYROLL_GOV_SHARE_SECTIONS:
+        for part in section['parts']:
+            if part['type'] != 'column':
+                continue
+            display_q = _plantilla_gov_share_part_display_quincena(part, department_name)
+            if display_q != quincena:
+                continue
+            key = part['key']
+            if any(
+                _plantilla_employee_gov_share_scheduled_for_quincena(
+                    quincena, key, emp_id, ded_maps, department_name,
+                )
+                for emp_id in emp_ids
+            ):
+                active.append(key)
+    return active
+
+
+def _plantilla_payroll_gov_share_sections_for_keys(active_keys: set[str]) -> list[dict]:
+    sections: list[dict] = []
+    for section in PLANTILLA_PAYROLL_GOV_SHARE_SECTIONS:
+        parts: list[dict] = []
+        for part in section['parts']:
+            if part['type'] == 'column' and part['key'] in active_keys:
+                parts.append(part)
+        if parts:
+            sections.append({'label': section['label'], 'parts': tuple(parts)})
+    return sections
+
+
+def _plantilla_payroll_gov_share_section_colspans(sections: list[dict]) -> list[dict]:
+    out = []
+    for section in sections:
+        colspan = sum(1 for part in section['parts'] if part['type'] == 'column')
+        out.append({'label': section['label'], 'colspan': colspan, 'parts': section['parts']})
+    return out
+
+
+def _plantilla_payroll_display_deduction_keys() -> list[str]:
+    keys: list[str] = []
+    for section in PLANTILLA_PAYROLL_DEDUCTION_SECTIONS:
+        for part in section['parts']:
+            if part['type'] == 'column':
+                keys.append(part['key'])
+            elif part['type'] == 'loan_group':
+                keys.extend(k for k, _ in part['columns'])
+    return keys
+
+
+def _plantilla_payroll_deduction_key_labels() -> dict[str, str]:
+    labels: dict[str, str] = {}
+    for section in PLANTILLA_PAYROLL_DEDUCTION_SECTIONS:
+        for part in section['parts']:
+            if part['type'] == 'column':
+                labels[part['key']] = part['label'] or section['label']
+            elif part['type'] == 'loan_group':
+                for key, label in part['columns']:
+                    labels[key] = label
+    return labels
+
+
+def _plantilla_payroll_sections_for_keys(active_keys: set[str]) -> list[dict]:
+    sections: list[dict] = []
+    for section in PLANTILLA_PAYROLL_DEDUCTION_SECTIONS:
+        parts: list[dict] = []
+        for part in section['parts']:
+            if part['type'] == 'column':
+                if part['key'] in active_keys:
+                    parts.append(part)
+            elif part['type'] == 'loan_group':
+                cols = tuple((k, lbl) for k, lbl in part['columns'] if k in active_keys)
+                if cols:
+                    parts.append({**part, 'columns': cols})
+        if parts:
+            entry = {'label': section['label'], 'parts': tuple(parts)}
+            if section.get('standalone_header'):
+                entry['standalone_header'] = True
+            sections.append(entry)
+    return sections
+
+
+def _plantilla_payroll_deduction_section_colspans(sections: list[dict] | None = None) -> list[dict]:
+    source = sections if sections is not None else PLANTILLA_PAYROLL_DEDUCTION_SECTIONS
+    out = []
+    for section in source:
+        colspan = 0
+        for part in section['parts']:
+            if part['type'] == 'column':
+                colspan += 1
+            elif part['type'] == 'loan_group':
+                colspan += len(part['columns'])
+        entry = {'label': section['label'], 'colspan': colspan, 'parts': section['parts']}
+        if section.get('standalone_header'):
+            entry['standalone_header'] = True
+        out.append(entry)
+    return out
+
+
+def _payroll_deduction_quincena_scheduled(ded, quincena: str) -> bool:
+    if ded is None:
+        return False
+    if quincena == '1':
+        return bool(ded.q1_enabled)
+    return bool(ded.q2_enabled)
+
+
+def _gsis_loan_ded_matches_field(ded: GsisLoanDeduction, loan_field: str) -> bool:
+    key = (ded.loan_type or '').strip().lower()
+    return key == loan_field or key == loan_field.upper()
+
+
+def _plantilla_employee_deduction_scheduled_for_quincena(
+    quincena: str,
+    key: str,
+    emp_id: int,
+    ded_maps: dict,
+) -> bool:
+    if key == 'gsis_ps':
+        contrib = _plantilla_contrib_for_quincena(ded_maps['gsis_contrib'].get(emp_id), quincena)
+        return contrib is not None
+
+    if key == 'phic_ps':
+        phic = _plantilla_contrib_for_quincena(ded_maps['phic'].get(emp_id), quincena)
+        return phic is not None
+
+    if key == 'hdmf_ps':
+        contrib = ded_maps['hdmf_contrib'].get(emp_id)
+        return (
+            contrib is not None
+            and str(quincena) == str(contrib.deductible_quincena)
+            and _money_decimal(contrib.ps_amount) > 0
+        )
+
+    if key == 'hdmf_mp2':
+        contrib = ded_maps['hdmf_contrib'].get(emp_id)
+        return (
+            contrib is not None
+            and str(quincena) == str(contrib.deductible_quincena)
+            and _money_decimal(contrib.mp2_amount) > 0
+        )
+
+    if key in _GSIS_LOAN_FIELD_BY_DED_KEY:
+        loan_field = _GSIS_LOAN_FIELD_BY_DED_KEY[key]
+        loan_deds = ded_maps['gsis_loan_deds'].get(emp_id, [])
+        for ded in loan_deds:
+            if _gsis_loan_ded_matches_field(ded, loan_field):
+                return _payroll_deduction_quincena_scheduled(ded, quincena)
+        loan_rec = ded_maps['gsis_loan_rec'].get(emp_id)
+        if loan_rec is not None:
+            q1, q2 = _gsis_loan_quincena_split(_money_decimal(getattr(loan_rec, loan_field, 0)))
+            return (q1 > 0 if quincena == '1' else q2 > 0)
+        return False
+
+    if key.startswith('hdmf_loan_'):
+        loan_type = key.replace('hdmf_loan_', '', 1)
+        loan_deds = ded_maps['hdmf_loan_deds'].get(emp_id, [])
+        for ded in loan_deds:
+            if (ded.loan_type or '').strip().lower() == loan_type:
+                return _payroll_deduction_quincena_scheduled(ded, quincena)
+        loan_rec = ded_maps['hdmf_loan_recs'].get(emp_id)
+        if loan_rec is not None and not loan_deds:
+            month_amt = _money_decimal(getattr(loan_rec, loan_type, 0))
+            q1, q2 = _gsis_loan_quincena_split(month_amt)
+            return (q1 > 0 if quincena == '1' else q2 > 0)
+        return False
+
+    if key == 'lbp':
+        ded = ded_maps['lbp'].get(emp_id)
+        if _payroll_deduction_quincena_scheduled(ded, quincena):
+            return True
+        rec = ded_maps['lbp_rec'].get(emp_id)
+        if rec is None:
+            return False
+        amt = rec.q1_amount if quincena == '1' else rec.q2_amount
+        return _money_decimal(amt) > 0
+
+    if key in ('jofemco_loan', 'jofemco_canteen'):
+        ded = ded_maps['jofemco'].get(emp_id)
+        rec = ded_maps['jofemco_rec'].get(emp_id)
+        if rec is not None:
+            if key == 'jofemco_loan':
+                amt = rec.loan_q1 if quincena == '1' else rec.loan_q2
+            else:
+                amt = rec.canteen_q1 if quincena == '1' else rec.canteen_q2
+            if _money_decimal(amt) > 0:
+                return True
+        if ded is not None and _payroll_deduction_quincena_scheduled(ded, quincena):
+            return _money_decimal(ded.q1_amount if quincena == '1' else ded.q2_amount) > 0
+        return False
+
+    if key == 'withholding_tax':
+        if quincena != '1':
+            return False
+        if _payroll_deduction_quincena_scheduled(ded_maps['wht'].get(emp_id), quincena):
+            return True
+        rec = ded_maps['wht_rec'].get(emp_id)
+        return rec is not None and _money_decimal(rec.q1_amount) > 0
+
+    return False
+
+
+def _plantilla_payroll_active_deduction_keys(
+    quincena: str,
+    emp_ids: list[int],
+    ded_maps: dict,
+) -> list[str]:
+    active: list[str] = []
+    for key in _plantilla_payroll_display_deduction_keys():
+        if any(
+            _plantilla_employee_deduction_scheduled_for_quincena(quincena, key, emp_id, ded_maps)
+            for emp_id in emp_ids
+        ):
+            active.append(key)
+    return active
+
+
+def _plantilla_payroll_layout_for_quincena(
+    quincena: str,
+    emp_ids: list[int],
+    ded_maps: dict,
+    department_name: str = '',
+    employees: list | None = None,
+) -> dict:
+    active_keys = _plantilla_payroll_active_deduction_keys(quincena, emp_ids, ded_maps)
+    if quincena == '1' and employees and any_lwop_payroll_deduction(employees):
+        if 'lwop' not in active_keys:
+            active_keys.append('lwop')
+    active_set = set(active_keys)
+    sections = _plantilla_payroll_sections_for_keys(active_set)
+    gov_active_keys = _plantilla_payroll_active_gov_share_keys(
+        quincena, emp_ids, ded_maps, department_name,
+    )
+    gov_sections = _plantilla_payroll_gov_share_sections_for_keys(set(gov_active_keys))
+    return {
+        'display_keys': active_keys,
+        'deduction_sections': _plantilla_payroll_deduction_section_colspans(sections),
+        'deduction_col_count': len(active_keys),
+        'deduction_key_labels': _plantilla_payroll_deduction_key_labels(),
+        'gov_share_keys': gov_active_keys,
+        'gov_share_sections': _plantilla_payroll_gov_share_section_colspans(gov_sections),
+        'gov_share_col_count': len(gov_active_keys),
+    }
+
+
+def _plantilla_payroll_empty_layout() -> dict:
+    return {
+        'display_keys': [],
+        'deduction_sections': [],
+        'deduction_col_count': 0,
+        'deduction_key_labels': _plantilla_payroll_deduction_key_labels(),
+        'gov_share_keys': [],
+        'gov_share_sections': [],
+        'gov_share_col_count': 0,
+    }
+
+_GSIS_LOAN_FIELD_BY_DED_KEY = {
+    'gsis_mpl': 'mpl',
+    'gsis_mpl_lite': 'mpl_lite',
+    'gsis_cpl': 'cpl',
+    'gsis_emrgyln': 'emrgyln',
+    'gsis_educ': 'educ',
+    'gsis_plreg': 'plreg',
+    'gsis_consoloan': 'consoloan',
+    'gsis_gfal': 'gfal',
+}
+
+
+def _is_plantilla_payroll_employee(emp: Employee) -> bool:
+    return not _is_jo_cos_employee(emp)
+
+
+def _plantilla_employee_designation(emp: Employee) -> str:
+    return (emp.position or '').strip() or '—'
+
+
+def _plantilla_payroll_service_period_label(year: int, month: int, quincena: str) -> str:
+    start_d, end_d = _quincena_date_range(year, month, quincena)
+    return f'{start_d.strftime("%B %d, %Y")} to {end_d.strftime("%B %d, %Y")}'
+
+
+def _plantilla_payroll_period_label(filters: dict, dept_name: str | None = None) -> str:
+    month_name = date(filters['year'], filters['month'], 1).strftime('%B %Y')
+    q_label = '1st' if filters['quincena'] == '1' else '2nd'
+    parts = [f'{month_name} — {q_label} quincena']
+    if dept_name:
+        parts.append(dept_name)
+    return ' · '.join(parts)
+
+
+def _payroll_quincena_split_amount(month_amount, quincena: str) -> Decimal:
+    q1, q2 = _gsis_loan_quincena_split(month_amount)
+    return q1 if quincena == '1' else q2
+
+
+def _payroll_scheduled_quincena_amount(
+    ded,
+    quincena: str,
+    fallback_month_amount: Decimal | None = None,
+) -> Decimal:
+    if ded is not None:
+        if quincena == '1':
+            return _money_decimal(ded.q1_amount) if ded.q1_enabled else Decimal('0.00')
+        return _money_decimal(ded.q2_amount) if ded.q2_enabled else Decimal('0.00')
+    if fallback_month_amount is not None:
+        return _payroll_quincena_split_amount(fallback_month_amount, quincena)
+    return Decimal('0.00')
+
+
+def _plantilla_contrib_for_quincena(contrib_by_q: dict | None, quincena: str):
+    if not contrib_by_q:
+        return None
+    return contrib_by_q.get(str(quincena))
+
+
+def _plantilla_payroll_deduction_maps(
+    emp_ids: list[int],
+    year: int,
+    month: int,
+    quincena: str,
+) -> dict:
+    maps: dict = {
+        'gsis_contrib': {},
+        'gsis_loan_rec': {},
+        'gsis_loan_deds': {},
+        'hdmf_contrib': {},
+        'hdmf_contrib_recs': {},
+        'hdmf_loan_deds': {},
+        'hdmf_loan_recs': {},
+        'lbp': {},
+        'lbp_rec': {},
+        'jofemco': {},
+        'jofemco_rec': {},
+        'wht': {},
+        'wht_rec': {},
+        'phic': {},
+    }
+    if not emp_ids:
+        return maps
+    for row in GsisContribution.query.filter(
+        GsisContribution.employee_id.in_(emp_ids),
+        GsisContribution.year == year,
+        GsisContribution.month == month,
+    ).all():
+        maps['gsis_contrib'].setdefault(row.employee_id, {})[str(row.deductible_quincena)] = row
+    for row in GsisLoanRecord.query.filter(
+        GsisLoanRecord.employee_id.in_(emp_ids),
+        GsisLoanRecord.year == year,
+        GsisLoanRecord.month == month,
+    ).all():
+        maps['gsis_loan_rec'][row.employee_id] = row
+    for row in GsisLoanDeduction.query.filter(
+        GsisLoanDeduction.employee_id.in_(emp_ids),
+        GsisLoanDeduction.year == year,
+        GsisLoanDeduction.month == month,
+    ).all():
+        maps['gsis_loan_deds'].setdefault(row.employee_id, []).append(row)
+    for row in HdmfContributionDeduction.query.filter(
+        HdmfContributionDeduction.employee_id.in_(emp_ids),
+        HdmfContributionDeduction.year == year,
+        HdmfContributionDeduction.month == month,
+        HdmfContributionDeduction.employment_scope == 'plantilla',
+    ).all():
+        maps['hdmf_contrib'][row.employee_id] = row
+    for row in HdmfContributionRecord.query.filter(
+        HdmfContributionRecord.employee_id.in_(emp_ids),
+        HdmfContributionRecord.year == year,
+        HdmfContributionRecord.month == month,
+        HdmfContributionRecord.employment_scope == 'plantilla',
+    ).all():
+        maps['hdmf_contrib_recs'].setdefault(row.employee_id, []).append(row)
+    for row in HdmfLoanDeduction.query.filter(
+        HdmfLoanDeduction.employee_id.in_(emp_ids),
+        HdmfLoanDeduction.year == year,
+        HdmfLoanDeduction.month == month,
+        HdmfLoanDeduction.employment_scope == 'plantilla',
+    ).all():
+        maps['hdmf_loan_deds'].setdefault(row.employee_id, []).append(row)
+    for row in HdmfLoanRecord.query.filter(
+        HdmfLoanRecord.employee_id.in_(emp_ids),
+        HdmfLoanRecord.year == year,
+        HdmfLoanRecord.month == month,
+        HdmfLoanRecord.employment_scope == 'plantilla',
+    ).all():
+        maps['hdmf_loan_recs'][row.employee_id] = row
+    for row in LbpBillingDeduction.query.filter(
+        LbpBillingDeduction.employee_id.in_(emp_ids),
+        LbpBillingDeduction.year == year,
+        LbpBillingDeduction.month == month,
+    ).all():
+        maps['lbp'][row.employee_id] = row
+    for row in LbpBillingRecord.query.filter(
+        LbpBillingRecord.employee_id.in_(emp_ids),
+        LbpBillingRecord.year == year,
+        LbpBillingRecord.month == month,
+    ).all():
+        maps['lbp_rec'][row.employee_id] = row
+    for row in JofemcoBillingDeduction.query.filter(
+        JofemcoBillingDeduction.employee_id.in_(emp_ids),
+        JofemcoBillingDeduction.year == year,
+        JofemcoBillingDeduction.month == month,
+    ).all():
+        maps['jofemco'][row.employee_id] = row
+    for row in JofemcoBillingRecord.query.filter(
+        JofemcoBillingRecord.employee_id.in_(emp_ids),
+        JofemcoBillingRecord.year == year,
+        JofemcoBillingRecord.month == month,
+    ).all():
+        maps['jofemco_rec'][row.employee_id] = row
+    for row in WithholdingTaxDeduction.query.filter(
+        WithholdingTaxDeduction.employee_id.in_(emp_ids),
+        WithholdingTaxDeduction.year == year,
+        WithholdingTaxDeduction.month == month,
+    ).all():
+        maps['wht'][row.employee_id] = row
+    for row in WithholdingTaxRecord.query.filter(
+        WithholdingTaxRecord.employee_id.in_(emp_ids),
+        WithholdingTaxRecord.year == year,
+        WithholdingTaxRecord.month == month,
+    ).all():
+        maps['wht_rec'][row.employee_id] = row
+    for row in PhicContribution.query.filter(
+        PhicContribution.employee_id.in_(emp_ids),
+        PhicContribution.year == year,
+        PhicContribution.month == month,
+    ).all():
+        maps['phic'].setdefault(row.employee_id, {})[str(row.deductible_quincena)] = row
+    return maps
+
+
+def _plantilla_gsis_loan_quincena_amount(
+    emp_id: int,
+    loan_field: str,
+    quincena: str,
+    loan_rec: GsisLoanRecord | None,
+    loan_deds: list[GsisLoanDeduction],
+) -> Decimal:
+    for ded in loan_deds:
+        key = (ded.loan_type or '').strip().lower()
+        if key == loan_field or key == loan_field.upper():
+            return _payroll_scheduled_quincena_amount(ded, quincena)
+    if loan_rec is not None:
+        return _payroll_quincena_split_amount(_money_decimal(getattr(loan_rec, loan_field, 0)), quincena)
+    return Decimal('0.00')
+
+
+def _plantilla_gsis_ps_for_quincena(
+    quincena: str,
+    gsis_contrib: GsisContribution | None,
+) -> Decimal:
+    if gsis_contrib is None or str(quincena) != str(gsis_contrib.deductible_quincena):
+        return Decimal('0.00')
+    return _money_decimal(gsis_contrib.ps_amount)
+
+
+def _plantilla_hdmf_ps_mp2_for_quincena(
+    quincena: str,
+    hdmf_contrib: HdmfContributionDeduction | None,
+) -> tuple[Decimal, Decimal]:
+    if hdmf_contrib is None or str(quincena) != str(hdmf_contrib.deductible_quincena):
+        return Decimal('0.00'), Decimal('0.00')
+    return _money_decimal(hdmf_contrib.ps_amount), _money_decimal(hdmf_contrib.mp2_amount)
+
+
+def _plantilla_hdmf_loan_by_type_for_quincena(
+    quincena: str,
+    loan_deds: list[HdmfLoanDeduction],
+    loan_rec: HdmfLoanRecord | None,
+) -> dict[str, Decimal]:
+    out = {f'hdmf_loan_{field}': Decimal('0.00') for field, _ in HDMF_LOAN_TYPE_FIELDS}
+    for ded in loan_deds:
+        lt = (ded.loan_type or '').strip().lower()
+        key = f'hdmf_loan_{lt}'
+        if key in out:
+            out[key] = _payroll_scheduled_quincena_amount(ded, quincena)
+    if loan_rec is not None and not loan_deds:
+        for field, _ in HDMF_LOAN_TYPE_FIELDS:
+            month_amt = _money_decimal(getattr(loan_rec, field, 0))
+            out[f'hdmf_loan_{field}'] = _payroll_quincena_split_amount(month_amt, quincena)
+    return out
+
+
+def _plantilla_phic_ps_for_quincena(
+    quincena: str,
+    phic_row: PhicContribution | None,
+) -> Decimal:
+    if phic_row is None or str(quincena) != str(phic_row.deductible_quincena):
+        return Decimal('0.00')
+    return _money_decimal(phic_row.ps_amount)
+
+
+def _plantilla_lbp_quincena_amount(
+    quincena: str,
+    ded: LbpBillingDeduction | None,
+    rec: LbpBillingRecord | None,
+) -> Decimal:
+    amt = _payroll_scheduled_quincena_amount(ded, quincena)
+    if amt > 0 or ded is not None:
+        return amt
+    if rec is None:
+        return Decimal('0.00')
+    return _money_decimal(rec.q1_amount if quincena == '1' else rec.q2_amount)
+
+
+def _plantilla_jofemco_loan_canteen_for_quincena(
+    quincena: str,
+    ded: JofemcoBillingDeduction | None,
+    rec: JofemcoBillingRecord | None,
+) -> tuple[Decimal, Decimal]:
+    if rec is not None:
+        if quincena == '1':
+            loan = _money_decimal(rec.loan_q1)
+            canteen = _money_decimal(rec.canteen_q1)
+        else:
+            loan = _money_decimal(rec.loan_q2)
+            canteen = _money_decimal(rec.canteen_q2)
+    else:
+        loan = canteen = Decimal('0.00')
+
+    if ded is not None:
+        enabled = ded.q1_enabled if quincena == '1' else ded.q2_enabled
+        if not enabled:
+            return Decimal('0.00'), Decimal('0.00')
+        scheduled = _money_decimal(ded.q1_amount if quincena == '1' else ded.q2_amount)
+        upload_total = (loan + canteen).quantize(Decimal('0.01'))
+        if upload_total > 0:
+            if scheduled != upload_total:
+                loan = (loan * scheduled / upload_total).quantize(Decimal('0.01'))
+                canteen = (scheduled - loan).quantize(Decimal('0.01'))
+        elif scheduled > 0:
+            loan = scheduled
+            canteen = Decimal('0.00')
+    elif rec is None:
+        return Decimal('0.00'), Decimal('0.00')
+
+    return loan.quantize(Decimal('0.01')), canteen.quantize(Decimal('0.01'))
+
+
+def _plantilla_wht_quincena_amount(
+    quincena: str,
+    ded: WithholdingTaxDeduction | None,
+    rec: WithholdingTaxRecord | None,
+) -> Decimal:
+    if quincena != '1':
+        return Decimal('0.00')
+    amt = _payroll_scheduled_quincena_amount(ded, quincena)
+    if amt > 0 or ded is not None:
+        return amt
+    if rec is None:
+        return Decimal('0.00')
+    return _money_decimal(rec.q1_amount)
+
+
+def _plantilla_payroll_row_for_employee(
+    emp: Employee,
+    row_no: int,
+    filters: dict,
+    ded_maps: dict,
+    display_keys: list[str],
+    gov_share_keys: list[str],
+) -> dict:
+    year, month, quincena = filters['year'], filters['month'], filters['quincena']
+    monthly_raw = _current_salary_amount(emp)
+    monthly = _money_decimal(monthly_raw or 0)
+    accrued = (monthly / Decimal('2')).quantize(Decimal('0.01'))
+
+    gsis_contrib = _plantilla_contrib_for_quincena(ded_maps['gsis_contrib'].get(emp.id), quincena)
+    gsis_ps = _plantilla_gsis_ps_for_quincena(quincena, gsis_contrib)
+
+    loan_rec = ded_maps['gsis_loan_rec'].get(emp.id)
+    loan_deds = ded_maps['gsis_loan_deds'].get(emp.id, [])
+    hdmf_ps, hdmf_mp2 = _plantilla_hdmf_ps_mp2_for_quincena(
+        quincena,
+        ded_maps['hdmf_contrib'].get(emp.id),
+    )
+    hdmf_loans = _plantilla_hdmf_loan_by_type_for_quincena(
+        quincena,
+        ded_maps['hdmf_loan_deds'].get(emp.id, []),
+        ded_maps['hdmf_loan_recs'].get(emp.id),
+    )
+    phic_ps = _plantilla_phic_ps_for_quincena(
+        quincena, _plantilla_contrib_for_quincena(ded_maps['phic'].get(emp.id), quincena),
+    )
+    jofemco_loan, jofemco_canteen = _plantilla_jofemco_loan_canteen_for_quincena(
+        quincena, ded_maps['jofemco'].get(emp.id), ded_maps['jofemco_rec'].get(emp.id),
+    )
+    lwop_days = Decimal('0')
+    lwop_amount = Decimal('0.00')
+    if quincena == '1':
+        lwop_days, lwop_amount = preview_lwop_payroll_deduction(emp)
+    deductions: dict[str, Decimal] = {
+        'gsis_ps': gsis_ps,
+        'hdmf_ps': hdmf_ps,
+        'hdmf_mp2': hdmf_mp2,
+        'phic_ps': phic_ps,
+        'lbp': _plantilla_lbp_quincena_amount(
+            quincena, ded_maps['lbp'].get(emp.id), ded_maps['lbp_rec'].get(emp.id),
+        ),
+        'jofemco_loan': jofemco_loan,
+        'jofemco_canteen': jofemco_canteen,
+        'withholding_tax': _plantilla_wht_quincena_amount(
+            quincena, ded_maps['wht'].get(emp.id), ded_maps['wht_rec'].get(emp.id),
+        ),
+        'lwop': lwop_amount,
+    }
+    deductions.update(hdmf_loans)
+    for ded_key, loan_field in _GSIS_LOAN_FIELD_BY_DED_KEY.items():
+        if loan_field == 'educ':
+            continue
+        deductions[ded_key] = _plantilla_gsis_loan_quincena_amount(
+            emp.id, loan_field, quincena, loan_rec, loan_deds,
+        )
+
+    display_keys = list(display_keys)
+    total_ded = sum(
+        (deductions.get(k, Decimal('0.00')) for k in display_keys),
+        Decimal('0.00'),
+    ).quantize(Decimal('0.01'))
+
+    # Legacy combined keys for PDF export
+    deductions['gsis_gs'] = Decimal('0.00')
+    deductions['gsis_educ'] = Decimal('0.00')
+    deductions['hdmf'] = (hdmf_ps + hdmf_mp2).quantize(Decimal('0.01'))
+    deductions['hdmf_loan'] = sum(hdmf_loans.values(), Decimal('0.00')).quantize(Decimal('0.01'))
+    deductions['jofemco'] = (jofemco_loan + jofemco_canteen).quantize(Decimal('0.01'))
+    net = (accrued - total_ded).quantize(Decimal('0.01'))
+    department_name = (emp.department.name if emp.department else '')
+    gov_share = _plantilla_gov_share_amounts_for_employee(
+        quincena, emp.id, ded_maps, department_name,
+    )
+
+    name = emp.directory_name_mi
+
+    row = {
+        'row_no': row_no,
+        'employee_pk': emp.id,
+        'employee_no': emp.employee_id or '',
+        'employee_name': name,
+        'designation': _plantilla_employee_designation(emp),
+        'department_name': (emp.department.name if emp.department else ''),
+        'monthly_rate': monthly,
+        'monthly_rate_display': _money_str(monthly) if monthly_raw is not None else '—',
+        'accrued': accrued,
+        'accrued_display': _money_str(accrued),
+        'deductions': deductions,
+        'total_deductions': total_ded,
+        'total_deductions_display': _money_str(total_ded) if total_ded else '',
+        'net_amount': net,
+        'net_amount_display': _money_str(net),
+        'gov_share': gov_share,
+        'search_text': f'{name} {_plantilla_employee_designation(emp)}'.lower(),
+        'lwop_days': lwop_days,
+        'lwop_days_display': f'{lwop_days:.3f}'.rstrip('0').rstrip('.') if lwop_days else '',
+    }
+    for key in display_keys:
+        amt = deductions.get(key, Decimal('0.00'))
+        row[f'ded_{key}'] = amt
+        row[f'ded_{key}_display'] = _money_str_or_blank(amt)
+    for key in gov_share_keys:
+        amt = gov_share.get(key, Decimal('0.00'))
+        row[f'gov_{key}'] = amt
+        row[f'gov_{key}_display'] = _money_str_or_blank(amt)
+    for key, _label in PLANTILLA_PAYROLL_DEDUCTION_COLUMNS:
+        if f'ded_{key}' in row:
+            continue
+        amt = deductions.get(key, Decimal('0.00'))
+        row[f'ded_{key}'] = amt
+        row[f'ded_{key}_display'] = _money_str_or_blank(amt)
+    return row
+
+
+def _plantilla_payroll_rows(filters: dict) -> tuple[list[dict], dict, dict]:
+    try:
+        dept_id = int(filters['department_id'])
+    except (TypeError, ValueError):
+        empty_totals = {
+            'monthly_rate': Decimal('0'),
+            'accrued': Decimal('0'),
+            'net_amount': Decimal('0'),
+        }
+        layout = _plantilla_payroll_empty_layout()
+        for key in layout['display_keys']:
+            empty_totals[f'ded_{key}'] = Decimal('0')
+        for key in layout['gov_share_keys']:
+            empty_totals[f'gov_{key}'] = Decimal('0')
+        for key, _ in PLANTILLA_PAYROLL_DEDUCTION_COLUMNS:
+            if f'ded_{key}' not in empty_totals:
+                empty_totals[f'ded_{key}'] = Decimal('0')
+        return [], empty_totals, layout
+
+    employees = (
+        Employee.query.options(db.joinedload(Employee.department))
+        .filter_by(status='active', department_id=dept_id)
+        .order_by(Employee.last_name.asc(), Employee.first_name.asc())
+        .all()
+    )
+    employees = [e for e in employees if _is_plantilla_payroll_employee(e)]
+    year, month, quincena = filters['year'], filters['month'], filters['quincena']
+    emp_ids = [e.id for e in employees]
+    ded_maps = _plantilla_payroll_deduction_maps(emp_ids, year, month, quincena)
+    department_name = ''
+    if employees and employees[0].department:
+        department_name = employees[0].department.name or ''
+    layout = _plantilla_payroll_layout_for_quincena(
+        quincena, emp_ids, ded_maps, department_name,
+        employees=employees,
+    )
+    display_keys = layout['display_keys']
+    gov_share_keys = layout['gov_share_keys']
+
+    rows = []
+    totals = {
+        'monthly_rate': Decimal('0'),
+        'accrued': Decimal('0'),
+        'net_amount': Decimal('0'),
+    }
+    for key in display_keys:
+        totals[f'ded_{key}'] = Decimal('0')
+    for key in gov_share_keys:
+        totals[f'gov_{key}'] = Decimal('0')
+    for key, _ in PLANTILLA_PAYROLL_DEDUCTION_COLUMNS:
+        if f'ded_{key}' not in totals:
+            totals[f'ded_{key}'] = Decimal('0')
+
+    for idx, emp in enumerate(employees, start=1):
+        row = _plantilla_payroll_row_for_employee(
+            emp, idx, filters, ded_maps, display_keys, gov_share_keys,
+        )
+        rows.append(row)
+        totals['monthly_rate'] += row['monthly_rate']
+        totals['accrued'] += row['accrued']
+        totals['net_amount'] += row['net_amount']
+        for key in display_keys:
+            totals[f'ded_{key}'] += row['deductions'].get(key, Decimal('0.00'))
+        for key in gov_share_keys:
+            totals[f'gov_{key}'] += row['gov_share'].get(key, Decimal('0.00'))
+        for key, _ in PLANTILLA_PAYROLL_DEDUCTION_COLUMNS:
+            if key in display_keys:
+                continue
+            totals[f'ded_{key}'] += row['deductions'].get(key, Decimal('0.00'))
+
+    for key in totals:
+        totals[key] = totals[key].quantize(Decimal('0.01'))
+    totals_display = {
+        k: (
+            _money_str_or_blank(v)
+            if k.startswith('ded_') or k.startswith('gov_')
+            else _money_str(v)
+        )
+        for k, v in totals.items()
+    }
+    totals_display['monthly_rate'] = _money_str(totals['monthly_rate'])
+    totals_display['accrued'] = _money_str(totals['accrued'])
+    totals_display['net_amount'] = _money_str(totals['net_amount'])
+    return rows, totals_display, layout
+
+
+def _plantilla_payroll_gov_share_key_labels() -> dict[str, str]:
+    labels: dict[str, str] = {}
+    for section in PLANTILLA_PAYROLL_GOV_SHARE_SECTIONS:
+        for part in section['parts']:
+            if part['type'] == 'column':
+                labels[part['key']] = f"{section['label']} {part['label']}"
+    return labels
+
+
+def _plantilla_payroll_pdf_bytes(
+    rows: list[dict],
+    totals: dict,
+    service_period: str,
+    department_name: str,
+    pay_date: date,
+    display_keys: list[str] | None = None,
+    key_labels: dict[str, str] | None = None,
+    gov_share_keys: list[str] | None = None,
+    gov_share_labels: dict[str, str] | None = None,
+) -> io.BytesIO:
+    from reportlab.lib.pagesizes import legal, landscape
+    from reportlab.pdfgen import canvas
+
+    page_size = landscape(legal)
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=page_size)
+    width, height = page_size
+    margin = 24
+    labels_map = key_labels or _plantilla_payroll_deduction_key_labels()
+    ded_keys = display_keys if display_keys is not None else [k for k, _ in PLANTILLA_PAYROLL_DEDUCTION_COLUMNS]
+    ded_cols = [(key, labels_map.get(key, key)) for key in ded_keys]
+    gov_labels_map = gov_share_labels or _plantilla_payroll_gov_share_key_labels()
+    gov_keys = gov_share_keys if gov_share_keys is not None else []
+    gov_cols = [(key, gov_labels_map.get(key, key)) for key in gov_keys]
+    col_w = [
+        14, 88, 62, 42, 42,
+        *([28] * len(ded_cols)),
+        38,
+        *([22] * len(gov_cols)),
+        14,
+    ]
+    table_w = sum(col_w)
+    x0 = margin
+    row_h = 9
+    font_hdr = 5
+    font_body = 4.5
+
+    def draw_page_header(y_top: float) -> float:
+        y = y_top
+        c.setFont('Helvetica-Bold', 9)
+        c.drawCentredString(width / 2, y, 'Republic of the Philippines')
+        y -= 10
+        c.setFont('Helvetica', 8)
+        c.drawCentredString(width / 2, y, 'Province of Bohol')
+        y -= 10
+        c.drawCentredString(width / 2, y, 'Municipality of Jagna')
+        y -= 12
+        c.setFont('Helvetica-Bold', 10)
+        c.drawCentredString(width / 2, y, 'MUNICIPAL PAYROLL')
+        y -= 12
+        c.setFont('Helvetica', 6.5)
+        c.drawString(x0, y, f'PERIOD OF SERVICE : {service_period}')
+        c.drawRightString(width - margin, y, f'Date {pay_date.strftime("%B %d, %Y")}')
+        y -= 10
+        c.setFont('Helvetica-Bold', 7)
+        c.drawString(x0, y, department_name.upper())
+        return y - 6
+
+    def draw_table_header(y: float) -> float:
+        c.setFont('Helvetica-Bold', font_hdr)
+        xs = [x0]
+        for w in col_w[:-1]:
+            xs.append(xs[-1] + w)
+        labels = (
+            ['NO', 'NAME OF EMPLOYEE', 'DESIGNATION', 'MONTHLY\nRATE', 'ACCRUED']
+            + [lbl for _k, lbl in ded_cols]
+            + ['PAID']
+            + [lbl for _k, lbl in gov_cols]
+            + ['NO']
+        )
+        for i, lbl in enumerate(labels):
+            c.drawCentredString(xs[i] + col_w[i] / 2, y, lbl.replace('\n', ' '))
+        c.line(x0, y - 2, x0 + table_w, y - 2)
+        return y - row_h
+
+    def draw_row(y: float, r: dict, bold: bool = False) -> float:
+        c.setFont('Helvetica-Bold' if bold else 'Helvetica', font_body)
+        xs = [x0]
+        for w in col_w[:-1]:
+            xs.append(xs[-1] + w)
+        vals = [
+            str(r.get('row_no', '')),
+            str(r.get('employee_name', ''))[:24],
+            str(r.get('designation', ''))[:14],
+            r.get('monthly_rate_display', ''),
+            r.get('accrued_display', ''),
+        ]
+        for key, _ in ded_cols:
+            vals.append(r.get(f'ded_{key}_display', ''))
+        vals.append(r.get('net_amount_display', ''))
+        for key, _ in gov_cols:
+            vals.append(r.get(f'gov_{key}_display', ''))
+        vals.append(str(r.get('row_no', '')))
+        for i, val in enumerate(vals):
+            if i in (0, len(vals) - 1):
+                c.drawCentredString(xs[i] + col_w[i] / 2, y, val)
+            elif i >= 3:
+                c.drawRightString(xs[i] + col_w[i] - 2, y, val)
+            else:
+                c.drawString(xs[i] + 2, y, val)
+        return y - row_h
+
+    y = height - margin
+    y = draw_page_header(y)
+    y = draw_table_header(y)
+    for r in rows:
+        if y < 120:
+            c.showPage()
+            y = draw_page_header(height - margin)
+            y = draw_table_header(y)
+        y = draw_row(y, r)
+    totals_row = {
+        'row_no': '',
+        'employee_name': 'TOTAL',
+        'designation': '',
+        'monthly_rate_display': totals.get('monthly_rate', ''),
+        'accrued_display': totals.get('accrued', ''),
+        'net_amount_display': totals.get('net_amount', ''),
+    }
+    for key, _ in ded_cols:
+        totals_row[f'ded_{key}_display'] = totals.get(f'ded_{key}', '')
+    for key, _ in gov_cols:
+        totals_row[f'gov_{key}_display'] = totals.get(f'gov_{key}', '')
+    c.line(x0, y + 4, x0 + table_w, y + 4)
+    y = draw_row(y, totals_row, bold=True)
+
+    sig_y = 52
+    c.setFont('Helvetica', 5)
+    c.drawString(x0, sig_y + 28, '(1) I HEREBY CERTIFY on my official oath that the above payroll is correct.')
+    c.line(x0, sig_y + 14, x0 + 150, sig_y + 14)
+    c.drawString(x0, sig_y, 'Municipal Mayor')
+    c.drawCentredString(width / 2, sig_y, 'Disbursing Officer')
+    c.line(width / 2 - 70, sig_y + 14, width / 2 + 70, sig_y + 14)
+    c.drawRightString(width - margin, sig_y + 28, f'Total net: {totals.get("net_amount", "")}')
     c.showPage()
     c.save()
     buf.seek(0)
@@ -5051,7 +9789,7 @@ def _dtr_regen_summary_employee_rows(year: int, month: int, quincena: str) -> li
         abm = int(s.absence_mins or 0)
         net = int(s.net_rendered_mins or 0)
         code = (emp.employee_id or '') if emp else ''
-        name = f'{(emp.last_name or "").strip()}, {(emp.first_name or "").strip()}' if emp else ''
+        name = emp.directory_name if emp else ''
         out.append({
             'department_name': dept_name,
             'employee_code': code,
@@ -5161,7 +9899,8 @@ def _dtr_regen_summary_pdf_bytes(dept_rows: list[dict], emp_rows: list[dict], pe
     return buf
 
 
-def _run_dtr_quincena_regeneration(year: int, month: int, quincena: str, created_by_user_id: int | None) -> None:
+def _run_dtr_quincena_regeneration(year: int, month: int, quincena: str, created_by_user_id: int | None) -> int:
+    """Process quincena worktime. Returns count of overnight Out punches auto-moved."""
     start_d, end_d = _quincena_date_range(year, month, quincena)
     tag = _dtr_regen_tag(year, month, quincena)
 
@@ -5182,9 +9921,10 @@ def _run_dtr_quincena_regeneration(year: int, month: int, quincena: str, created
     ).delete(synchronize_session=False)
 
     prev_emp_ids = [r[0] for r in db.session.query(LeaveLedger.employee_id).filter(LeaveLedger.remarks == tag).distinct().all()]
+    lwop_affected = delete_lwop_regen_rows_for_quincena(start_d, end_d)
     LeaveLedger.query.filter(LeaveLedger.remarks == tag).delete(synchronize_session=False)
     db.session.flush()
-    for eid in prev_emp_ids:
+    for eid in set(prev_emp_ids) | set(lwop_affected):
         recompute_leave_ledger_balances(eid)
 
     employees = (Employee.query.filter_by(status='active')
@@ -5192,6 +9932,27 @@ def _run_dtr_quincena_regeneration(year: int, month: int, quincena: str, created
                  .all())
     processed_at = datetime.utcnow()
     plantilla_recompute_ids: list[int] = []
+
+    # Restore actual In/Out (and clear leftover 8-5 / 7-6 stamps) before overnight pairing.
+    restore_actual_dtr_punches(start_d, end_d, employees)
+    db.session.flush()
+
+    # Auto-move early-morning Out onto overnight flexi start days before worktime calc.
+    from app.dtr_overnight_punch_service import pair_overnight_punches_for_quincena
+    _pair_moves, pair_n = pair_overnight_punches_for_quincena(
+        year=year,
+        month=month,
+        quincena_half=quincena,
+        start_d=start_d,
+        end_d=end_d,
+        employees=employees,
+        duty_schedule_from_row=_duty_schedule_from_flexible_worktime_row,
+        entry_date_bounds=_flexible_worktime_entry_date_bounds,
+        employee_on_flexi=_employee_on_flexible_worktime_quincena,
+        dry_run=False,
+    )
+    if pair_n:
+        db.session.flush()
 
     for emp in employees:
         totals = _aggregate_employee_dtr_worktime(
@@ -5206,18 +9967,22 @@ def _run_dtr_quincena_regeneration(year: int, month: int, quincena: str, created
         net = totals['net']
 
         plantilla_ledger = (emp.status_of_appointment or '').strip() in LEAVE_CREDITS_STATUSES and not totals['jo_cos']
-        if plantilla_ledger and (late_tot > 0 or ut_tot > 0 or absence_days > 0):
-            particulars = f'DTR quincena regen VL/SL deductions — {year:04d}-{month:02d} Q{quincena}'
+        if plantilla_ledger and (late_tot > 0 or ut_tot > 0):
+            particulars = f'DTR quincena regen VL deductions — {year:04d}-{month:02d} Q{quincena}'
             db.session.add(LeaveLedger(
                 employee_id=emp.id,
                 transaction_date=end_d,
                 particulars=particulars,
                 vl_tardiness=minutes_to_day_equivalent(late_tot),
                 vl_undertime=minutes_to_day_equivalent(ut_tot),
-                vl_applied=Decimal(str(absence_days)),
                 remarks=tag,
                 created_by=created_by_user_id,
             ))
+            plantilla_recompute_ids.append(emp.id)
+
+        if plantilla_ledger and post_lwop_for_absent_days(
+            emp, totals['day_rows'], created_by_user_id=created_by_user_id,
+        ):
             plantilla_recompute_ids.append(emp.id)
 
         if plantilla_ledger:
@@ -5291,9 +10056,16 @@ def _run_dtr_quincena_regeneration(year: int, month: int, quincena: str, created
     for eid in set(prev_jo_cos_ledger_emp_ids):
         _recompute_jo_cos_overtime_ledger_balances(eid)
     db.session.commit()
+    return int(pair_n or 0)
 
 
-def _parse_flexible_worktime_entries_json(raw: str, start_d: date, end_d: date) -> list[dict]:
+def _parse_flexible_worktime_entries_json(
+    raw: str,
+    start_d: date,
+    end_d: date,
+    *,
+    allowed_department_id: int | None = None,
+) -> list[dict]:
     raw = (raw or '').strip()
     if not raw:
         return []
@@ -5303,6 +10075,8 @@ def _parse_flexible_worktime_entries_json(raw: str, start_d: date, end_d: date) 
         raise ValueError('Invalid flexible worktime list JSON.') from e
     if not isinstance(data, list):
         raise ValueError('Flexible worktime list must be a JSON array.')
+    # Night-shift entries may start/end one day outside the core quincena.
+    entry_min, entry_max = _flexible_worktime_entry_date_bounds(start_d, end_d)
     parsed: list[dict] = []
     for idx, item in enumerate(data, start=1):
         if not isinstance(item, dict):
@@ -5314,6 +10088,11 @@ def _parse_flexible_worktime_entries_json(raw: str, start_d: date, end_d: date) 
         emp = Employee.query.get(emp_id)
         if not emp or (emp.status or '').strip().lower() != 'active':
             raise ValueError(f'Row {idx}: employee not found or not active.')
+        if allowed_department_id is not None and emp.department_id != allowed_department_id:
+            raise ValueError(
+                f'Row {idx}: employee is outside your department. '
+                'Payroll Maker may only manage Flexible Worktime for their department.'
+            )
         try:
             d0 = datetime.strptime((item.get('date_start') or '').strip(), '%Y-%m-%d').date()
             d1 = datetime.strptime((item.get('date_end') or '').strip(), '%Y-%m-%d').date()
@@ -5321,36 +10100,82 @@ def _parse_flexible_worktime_entries_json(raw: str, start_d: date, end_d: date) 
             raise ValueError(f'Row {idx}: invalid date range.') from e
         if d0 > d1:
             raise ValueError(f'Row {idx}: start date must be on or before end date.')
-        if d0 < start_d or d1 > end_d:
-            raise ValueError(f'Row {idx}: dates must fall within the selected quincena.')
-        times = {}
-        for key in ('time_in', 'break_out', 'break_in', 'time_out'):
-            t = _parse_flexible_worktime_time(item.get(key))
-            if not t:
-                raise ValueError(f'Row {idx}: invalid {key.replace("_", " ")}.')
-            times[key] = t
+        if d0 < entry_min or d1 > entry_max:
+            raise ValueError(
+                f'Row {idx}: dates must fall within the selected quincena '
+                f'(or one day before/after for night shift).'
+            )
+        duty_mode = (item.get('duty_mode') or 'split').strip().lower()
+        if duty_mode not in ('split', 'straight', 'rest'):
+            raise ValueError(f'Row {idx}: duty mode must be split, straight, or rest.')
+        if duty_mode == 'rest':
+            time_in = None
+            time_out = None
+            break_out = None
+            break_in = None
+        else:
+            time_in = _parse_flexible_worktime_time(item.get('time_in'))
+            time_out = _parse_flexible_worktime_time(item.get('time_out'))
+            if not time_in or not time_out:
+                raise ValueError(f'Row {idx}: time in and time out are required.')
+            if duty_mode == 'straight':
+                break_out = None
+                break_in = None
+            else:
+                break_out = _parse_flexible_worktime_time(item.get('break_out'))
+                break_in = _parse_flexible_worktime_time(item.get('break_in'))
+                if not break_out or not break_in:
+                    raise ValueError(f'Row {idx}: break out and break in are required for split duty.')
         parsed.append({
             'employee_id': emp_id,
             'date_start': d0,
             'date_end': d1,
-            **times,
+            'duty_mode': duty_mode,
+            'time_in': time_in,
+            'break_out': break_out,
+            'break_in': break_in,
+            'time_out': time_out,
         })
     by_emp: dict[int, list[tuple[date, date]]] = {}
     for row in parsed:
         ranges = by_emp.setdefault(row['employee_id'], [])
         for a0, a1 in ranges:
             if row['date_start'] <= a1 and a0 <= row['date_end']:
-                raise ValueError('Overlapping date ranges for the same employee are not allowed.')
+                raise ValueError(
+                    'Overlapping date ranges for the same employee are not allowed. '
+                    'For overnight (e.g. 4:00 pm -> 12:00 am), Date from/to are shift-start days only — '
+                    'do not extend Date to into the next morning. Same slot Tue-Thu is OK as one row; '
+                    'do not overlap that range with Fri-Sun.'
+                )
         ranges.append((row['date_start'], row['date_end']))
     return parsed
 
 
 def _save_flexible_worktime_quincena(
-    year: int, month: int, quincena: str, entries: list[dict], user_id: int | None
+    year: int,
+    month: int,
+    quincena: str,
+    entries: list[dict],
+    user_id: int | None,
+    *,
+    department_id: int | None = None,
 ) -> None:
-    FlexibleWorktime.query.filter_by(
+    """
+    Replace Flexible Worktime rows for a quincena.
+
+    When ``department_id`` is set (Payroll Maker scope), only that department's
+    existing rows are removed/replaced so other departments are preserved.
+    """
+    q = FlexibleWorktime.query.filter_by(
         year=year, month=month, quincena_half=quincena
-    ).delete(synchronize_session=False)
+    )
+    if department_id is not None:
+        scoped_employee_ids = (
+            db.session.query(Employee.id)
+            .filter(Employee.department_id == department_id)
+        )
+        q = q.filter(FlexibleWorktime.employee_id.in_(scoped_employee_ids))
+    q.delete(synchronize_session=False)
     now = datetime.utcnow()
     for row in entries:
         db.session.add(FlexibleWorktime(
@@ -5360,9 +10185,10 @@ def _save_flexible_worktime_quincena(
             quincena_half=quincena,
             date_start=row['date_start'],
             date_end=row['date_end'],
+            duty_mode=row.get('duty_mode') or 'split',
             time_in=row['time_in'],
-            break_out=row['break_out'],
-            break_in=row['break_in'],
+            break_out=row.get('break_out'),
+            break_in=row.get('break_in'),
             time_out=row['time_out'],
             created_by_user_id=user_id,
             created_at=now,
@@ -5398,11 +10224,24 @@ def _save_overtime_authorization_quincena(
 
 
 def _save_jo_cos_extend_service_quincena(
-    year: int, month: int, quincena: str, entries: list[dict], user_id: int | None
+    year: int,
+    month: int,
+    quincena: str,
+    entries: list[dict],
+    user_id: int | None,
+    *,
+    department_id: int | None = None,
 ) -> None:
-    JoCosExtendService.query.filter_by(
+    q = JoCosExtendService.query.filter_by(
         year=year, month=month, quincena_half=quincena
-    ).delete(synchronize_session=False)
+    )
+    if department_id is not None:
+        scoped_employee_ids = (
+            db.session.query(Employee.id)
+            .filter(Employee.department_id == department_id)
+        )
+        q = q.filter(JoCosExtendService.employee_id.in_(scoped_employee_ids))
+    q.delete(synchronize_session=False)
     now = datetime.utcnow()
     for row in entries:
         db.session.add(JoCosExtendService(
@@ -5426,19 +10265,41 @@ def _save_jo_cos_extend_service_quincena(
 @bp.route('/dtr/flexible-worktime', methods=['GET', 'POST'])
 @login_required
 def dtr_flexible_worktime():
-    denied = _require_admin_or_hr()
+    denied = _require_flexible_worktime_manager()
     if denied:
         return denied
+
+    maker_dept_id = _payroll_maker_department_id()
+    if (
+        (getattr(current_user, 'role', None) or '').strip().lower() == 'payroll_maker'
+        and maker_dept_id is None
+    ):
+        flash(
+            'Access denied. Payroll Maker must be linked to an employee with a department '
+            'to manage Flexible Worktime.',
+            'error',
+        )
+        return redirect(url_for(_dashboard_for_user(current_user)))
+
     filters = _flexible_worktime_parse_filters(request.args if request.method == 'GET' else request.form)
+    # Payroll Maker is locked to their department (cannot browse/save other depts).
+    if maker_dept_id is not None:
+        filters['department_id'] = str(maker_dept_id)
+
     start_d, end_d = _quincena_date_range(filters['year'], filters['month'], filters['quincena'])
+    entry_min, entry_max = _flexible_worktime_entry_date_bounds(start_d, end_d)
     if request.method == 'POST':
         try:
             entries = _parse_flexible_worktime_entries_json(
-                request.form.get('entries_json', ''), start_d, end_d
+                request.form.get('entries_json', ''),
+                start_d,
+                end_d,
+                allowed_department_id=maker_dept_id,
             )
             _save_flexible_worktime_quincena(
                 filters['year'], filters['month'], filters['quincena'],
                 entries, getattr(current_user, 'id', None),
+                department_id=maker_dept_id,
             )
             flash('Flexible worktime saved for this quincena.', 'success')
         except ValueError as e:
@@ -5480,19 +10341,35 @@ def dtr_flexible_worktime():
             'first_name': e.first_name or '',
             'last_name': e.last_name or '',
             'department_id': e.department_id,
-            'label': f"{e.last_name}, {e.first_name} ({e.employee_id})",
+            'directory_name': e.directory_name,
+            'label': f"{e.directory_name} ({e.employee_id})",
         }
         for e in employees
     ]
-    departments = Department.query.order_by(Department.name.asc()).all()
+    if maker_dept_id is not None:
+        departments = Department.query.filter_by(id=maker_dept_id).order_by(Department.name.asc()).all()
+    else:
+        departments = Department.query.order_by(Department.name.asc()).all()
     flexi_shift_presets = [
         {
             'label': 'Day shift (8 am – 5 pm)',
+            'duty_mode': 'split',
             'time_in': '08:00', 'break_out': '12:00', 'break_in': '13:00', 'time_out': '17:00',
         },
         {
+            'label': 'Straight 8h (8 am – 4 pm)',
+            'duty_mode': 'straight',
+            'time_in': '08:00', 'break_out': '', 'break_in': '', 'time_out': '16:00',
+        },
+        {
             'label': 'Night shift — MDRRMO (8 pm – 5 am)',
+            'duty_mode': 'split',
             'time_in': '20:00', 'break_out': '00:00', 'break_in': '00:30', 'time_out': '05:00',
+        },
+        {
+            'label': 'Rest day',
+            'duty_mode': 'rest',
+            'time_in': '', 'break_out': '', 'break_in': '', 'time_out': '',
         },
     ]
     period_label = (
@@ -5510,9 +10387,13 @@ def dtr_flexible_worktime():
         period_label=period_label,
         quincena_start=start_d.isoformat(),
         quincena_end=end_d.isoformat(),
+        date_entry_min=entry_min.isoformat(),
+        date_entry_max=entry_max.isoformat(),
         departments=departments,
         flexi_shift_presets=flexi_shift_presets,
         employee=employee,
+        is_payroll_maker_scope=maker_dept_id is not None,
+        can_regenerate_dtr=_user_is_admin_or_hr(),
     )
 
 
@@ -5564,7 +10445,8 @@ def dtr_overtime_authorization():
             'employee_id': e.employee_id or '',
             'first_name': e.first_name or '',
             'last_name': e.last_name or '',
-            'label': f"{e.last_name}, {e.first_name} ({e.employee_id})",
+            'directory_name': e.directory_name,
+            'label': f"{e.directory_name} ({e.employee_id})",
         }
         for e in employees
     ]
@@ -5590,19 +10472,40 @@ def dtr_overtime_authorization():
 @bp.route('/dtr/jo-cos-extend-service', methods=['GET', 'POST'])
 @login_required
 def dtr_jo_cos_extend_service():
-    denied = _require_admin_or_hr()
+    denied = _require_x_service_manager()
     if denied:
         return denied
+
+    maker_dept_id = _payroll_maker_department_id()
+    if (
+        (getattr(current_user, 'role', None) or '').strip().lower() == 'payroll_maker'
+        and maker_dept_id is None
+    ):
+        flash(
+            'Access denied. Payroll Maker must be linked to an employee with a department '
+            'to manage X-Service Authorization.',
+            'error',
+        )
+        return redirect(url_for(_dashboard_for_user(current_user)))
+
     filters = _flexible_worktime_parse_filters(request.args if request.method == 'GET' else request.form)
+    if maker_dept_id is not None:
+        filters['department_id'] = str(maker_dept_id)
+
     start_d, end_d = _quincena_date_range(filters['year'], filters['month'], filters['quincena'])
     if request.method == 'POST':
         try:
             entries = _parse_quincena_schedule_entries_json(
-                request.form.get('entries_json', ''), start_d, end_d, require_jo_cos=True
+                request.form.get('entries_json', ''),
+                start_d,
+                end_d,
+                require_jo_cos=True,
+                allowed_department_id=maker_dept_id,
             )
             _save_jo_cos_extend_service_quincena(
                 filters['year'], filters['month'], filters['quincena'],
                 entries, getattr(current_user, 'id', None),
+                department_id=maker_dept_id,
             )
             flash('X-Service authorization saved for this quincena.', 'success')
         except ValueError as e:
@@ -5611,6 +10514,7 @@ def dtr_jo_cos_extend_service():
         return redirect(url_for(
             'routes.dtr_jo_cos_extend_service',
             year=filters['year'], month=filters['month'], quincena=filters['quincena'],
+            **({'department_id': filters['department_id']} if filters.get('department_id') else {}),
         ))
 
     rows = (
@@ -5621,6 +10525,13 @@ def dtr_jo_cos_extend_service():
         .order_by(Employee.last_name.asc(), Employee.first_name.asc(), JoCosExtendService.date_start.asc())
         .all()
     )
+    dept_filter_id = None
+    if filters.get('department_id'):
+        try:
+            dept_filter_id = int(filters['department_id'])
+            rows = [r for r in rows if r.employee and r.employee.department_id == dept_filter_id]
+        except ValueError:
+            dept_filter_id = None
     entries = [_jo_cos_extend_service_row_dict(r) for r in rows]
     employees = (
         Employee.query.filter_by(status='active')
@@ -5628,16 +10539,23 @@ def dtr_jo_cos_extend_service():
         .all()
     )
     employees = [e for e in employees if _is_jo_cos_employee(e)]
+    if dept_filter_id is not None:
+        employees = [e for e in employees if e.department_id == dept_filter_id]
     employees_for_js = [
         {
             'id': e.id,
             'employee_id': e.employee_id or '',
             'first_name': e.first_name or '',
             'last_name': e.last_name or '',
-            'label': f"{e.last_name}, {e.first_name} ({e.employee_id})",
+            'directory_name': e.directory_name,
+            'label': f"{e.directory_name} ({e.employee_id})",
         }
         for e in employees
     ]
+    if maker_dept_id is not None:
+        departments = Department.query.filter_by(id=maker_dept_id).order_by(Department.name.asc()).all()
+    else:
+        departments = Department.query.order_by(Department.name.asc()).all()
     period_label = (
         f"{date(filters['year'], filters['month'], 1).strftime('%B %Y')} — "
         f"{'1st' if filters['quincena'] == '1' else '2nd'} quincena "
@@ -5654,6 +10572,9 @@ def dtr_jo_cos_extend_service():
         quincena_start=start_d.isoformat(),
         quincena_end=end_d.isoformat(),
         employee=employee,
+        departments=departments,
+        is_payroll_maker_scope=maker_dept_id is not None,
+        can_regenerate_dtr=_user_is_admin_or_hr(),
     )
 
 
@@ -5905,13 +10826,135 @@ def dtr_regenerate():
         flash('Invalid period.', 'error')
         return redirect(url_for('routes.dtr_regenerate'))
     try:
-        _run_dtr_quincena_regeneration(year, month, quincena, getattr(current_user, 'id', None))
-        flash('DTR quincena regeneration completed.', 'success')
+        pair_n = _run_dtr_quincena_regeneration(year, month, quincena, getattr(current_user, 'id', None))
+        period = dtr_period.get_or_create_period(year, month, quincena)
+        dtr_period.mark_processed(period, getattr(current_user, 'id', None))
+        dtr_period.notify_employees_worktime_processed(year, month, quincena)
+        dtr_period.notify_hr_worktime_processed(year, month, quincena)
+        db.session.commit()
+        flash('Worktime processing completed.', 'success')
+        if pair_n:
+            flash(
+                f'Overnight punch pairing moved {pair_n} early-morning Out '
+                f'time(s) onto flexi start days before computing worktime.',
+                'success',
+            )
     except Exception as e:
         db.session.rollback()
-        flash(f'Regeneration failed: {e}', 'error')
+        flash(f'Worktime processing failed: {e}', 'error')
         return redirect(url_for('routes.dtr_regenerate'))
     return redirect(url_for('routes.dtr_regenerate_summary', year=year, month=month, quincena=quincena))
+
+
+@bp.route('/dtr/overnight-punch-fix', methods=['GET', 'POST'])
+@login_required
+def dtr_overnight_punch_fix():
+    """Admin/HR/Payroll Maker: preview or apply overnight Out auto-move onto flexi start days."""
+    denied = _require_flexible_worktime_manager()
+    if denied:
+        return denied
+
+    from app.dtr_overnight_punch_service import pair_overnight_punches_for_quincena
+
+    anchor = date.today()
+    opts = _build_quincena_upload_options(anchor)
+    default_quincena = f'{anchor.year:04d}-{anchor.month:02d}-{"1" if anchor.day <= 15 else "2"}'
+    raw_period = (request.values.get('quincena_period') or default_quincena).strip()
+    year = month = None
+    quincena = '1'
+    py, pm, pq = _parse_quincena_upload_value(raw_period)
+    if py is not None:
+        year, month, quincena = py, pm, pq
+    else:
+        year, month, quincena = anchor.year, anchor.month, ('1' if anchor.day <= 15 else '2')
+        raw_period = f'{year:04d}-{month:02d}-{quincena}'
+
+    start_d, end_d = _quincena_date_range(year, month, quincena)
+    period_label = (
+        f'{date(year, month, 1).strftime("%B %Y")} — '
+        f'{"1st" if quincena == "1" else "2nd"} quincena'
+    )
+    maker_dept_id = _payroll_maker_department_id()
+    is_payroll_maker_scope = (
+        (getattr(current_user, 'role', None) or '').strip().lower() == 'payroll_maker'
+        and maker_dept_id is not None
+    )
+    emp_q = Employee.query.filter_by(status='active')
+    if maker_dept_id is not None:
+        emp_q = emp_q.filter(Employee.department_id == maker_dept_id)
+    employees = emp_q.order_by(Employee.last_name, Employee.first_name).all()
+    moves = []
+    applied = 0
+    previewed = False
+
+    if request.method == 'POST':
+        action = (request.form.get('action') or 'preview').strip().lower()
+        dry_run = action != 'apply'
+        try:
+            moves, applied = pair_overnight_punches_for_quincena(
+                year=year,
+                month=month,
+                quincena_half=quincena,
+                start_d=start_d,
+                end_d=end_d,
+                employees=employees,
+                duty_schedule_from_row=_duty_schedule_from_flexible_worktime_row,
+                entry_date_bounds=_flexible_worktime_entry_date_bounds,
+                employee_on_flexi=_employee_on_flexible_worktime_quincena,
+                dry_run=dry_run,
+            )
+            previewed = True
+            if dry_run:
+                flash(
+                    f'Preview: {len(moves)} overnight Out move(s) would be applied for {period_label}.',
+                    'success' if moves else 'info',
+                )
+            else:
+                db.session.commit()
+                if is_payroll_maker_scope:
+                    flash(
+                        f'Applied {applied} overnight Out move(s) for {period_label}. '
+                        f'Ask Admin/HR to re-run Process Worktime so late/undertime snapshots refresh.',
+                        'success' if applied else 'info',
+                    )
+                else:
+                    flash(
+                        f'Applied {applied} overnight Out move(s) for {period_label}. '
+                        f'Re-run Process Worktime so late/undertime snapshots refresh.',
+                        'success' if applied else 'info',
+                    )
+                # Re-preview after apply (should be empty if all applied)
+                moves, _ = pair_overnight_punches_for_quincena(
+                    year=year,
+                    month=month,
+                    quincena_half=quincena,
+                    start_d=start_d,
+                    end_d=end_d,
+                    employees=employees,
+                    duty_schedule_from_row=_duty_schedule_from_flexible_worktime_row,
+                    entry_date_bounds=_flexible_worktime_entry_date_bounds,
+                    employee_on_flexi=_employee_on_flexible_worktime_quincena,
+                    dry_run=True,
+                )
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Overnight punch fix failed: {e}', 'error')
+
+    employee = current_user.employee if current_user.employee else None
+    return render_template(
+        'dtr_overnight_punch_fix.html',
+        employee=employee,
+        quincena_options=opts,
+        default_quincena=raw_period,
+        period_label=period_label,
+        year=year,
+        month=month,
+        quincena=quincena,
+        moves=moves,
+        previewed=previewed,
+        applied_count=applied,
+        is_payroll_maker_scope=is_payroll_maker_scope,
+    )
 
 
 @bp.route('/dtr/regenerate/summary')
@@ -6350,6 +11393,672 @@ def payroll_deductions_phic_submit():
         flash(f'Error saving PHIC contributions: {str(e)}', 'error')
 
     return redirect(url_for('routes.payroll_deductions_phic', year=year, month=month, department_id=department_id, generate=1))
+
+
+@bp.route('/payroll/deductions/lbp')
+@login_required
+def payroll_deductions_lbp():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    employee = current_user.employee if current_user.employee else None
+    today = date.today()
+    year_raw = (request.args.get('year') or str(today.year)).strip()
+    month_raw = (request.args.get('month') or str(today.month)).strip()
+    dept_raw = (request.args.get('department_id') or '').strip()
+    loan_view = (request.args.get('loan_view') or '').strip().lower()
+    loan_load = (request.args.get('loan_load') or '').strip() == '1'
+
+    try:
+        year = int(year_raw)
+    except ValueError:
+        year = today.year
+    try:
+        month = int(month_raw)
+        if month < 1 or month > 12:
+            raise ValueError()
+    except ValueError:
+        month = today.month
+
+    department_id = None
+    if dept_raw:
+        try:
+            department_id = int(dept_raw)
+        except ValueError:
+            department_id = None
+
+    departments = Department.query.order_by(Department.name.asc()).all()
+    dept_by_id = {d.id: d for d in departments}
+    selected_department = dept_by_id.get(department_id) if department_id else None
+
+    has_billing_data = LbpBillingRecord.query.filter_by(year=year, month=month).first() is not None
+    show_upload = loan_view == 'upload'
+
+    billing_rows = []
+    if loan_load and has_billing_data:
+        billing_rows = _lbp_billing_load_rows(year, month, department_id)
+
+    return render_template(
+        'payroll/lbp.html',
+        employee=employee,
+        departments=departments,
+        selected_department=selected_department,
+        year=year,
+        month=month,
+        billing_rows=billing_rows,
+        billing_loaded=loan_load and has_billing_data,
+        show_upload=show_upload,
+        has_billing_data=has_billing_data,
+    )
+
+
+@bp.route('/payroll/deductions/lbp/preview', methods=['POST'])
+@login_required
+def payroll_deductions_lbp_preview():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    upload = request.files.get('lbp_billing_file')
+    if not upload or not upload.filename:
+        return jsonify({'ok': False, 'error': 'Select an LBP billing file to upload.'}), 400
+    if not upload.filename.lower().endswith(('.xls', '.xlsx')):
+        return jsonify({'ok': False, 'error': 'Upload an Excel file (.xls or .xlsx).'}), 400
+    try:
+        data = _parse_lbp_billing_xls(upload.read())
+        return jsonify({'ok': True, **data})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+
+
+@bp.route('/payroll/deductions/lbp/upload-submit', methods=['POST'])
+@login_required
+def payroll_deductions_lbp_upload_submit():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    year_raw = (request.form.get('year') or '').strip()
+    month_raw = (request.form.get('month') or '').strip()
+    rows_json = (request.form.get('rows_json') or '').strip()
+    try:
+        year = int(year_raw)
+        month = int(month_raw)
+        if month < 1 or month > 12:
+            raise ValueError()
+    except ValueError:
+        flash('Invalid year or month for LBP billing upload.', 'error')
+        return redirect(url_for('routes.payroll_deductions_lbp', loan_view='upload'))
+
+    try:
+        payload = json.loads(rows_json or '[]')
+        if not isinstance(payload, list):
+            payload = []
+    except json.JSONDecodeError:
+        payload = []
+
+    matched = [r for r in payload if r.get('employee_pk')]
+    if not matched:
+        flash('No matched employees to save from the upload.', 'warning')
+        return redirect(url_for('routes.payroll_deductions_lbp', loan_view='upload'))
+
+    try:
+        LbpBillingRecord.query.filter_by(year=year, month=month).delete(synchronize_session=False)
+        inserted = 0
+        for r in matched:
+            emp_id = int(r['employee_pk'])
+            db.session.add(LbpBillingRecord(
+                employee_id=emp_id,
+                year=year,
+                month=month,
+                employee_no=(r.get('employee_no') or '').strip() or None,
+                percov=(r.get('percov') or '').strip() or None,
+                q1_amount=_money_decimal(r.get('q1_amount')),
+                q2_amount=_money_decimal(r.get('q2_amount')),
+                total_payable=_money_decimal(r.get('total_payable')),
+                created_by_user_id=getattr(current_user, 'id', None),
+            ))
+            inserted += 1
+        db.session.commit()
+        flash(f'LBP billing file saved ({inserted} employees).', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error saving LBP billing upload: {str(e)}', 'error')
+        return redirect(url_for('routes.payroll_deductions_lbp', loan_view='upload'))
+
+    return redirect(url_for(
+        'routes.payroll_deductions_lbp',
+        year=year,
+        month=month,
+        loan_view='load',
+        loan_load=1,
+    ))
+
+
+@bp.route('/payroll/deductions/lbp/deductions-submit', methods=['POST'])
+@login_required
+def payroll_deductions_lbp_deductions_submit():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    year_raw = (request.form.get('year') or '').strip()
+    month_raw = (request.form.get('month') or '').strip()
+    dept_raw = (request.form.get('department_id') or '').strip()
+    rows_json = (request.form.get('rows_json') or '').strip()
+    try:
+        year = int(year_raw)
+        month = int(month_raw)
+        if month < 1 or month > 12:
+            raise ValueError()
+    except ValueError:
+        flash('Invalid year or month.', 'error')
+        return redirect(url_for('routes.payroll_deductions_lbp', loan_view='load'))
+
+    department_id = None
+    if dept_raw:
+        try:
+            department_id = int(dept_raw)
+        except ValueError:
+            department_id = None
+
+    try:
+        payload = json.loads(rows_json or '[]')
+        if not isinstance(payload, list):
+            payload = []
+    except json.JSONDecodeError:
+        payload = []
+
+    if not payload:
+        flash('No billing deduction rows to save.', 'warning')
+        return redirect(url_for(
+            'routes.payroll_deductions_lbp',
+            year=year, month=month, department_id=department_id or '',
+            loan_load=1, loan_view='load',
+        ))
+
+    try:
+        employee_ids = {int(r.get('employee_pk')) for r in payload if r.get('employee_pk')}
+        for emp_id in employee_ids:
+            (LbpBillingDeduction.query
+             .filter_by(employee_id=emp_id, year=year, month=month)
+             .delete(synchronize_session=False))
+
+        inserted = 0
+        for r in payload:
+            emp_id = int(r.get('employee_pk'))
+            month_amount = _money_decimal(r.get('month_amount'))
+            q1_amount = _money_decimal(r.get('q1_amount'))
+            q2_amount = _money_decimal(r.get('q2_amount'))
+            q1_on = str(r.get('q1_enabled', '1')).lower() in ('1', 'true', 'yes', 'on')
+            q2_on = str(r.get('q2_enabled', '1')).lower() in ('1', 'true', 'yes', 'on')
+            emp = Employee.query.get(emp_id)
+            if not emp:
+                continue
+            db.session.add(LbpBillingDeduction(
+                employee_id=emp_id,
+                department_id=emp.department_id,
+                year=year,
+                month=month,
+                month_amount=month_amount,
+                q1_amount=q1_amount,
+                q2_amount=q2_amount,
+                q1_enabled=q1_on,
+                q2_enabled=q2_on,
+                created_by_user_id=getattr(current_user, 'id', None),
+            ))
+            inserted += 1
+        db.session.commit()
+        flash(f'LBP billing deductions saved ({inserted} rows).', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error saving LBP billing deductions: {str(e)}', 'error')
+
+    return redirect(url_for(
+        'routes.payroll_deductions_lbp',
+        year=year, month=month, department_id=department_id or '',
+        loan_load=1, loan_view='load',
+    ))
+
+
+@bp.route('/payroll/deductions/jofemco')
+@login_required
+def payroll_deductions_jofemco():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    employee = current_user.employee if current_user.employee else None
+    today = date.today()
+    year_raw = (request.args.get('year') or str(today.year)).strip()
+    month_raw = (request.args.get('month') or str(today.month)).strip()
+    dept_raw = (request.args.get('department_id') or '').strip()
+    loan_view = (request.args.get('loan_view') or '').strip().lower()
+    loan_load = (request.args.get('loan_load') or '').strip() == '1'
+
+    try:
+        year = int(year_raw)
+    except ValueError:
+        year = today.year
+    try:
+        month = int(month_raw)
+        if month < 1 or month > 12:
+            raise ValueError()
+    except ValueError:
+        month = today.month
+
+    department_id = None
+    if dept_raw:
+        try:
+            department_id = int(dept_raw)
+        except ValueError:
+            department_id = None
+
+    departments = Department.query.order_by(Department.name.asc()).all()
+    dept_by_id = {d.id: d for d in departments}
+    selected_department = dept_by_id.get(department_id) if department_id else None
+
+    has_billing_data = JofemcoBillingRecord.query.filter_by(year=year, month=month).first() is not None
+    show_upload = loan_view == 'upload'
+
+    billing_rows = []
+    if loan_load and has_billing_data:
+        billing_rows = _jofemco_billing_load_rows(year, month, department_id)
+
+    return render_template(
+        'payroll/jofemco.html',
+        employee=employee,
+        departments=departments,
+        selected_department=selected_department,
+        year=year,
+        month=month,
+        billing_rows=billing_rows,
+        billing_loaded=loan_load and has_billing_data,
+        show_upload=show_upload,
+        has_billing_data=has_billing_data,
+    )
+
+
+@bp.route('/payroll/deductions/jofemco/preview', methods=['POST'])
+@login_required
+def payroll_deductions_jofemco_preview():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    upload = request.files.get('jofemco_billing_file')
+    if not upload or not upload.filename:
+        return jsonify({'ok': False, 'error': 'Select a JOFEMCO billing file to upload.'}), 400
+    if not upload.filename.lower().endswith(('.xls', '.xlsx')):
+        return jsonify({'ok': False, 'error': 'Upload an Excel file (.xls or .xlsx).'}), 400
+    try:
+        data = _parse_jofemco_billing_xls(upload.read())
+        return jsonify({'ok': True, **data})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+
+
+@bp.route('/payroll/deductions/jofemco/upload-submit', methods=['POST'])
+@login_required
+def payroll_deductions_jofemco_upload_submit():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    year_raw = (request.form.get('year') or '').strip()
+    month_raw = (request.form.get('month') or '').strip()
+    rows_json = (request.form.get('rows_json') or '').strip()
+    try:
+        year = int(year_raw)
+        month = int(month_raw)
+        if month < 1 or month > 12:
+            raise ValueError()
+    except ValueError:
+        flash('Invalid year or month for JOFEMCO billing upload.', 'error')
+        return redirect(url_for('routes.payroll_deductions_jofemco', loan_view='upload'))
+
+    try:
+        payload = json.loads(rows_json or '[]')
+        if not isinstance(payload, list):
+            payload = []
+    except json.JSONDecodeError:
+        payload = []
+
+    matched = [r for r in payload if r.get('employee_pk')]
+    if not matched:
+        flash('No matched employees to save from the upload.', 'warning')
+        return redirect(url_for('routes.payroll_deductions_jofemco', loan_view='upload'))
+
+    try:
+        JofemcoBillingRecord.query.filter_by(year=year, month=month).delete(synchronize_session=False)
+        inserted = 0
+        for r in matched:
+            emp_id = int(r['employee_pk'])
+            db.session.add(JofemcoBillingRecord(
+                employee_id=emp_id,
+                year=year,
+                month=month,
+                employee_no=(r.get('employee_no') or '').strip() or None,
+                percov=(r.get('percov') or '').strip() or None,
+                loan_q1=_money_decimal(r.get('loan_q1')),
+                loan_q2=_money_decimal(r.get('loan_q2')),
+                canteen_q1=_money_decimal(r.get('canteen_q1')),
+                canteen_q2=_money_decimal(r.get('canteen_q2')),
+                total_payable=_money_decimal(r.get('total_payable')),
+                created_by_user_id=getattr(current_user, 'id', None),
+            ))
+            inserted += 1
+        db.session.commit()
+        flash(f'JOFEMCO billing file saved ({inserted} employees).', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error saving JOFEMCO billing upload: {str(e)}', 'error')
+        return redirect(url_for('routes.payroll_deductions_jofemco', loan_view='upload'))
+
+    return redirect(url_for(
+        'routes.payroll_deductions_jofemco',
+        year=year,
+        month=month,
+        loan_view='load',
+        loan_load=1,
+    ))
+
+
+@bp.route('/payroll/deductions/jofemco/deductions-submit', methods=['POST'])
+@login_required
+def payroll_deductions_jofemco_deductions_submit():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    year_raw = (request.form.get('year') or '').strip()
+    month_raw = (request.form.get('month') or '').strip()
+    dept_raw = (request.form.get('department_id') or '').strip()
+    rows_json = (request.form.get('rows_json') or '').strip()
+    try:
+        year = int(year_raw)
+        month = int(month_raw)
+        if month < 1 or month > 12:
+            raise ValueError()
+    except ValueError:
+        flash('Invalid year or month.', 'error')
+        return redirect(url_for('routes.payroll_deductions_jofemco', loan_view='load'))
+
+    department_id = None
+    if dept_raw:
+        try:
+            department_id = int(dept_raw)
+        except ValueError:
+            department_id = None
+
+    try:
+        payload = json.loads(rows_json or '[]')
+        if not isinstance(payload, list):
+            payload = []
+    except json.JSONDecodeError:
+        payload = []
+
+    if not payload:
+        flash('No billing deduction rows to save.', 'warning')
+        return redirect(url_for(
+            'routes.payroll_deductions_jofemco',
+            year=year, month=month, department_id=department_id or '',
+            loan_load=1, loan_view='load',
+        ))
+
+    try:
+        employee_ids = {int(r.get('employee_pk')) for r in payload if r.get('employee_pk')}
+        for emp_id in employee_ids:
+            (JofemcoBillingDeduction.query
+             .filter_by(employee_id=emp_id, year=year, month=month)
+             .delete(synchronize_session=False))
+
+        inserted = 0
+        for r in payload:
+            emp_id = int(r.get('employee_pk'))
+            month_amount = _money_decimal(r.get('month_amount'))
+            q1_amount = _money_decimal(r.get('q1_amount'))
+            q2_amount = _money_decimal(r.get('q2_amount'))
+            q1_on = str(r.get('q1_enabled', '1')).lower() in ('1', 'true', 'yes', 'on')
+            q2_on = str(r.get('q2_enabled', '1')).lower() in ('1', 'true', 'yes', 'on')
+            emp = Employee.query.get(emp_id)
+            if not emp:
+                continue
+            db.session.add(JofemcoBillingDeduction(
+                employee_id=emp_id,
+                department_id=emp.department_id,
+                year=year,
+                month=month,
+                month_amount=month_amount,
+                q1_amount=q1_amount,
+                q2_amount=q2_amount,
+                q1_enabled=q1_on,
+                q2_enabled=q2_on,
+                created_by_user_id=getattr(current_user, 'id', None),
+            ))
+            inserted += 1
+        db.session.commit()
+        flash(f'JOFEMCO billing deductions saved ({inserted} rows).', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error saving JOFEMCO billing deductions: {str(e)}', 'error')
+
+    return redirect(url_for(
+        'routes.payroll_deductions_jofemco',
+        year=year, month=month, department_id=department_id or '',
+        loan_load=1, loan_view='load',
+    ))
+
+
+@bp.route('/payroll/deductions/withholding-tax')
+@login_required
+def payroll_deductions_withholding_tax():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    employee = current_user.employee if current_user.employee else None
+    today = date.today()
+    year_raw = (request.args.get('year') or str(today.year)).strip()
+    month_raw = (request.args.get('month') or str(today.month)).strip()
+    dept_raw = (request.args.get('department_id') or '').strip()
+    view = (request.args.get('loan_view') or '').strip().lower()  # reuse param name from cloned pages
+    do_load = (request.args.get('loan_load') or '').strip() == '1'
+
+    try:
+        year = int(year_raw)
+    except ValueError:
+        year = today.year
+    try:
+        month = int(month_raw)
+        if month < 1 or month > 12:
+            raise ValueError()
+    except ValueError:
+        month = today.month
+
+    department_id = None
+    if dept_raw:
+        try:
+            department_id = int(dept_raw)
+        except ValueError:
+            department_id = None
+
+    departments = Department.query.order_by(Department.name.asc()).all()
+    dept_by_id = {d.id: d for d in departments}
+    selected_department = dept_by_id.get(department_id) if department_id else None
+
+    has_data = WithholdingTaxRecord.query.filter_by(year=year, month=month).first() is not None
+    show_upload = view == 'upload'
+
+    rows = []
+    if do_load and has_data:
+        rows = _withholding_tax_load_rows(year, month, department_id)
+
+    return render_template(
+        'payroll/withholding_tax.html',
+        employee=employee,
+        departments=departments,
+        selected_department=selected_department,
+        year=year,
+        month=month,
+        rows=rows,
+        loaded=do_load and has_data,
+        show_upload=show_upload,
+        has_data=has_data,
+    )
+
+
+@bp.route('/payroll/deductions/withholding-tax/preview', methods=['POST'])
+@login_required
+def payroll_deductions_withholding_tax_preview():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    upload = request.files.get('withholding_tax_file')
+    if not upload or not upload.filename:
+        return jsonify({'ok': False, 'error': 'Select a withholding tax file to upload.'}), 400
+    if not upload.filename.lower().endswith(('.xls', '.xlsx')):
+        return jsonify({'ok': False, 'error': 'Upload an Excel file (.xls or .xlsx).'}), 400
+    try:
+        data = _parse_withholding_tax_xlsx(upload.read())
+        return jsonify({'ok': True, **data})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+
+
+@bp.route('/payroll/deductions/withholding-tax/upload-submit', methods=['POST'])
+@login_required
+def payroll_deductions_withholding_tax_upload_submit():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    year_raw = (request.form.get('year') or '').strip()
+    month_raw = (request.form.get('month') or '').strip()
+    rows_json = (request.form.get('rows_json') or '').strip()
+    try:
+        year = int(year_raw)
+        month = int(month_raw)
+        if month < 1 or month > 12:
+            raise ValueError()
+    except ValueError:
+        flash('Invalid year or month for withholding tax upload.', 'error')
+        return redirect(url_for('routes.payroll_deductions_withholding_tax', loan_view='upload'))
+
+    try:
+        payload = json.loads(rows_json or '[]')
+        if not isinstance(payload, list):
+            payload = []
+    except json.JSONDecodeError:
+        payload = []
+
+    matched = [r for r in payload if r.get('employee_pk')]
+    if not matched:
+        flash('No matched employees to save from the upload.', 'warning')
+        return redirect(url_for('routes.payroll_deductions_withholding_tax', loan_view='upload'))
+
+    try:
+        WithholdingTaxRecord.query.filter_by(year=year, month=month).delete(synchronize_session=False)
+        inserted = 0
+        for r in matched:
+            emp_id = int(r['employee_pk'])
+            db.session.add(WithholdingTaxRecord(
+                employee_id=emp_id,
+                year=year,
+                month=month,
+                employee_no=(r.get('employee_no') or '').strip() or None,
+                percov=(r.get('percov') or '').strip() or None,
+                q1_amount=_money_decimal(r.get('q1_amount')),
+                created_by_user_id=getattr(current_user, 'id', None),
+            ))
+            inserted += 1
+        db.session.commit()
+        flash(f'Withholding tax file saved ({inserted} employees).', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error saving withholding tax upload: {str(e)}', 'error')
+        return redirect(url_for('routes.payroll_deductions_withholding_tax', loan_view='upload'))
+
+    return redirect(url_for(
+        'routes.payroll_deductions_withholding_tax',
+        year=year,
+        month=month,
+        loan_view='load',
+        loan_load=1,
+    ))
+
+
+@bp.route('/payroll/deductions/withholding-tax/deductions-submit', methods=['POST'])
+@login_required
+def payroll_deductions_withholding_tax_deductions_submit():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    year_raw = (request.form.get('year') or '').strip()
+    month_raw = (request.form.get('month') or '').strip()
+    dept_raw = (request.form.get('department_id') or '').strip()
+    rows_json = (request.form.get('rows_json') or '').strip()
+    try:
+        year = int(year_raw)
+        month = int(month_raw)
+        if month < 1 or month > 12:
+            raise ValueError()
+    except ValueError:
+        flash('Invalid year or month.', 'error')
+        return redirect(url_for('routes.payroll_deductions_withholding_tax', loan_view='load'))
+
+    department_id = None
+    if dept_raw:
+        try:
+            department_id = int(dept_raw)
+        except ValueError:
+            department_id = None
+
+    try:
+        payload = json.loads(rows_json or '[]')
+        if not isinstance(payload, list):
+            payload = []
+    except json.JSONDecodeError:
+        payload = []
+
+    if not payload:
+        flash('No withholding tax rows to save.', 'warning')
+        return redirect(url_for(
+            'routes.payroll_deductions_withholding_tax',
+            year=year, month=month, department_id=department_id or '',
+            loan_load=1, loan_view='load',
+        ))
+
+    try:
+        employee_ids = {int(r.get('employee_pk')) for r in payload if r.get('employee_pk')}
+        for emp_id in employee_ids:
+            (WithholdingTaxDeduction.query
+             .filter_by(employee_id=emp_id, year=year, month=month)
+             .delete(synchronize_session=False))
+
+        inserted = 0
+        for r in payload:
+            emp_id = int(r.get('employee_pk'))
+            q1_amount = _money_decimal(r.get('q1_amount'))
+            month_amount = q1_amount
+            emp = Employee.query.get(emp_id)
+            if not emp:
+                continue
+            db.session.add(WithholdingTaxDeduction(
+                employee_id=emp_id,
+                department_id=emp.department_id,
+                year=year,
+                month=month,
+                month_amount=month_amount,
+                q1_amount=q1_amount,
+                q2_amount=Decimal('0.00'),
+                q1_enabled=True,
+                q2_enabled=False,
+                created_by_user_id=getattr(current_user, 'id', None),
+            ))
+            inserted += 1
+        db.session.commit()
+        flash(f'Withholding tax deductions saved ({inserted} rows).', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error saving withholding tax deductions: {str(e)}', 'error')
+
+    return redirect(url_for(
+        'routes.payroll_deductions_withholding_tax',
+        year=year, month=month, department_id=department_id or '',
+        loan_load=1, loan_view='load',
+    ))
 
 
 @bp.route('/payroll/deductions/gsis/loans/preview', methods=['POST'])
@@ -7067,21 +12776,6 @@ def payroll_deductions_hdmf_loans_deductions_submit(scope):
     ) + '#loan')
 
 
-@bp.route('/payroll/deductions/plantilla')
-@login_required
-def payroll_deductions_plantilla():
-    denied = _require_admin_or_hr()
-    if denied:
-        return denied
-    employee = current_user.employee if current_user.employee else None
-    return render_template(
-        'payroll/deductions.html',
-        employee=employee,
-        page_title='Plantilla Deductions',
-        employee_type='plantilla',
-    )
-
-
 @bp.route('/payroll/worktime-summary')
 @login_required
 def payroll_worktime_summary():
@@ -7184,8 +12878,20 @@ def payroll_jo_cos():
         department_name = dept.name or f'Department #{dept_id}'
         period_label = _jo_cos_payroll_period_label(filters, department_name)
         rows, totals = _jo_cos_payroll_rows(filters)
+        payslip_count = JoCosPayslip.query.filter_by(
+            year=filters['year'],
+            month=filters['month'],
+            quincena_half=filters['quincena'],
+            department_id=dept_id,
+        ).count()
     elif filters['loaded']:
         flash('Select a department before loading payroll.', 'error')
+        payslip_count = 0
+    else:
+        payslip_count = 0
+
+    if not dept_selected:
+        payslip_count = 0
 
     return render_template(
         'payroll/jo_cos.html',
@@ -7198,6 +12904,7 @@ def payroll_jo_cos():
         department_name=department_name,
         dept_selected=dept_selected,
         row_count=len(rows),
+        payslip_count=payslip_count,
     )
 
 
@@ -7250,14 +12957,571 @@ def payroll_jo_cos_export():
     ))
 
 
+@bp.route('/payroll/jo-cos/payslips/generate', methods=['POST'])
+@login_required
+def payroll_jo_cos_payslips_generate():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    filters = _jo_cos_payroll_parse_filters(request.form)
+    filters['loaded'] = True
+    if not filters['department_id']:
+        flash('Select a department before generating payslips.', 'error')
+        return redirect(url_for('routes.payroll_jo_cos'))
+    try:
+        dept_id = int(filters['department_id'])
+    except ValueError:
+        flash('Select a valid department.', 'error')
+        return redirect(url_for('routes.payroll_jo_cos'))
+    dept = Department.query.get(dept_id)
+    if not dept:
+        flash('Department not found.', 'error')
+        return redirect(url_for('routes.payroll_jo_cos'))
+    department_name = dept.name or f'Department #{dept_id}'
+    try:
+        count = _jo_cos_payslips_generate(
+            filters, department_name, getattr(current_user, 'id', None),
+        )
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error generating payslips: {e}', 'error')
+        return redirect(url_for(
+            'routes.payroll_jo_cos',
+            year=filters['year'], month=filters['month'],
+            quincena=filters['quincena'], department_id=filters['department_id'], load=1,
+        ))
+    if count:
+        flash(f'Generated {count} payslip(s) for {_jo_cos_payslip_period_label(filters["year"], filters["month"], filters["quincena"])}.', 'success')
+    else:
+        flash('No payroll rows to generate payslips from. Load payroll first.', 'warning')
+    return redirect(url_for(
+        'routes.payroll_jo_cos',
+        year=filters['year'], month=filters['month'],
+        quincena=filters['quincena'], department_id=filters['department_id'], load=1,
+    ))
+
+
+@bp.route('/payroll/jo-cos/payslips/export')
+@login_required
+def payroll_jo_cos_payslips_export():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    filters = _jo_cos_payroll_parse_filters(request.args)
+    if not filters['department_id']:
+        flash('Select a department before exporting payslips.', 'error')
+        return redirect(url_for('routes.payroll_jo_cos'))
+    try:
+        dept_id = int(filters['department_id'])
+    except ValueError:
+        flash('Select a valid department.', 'error')
+        return redirect(url_for('routes.payroll_jo_cos'))
+    slips = (
+        JoCosPayslip.query.filter_by(
+            year=filters['year'],
+            month=filters['month'],
+            quincena_half=filters['quincena'],
+            department_id=dept_id,
+        )
+        .join(Employee)
+        .order_by(Employee.last_name.asc(), Employee.first_name.asc())
+        .all()
+    )
+    if not slips:
+        flash('No payslips found for this period. Click Generate Payslip first.', 'warning')
+        return redirect(url_for(
+            'routes.payroll_jo_cos',
+            year=filters['year'], month=filters['month'],
+            quincena=filters['quincena'], department_id=filters['department_id'], load=1,
+        ))
+    buf = _jo_cos_payslip_pdf_bytes(slips)
+    base = (
+        f'jo_cos_payslips_{filters["year"]}_{filters["month"]:02d}_'
+        f'Q{filters["quincena"]}_dept{dept_id}'
+    )
+    return send_file(buf, mimetype='application/pdf', as_attachment=True, download_name=f'{base}.pdf')
+
+
+@bp.route('/payroll/jo-cos/my-payslips')
+@login_required
+def payroll_jo_cos_my_payslips():
+    emp = _current_employee_for_user()
+    if not emp:
+        flash('Employee record not linked to your account.', 'error')
+        return redirect(url_for(_dashboard_for_user(current_user)))
+    if not _is_jo_cos_employee(emp):
+        flash('Payslips are available for JO/COS employees only.', 'error')
+        return redirect(url_for(_dashboard_for_user(current_user)))
+    selected_year = (request.args.get('year') or '').strip()
+    q = JoCosPayslip.query.filter_by(employee_id=emp.id)
+    if selected_year:
+        try:
+            q = q.filter(JoCosPayslip.year == int(selected_year))
+        except (TypeError, ValueError):
+            selected_year = ''
+    slips = (
+        q.order_by(
+            JoCosPayslip.year.desc(),
+            JoCosPayslip.month.desc(),
+            JoCosPayslip.quincena_half.desc(),
+        ).all()
+    )
+    available_years = [
+        y for (y,) in (
+            db.session.query(JoCosPayslip.year)
+            .filter_by(employee_id=emp.id)
+            .distinct()
+            .order_by(JoCosPayslip.year.desc())
+            .all()
+        )
+    ]
+    rows = []
+    for slip in slips:
+        d = _jo_cos_payslip_view_dict(slip)
+        d['period_short'] = _jo_cos_payslip_period_label(slip.year, slip.month, slip.quincena_half)
+        rows.append(d)
+    return render_template(
+        'payroll/jo_cos_my_payslips.html',
+        employee=emp,
+        payslips=rows,
+        available_years=available_years,
+        selected_year=selected_year,
+    )
+
+
+@bp.route('/payroll/jo-cos/payslips/<int:payslip_id>')
+@login_required
+def payroll_jo_cos_payslip_view(payslip_id: int):
+    slip = JoCosPayslip.query.get_or_404(payslip_id)
+    if not _can_view_jo_cos_payslip(slip):
+        flash('Access denied.', 'error')
+        return redirect(url_for(_dashboard_for_user(current_user)))
+    employee = current_user.employee if current_user.employee else None
+    return render_template(
+        'payroll/jo_cos_payslip.html',
+        employee=employee,
+        payslip=_jo_cos_payslip_view_dict(slip),
+        slip_id=slip.id,
+        is_admin_view=(getattr(current_user, 'role', None) or '').strip().lower() in ('admin', 'hr'),
+    )
+
+
+@bp.route('/payroll/jo-cos/payslips/<int:payslip_id>/pdf')
+@login_required
+def payroll_jo_cos_payslip_pdf(payslip_id: int):
+    slip = JoCosPayslip.query.get_or_404(payslip_id)
+    if not _can_view_jo_cos_payslip(slip):
+        flash('Access denied.', 'error')
+        return redirect(url_for(_dashboard_for_user(current_user)))
+    buf = _jo_cos_payslip_pdf_bytes([slip])
+    fname = (
+        f'payslip_{slip.employee_no or slip.employee_id}_'
+        f'{slip.year}_{slip.month:02d}_Q{slip.quincena_half}.pdf'
+    )
+    return send_file(buf, mimetype='application/pdf', as_attachment=True, download_name=fname)
+
+
 @bp.route('/payroll/plantilla')
 @login_required
 def payroll_plantilla():
     denied = _require_admin_or_hr()
     if denied:
         return denied
+    filters = _payroll_quincena_parse_filters(request.args)
+    departments = Department.query.order_by(Department.name.asc()).all()
+    dept_by_id = {d.id: d for d in departments}
     employee = current_user.employee if current_user.employee else None
-    return render_template('payroll/plantilla.html', employee=employee)
+
+    rows = []
+    totals = {}
+    payroll_layout = _plantilla_payroll_empty_layout()
+    period_label = ''
+    service_period = ''
+    department_name = ''
+    dept_selected = False
+
+    if filters['loaded'] and filters['department_id']:
+        try:
+            dept_id = int(filters['department_id'])
+        except ValueError:
+            flash('Select a valid department.', 'error')
+            return redirect(url_for('routes.payroll_plantilla'))
+        dept = dept_by_id.get(dept_id)
+        if not dept:
+            flash('Department not found.', 'error')
+            return redirect(url_for('routes.payroll_plantilla'))
+        dept_selected = True
+        department_name = dept.name or f'Department #{dept_id}'
+        period_label = _plantilla_payroll_period_label(filters, department_name)
+        service_period = _plantilla_payroll_service_period_label(
+            filters['year'], filters['month'], filters['quincena'],
+        )
+        rows, totals, payroll_layout = _plantilla_payroll_rows(filters)
+    elif filters['loaded']:
+        flash('Select a department before loading payroll.', 'error')
+
+    return render_template(
+        'payroll/plantilla.html',
+        employee=employee,
+        departments=departments,
+        filters=filters,
+        rows=rows,
+        totals=totals,
+        period_label=period_label,
+        service_period=service_period,
+        department_name=department_name,
+        dept_selected=dept_selected,
+        row_count=len(rows),
+        deduction_sections=payroll_layout['deduction_sections'],
+        display_deduction_keys=payroll_layout['display_keys'],
+        deduction_col_count=payroll_layout['deduction_col_count'],
+        gov_share_sections=payroll_layout['gov_share_sections'],
+        display_gov_share_keys=payroll_layout['gov_share_keys'],
+        gov_share_col_count=payroll_layout['gov_share_col_count'],
+    )
+
+
+@bp.route('/payroll/plantilla/export')
+@login_required
+def payroll_plantilla_export():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    filters = _payroll_quincena_parse_filters(request.args)
+    filters['loaded'] = True
+    fmt = (request.args.get('format') or 'pdf').strip().lower()
+    if not filters['department_id']:
+        flash('Select a department before exporting payroll.', 'error')
+        return redirect(url_for('routes.payroll_plantilla'))
+    try:
+        dept_id = int(filters['department_id'])
+    except ValueError:
+        flash('Select a valid department.', 'error')
+        return redirect(url_for('routes.payroll_plantilla'))
+    dept = Department.query.get(dept_id)
+    if not dept:
+        flash('Department not found.', 'error')
+        return redirect(url_for('routes.payroll_plantilla'))
+
+    rows, totals, payroll_layout = _plantilla_payroll_rows(filters)
+    department_name = dept.name or f'Department #{dept_id}'
+    service_period = _plantilla_payroll_service_period_label(
+        filters['year'], filters['month'], filters['quincena'],
+    )
+    _, end_d = _quincena_date_range(filters['year'], filters['month'], filters['quincena'])
+    base = (
+        f'plantilla_payroll_{filters["year"]}_{filters["month"]:02d}_'
+        f'Q{filters["quincena"]}_dept{dept_id}'
+    )
+    if fmt == 'pdf':
+        buf = _plantilla_payroll_pdf_bytes(
+            rows,
+            totals,
+            service_period,
+            department_name,
+            end_d,
+            display_keys=payroll_layout['display_keys'],
+            key_labels=payroll_layout['deduction_key_labels'],
+            gov_share_keys=payroll_layout['gov_share_keys'],
+            gov_share_labels=_plantilla_payroll_gov_share_key_labels(),
+        )
+        return send_file(
+            buf,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f'{base}.pdf',
+        )
+    flash('Invalid export format. Use pdf.', 'error')
+    return redirect(url_for(
+        'routes.payroll_plantilla',
+        year=filters['year'],
+        month=filters['month'],
+        quincena=filters['quincena'],
+        department_id=filters['department_id'],
+        load=1,
+    ))
+
+
+def _plantilla_payslip_upsert_from_payroll_row(
+    row: dict,
+    *,
+    year: int,
+    month: int,
+    quincena: str,
+    department_id: int | None,
+    department_name: str,
+    generated_by_user_id: int | None,
+    layout: dict,
+) -> PlantillaPayslip:
+    deductions = row.get('deductions') or {}
+    gov_share = row.get('gov_share') or {}
+
+    def _to_json_money_map(m: dict) -> dict:
+        out = {}
+        for k, v in (m or {}).items():
+            try:
+                out[str(k)] = str(_money_decimal(v).quantize(Decimal('0.01')))
+            except Exception:
+                out[str(k)] = '0.00'
+        return out
+
+    return PlantillaPayslip(
+        employee_id=row['employee_pk'],
+        department_id=department_id,
+        year=year,
+        month=month,
+        quincena_half=str(quincena),
+        employee_name=row.get('employee_name') or '',
+        employee_no=row.get('employee_no') or '',
+        designation=row.get('designation') or '—',
+        department_name=department_name,
+        monthly_rate=_money_decimal(row.get('monthly_rate') or 0),
+        accrued=_money_decimal(row.get('accrued') or 0),
+        net_amount=_money_decimal(row.get('net_amount') or 0),
+        deductions=_to_json_money_map(deductions),
+        gov_share=_to_json_money_map(gov_share),
+        layout=layout or {},
+        generated_at=datetime.utcnow(),
+        generated_by_user_id=generated_by_user_id,
+    )
+
+
+@bp.route('/payroll/plantilla/payslips/generate', methods=['POST'])
+@login_required
+def payroll_plantilla_payslips_generate():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    filters = _payroll_quincena_parse_filters(request.form)
+    filters['loaded'] = True
+    if not filters['department_id']:
+        flash('Select a department before generating payslips.', 'error')
+        return redirect(url_for('routes.payroll_plantilla'))
+    try:
+        dept_id = int(filters['department_id'])
+    except ValueError:
+        flash('Select a valid department.', 'error')
+        return redirect(url_for('routes.payroll_plantilla'))
+    dept = Department.query.get(dept_id)
+    if not dept:
+        flash('Department not found.', 'error')
+        return redirect(url_for('routes.payroll_plantilla'))
+    department_name = dept.name or f'Department #{dept_id}'
+
+    year, month, quincena = filters['year'], filters['month'], filters['quincena']
+    try:
+        rows, _totals, payroll_layout = _plantilla_payroll_rows(filters)
+        if not rows:
+            flash('No payroll rows to generate payslips from. Load payroll first.', 'warning')
+            return redirect(url_for(
+                'routes.payroll_plantilla',
+                year=year, month=month, quincena=quincena, department_id=dept_id, load=1,
+            ))
+
+        emp_ids = [r['employee_pk'] for r in rows]
+        existing = {
+            p.employee_id: p
+            for p in PlantillaPayslip.query.filter(
+                PlantillaPayslip.employee_id.in_(emp_ids),
+                PlantillaPayslip.year == year,
+                PlantillaPayslip.month == month,
+                PlantillaPayslip.quincena_half == str(quincena),
+            ).all()
+        }
+        layout_payload = {
+            'deduction_keys': payroll_layout.get('display_keys', []),
+            'deduction_labels': payroll_layout.get('deduction_key_labels', _plantilla_payroll_deduction_key_labels()),
+            'gov_share_keys': payroll_layout.get('gov_share_keys', []),
+            'gov_share_labels': _plantilla_payroll_gov_share_key_labels(),
+        }
+
+        notify_rows: list[tuple[int, int]] = []
+        count = 0
+        for r in rows:
+            emp_obj = Employee.query.get(r['employee_pk'])
+            if emp_obj and str(quincena) == '1':
+                post_lwop_payroll_settlement(
+                    emp_obj, year, month, str(quincena),
+                    created_by_user_id=getattr(current_user, 'id', None),
+                )
+            slip = existing.get(r['employee_pk'])
+            if slip:
+                slip.department_id = dept_id
+                slip.employee_name = r.get('employee_name') or slip.employee_name
+                slip.employee_no = r.get('employee_no') or ''
+                slip.designation = r.get('designation') or '—'
+                slip.department_name = department_name
+                slip.monthly_rate = _money_decimal(r.get('monthly_rate') or 0)
+                slip.accrued = _money_decimal(r.get('accrued') or 0)
+                slip.net_amount = _money_decimal(r.get('net_amount') or 0)
+                slip.deductions = {k: str(_money_decimal(v).quantize(Decimal('0.01'))) for k, v in (r.get('deductions') or {}).items()}
+                slip.gov_share = {k: str(_money_decimal(v).quantize(Decimal('0.01'))) for k, v in (r.get('gov_share') or {}).items()}
+                slip.layout = layout_payload
+                slip.generated_at = datetime.utcnow()
+                slip.generated_by_user_id = getattr(current_user, 'id', None)
+                notify_rows.append((slip.employee_id, slip.id))
+            else:
+                new_slip = _plantilla_payslip_upsert_from_payroll_row(
+                    r,
+                    year=year,
+                    month=month,
+                    quincena=str(quincena),
+                    department_id=dept_id,
+                    department_name=department_name,
+                    generated_by_user_id=getattr(current_user, 'id', None),
+                    layout=layout_payload,
+                )
+                db.session.add(new_slip)
+                db.session.flush()
+                notify_rows.append((new_slip.employee_id, new_slip.id))
+            count += 1
+
+        period = _plantilla_payslip_period_label(year, month, str(quincena))
+        for emp_id, slip_id in notify_rows:
+            try:
+                emp = Employee.query.get(emp_id)
+                if emp and emp.user_id:
+                    _create_hrms_notification(
+                        emp.user_id,
+                        'Payslip available',
+                        f'Your plantilla payslip is ready for {period}.',
+                        link_url=url_for('routes.payroll_plantilla_my_payslips', year=year),
+                        related_type='plantilla_payslip',
+                        related_id=slip_id,
+                    )
+            except Exception:
+                pass
+
+        db.session.commit()
+        flash(f'Generated {count} payslip(s) for {period}.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error generating payslips: {e}', 'error')
+    return redirect(url_for(
+        'routes.payroll_plantilla',
+        year=year, month=month, quincena=quincena, department_id=dept_id, load=1,
+    ))
+
+
+@bp.route('/payroll/plantilla/my-payslips')
+@login_required
+def payroll_plantilla_my_payslips():
+    emp = _current_employee_for_user()
+    if not emp:
+        flash('Employee record not linked to your account.', 'error')
+        return redirect(url_for(_dashboard_for_user(current_user)))
+    if _is_jo_cos_employee(emp):
+        flash('Plantilla payslips are not available for JO/COS employees.', 'error')
+        return redirect(url_for(_dashboard_for_user(current_user)))
+
+    selected_year = (request.args.get('year') or '').strip()
+    q = PlantillaPayslip.query.filter_by(employee_id=emp.id)
+    if selected_year:
+        try:
+            q = q.filter(PlantillaPayslip.year == int(selected_year))
+        except (TypeError, ValueError):
+            selected_year = ''
+    slips = (
+        q.order_by(
+            PlantillaPayslip.year.desc(),
+            PlantillaPayslip.month.desc(),
+            PlantillaPayslip.quincena_half.desc(),
+        ).all()
+    )
+    available_years = [
+        y for (y,) in (
+            db.session.query(PlantillaPayslip.year)
+            .filter_by(employee_id=emp.id)
+            .distinct()
+            .order_by(PlantillaPayslip.year.desc())
+            .all()
+        )
+    ]
+
+    def _period_short(s: PlantillaPayslip) -> str:
+        return _plantilla_payslip_period_label(s.year, s.month, s.quincena_half)
+
+    rows = []
+    for s in slips:
+        rows.append({
+            'id': s.id,
+            'year': s.year,
+            'month': s.month,
+            'quincena': s.quincena_half,
+            'department_name': s.department_name or '',
+            'net_amount_display': _money_str(_money_decimal(s.net_amount)),
+            'generated_at': s.generated_at,
+            'period_short': _period_short(s),
+        })
+
+    return render_template(
+        'payroll/plantilla_my_payslips.html',
+        employee=emp,
+        payslips=rows,
+        available_years=available_years,
+        selected_year=selected_year,
+    )
+
+
+@bp.route('/payroll/plantilla/payslips/<int:payslip_id>')
+@login_required
+def payroll_plantilla_payslip_view(payslip_id: int):
+    slip = PlantillaPayslip.query.get_or_404(payslip_id)
+    if not _can_view_plantilla_payslip(slip):
+        flash('Access denied.', 'error')
+        return redirect(url_for(_dashboard_for_user(current_user)))
+
+    labels = (slip.layout or {}).get('deduction_labels') or _plantilla_payroll_deduction_key_labels()
+    ded_map = slip.deductions or {}
+    ded_rows = []
+    for key, amt_str in ded_map.items():
+        try:
+            amt = Decimal(str(amt_str))
+        except Exception:
+            amt = Decimal('0.00')
+        if amt == 0:
+            continue
+        ded_rows.append({'key': key, 'label': labels.get(key, key), 'amount_display': _money_str(amt)})
+    ded_rows.sort(key=lambda r: r['label'])
+
+    gov_labels = (slip.layout or {}).get('gov_share_labels') or _plantilla_payroll_gov_share_key_labels()
+    gov_map = slip.gov_share or {}
+    gov_rows = []
+    for key, amt_str in gov_map.items():
+        try:
+            amt = Decimal(str(amt_str))
+        except Exception:
+            amt = Decimal('0.00')
+        if amt == 0:
+            continue
+        gov_rows.append({'key': key, 'label': gov_labels.get(key, key), 'amount_display': _money_str(amt)})
+    gov_rows.sort(key=lambda r: r['label'])
+
+    payload = {
+        'id': slip.id,
+        'year': slip.year,
+        'month': slip.month,
+        'quincena': slip.quincena_half,
+        'department_id': slip.department_id,
+        'employee_name': slip.employee_name,
+        'employee_no': slip.employee_no or '',
+        'designation': slip.designation or '—',
+        'department_name': slip.department_name or '',
+        'period_label': _plantilla_payslip_period_label(slip.year, slip.month, slip.quincena_half),
+        'monthly_rate_display': _money_str(_money_decimal(slip.monthly_rate)),
+        'accrued_display': _money_str(_money_decimal(slip.accrued)),
+        'net_amount_display': _money_str(_money_decimal(slip.net_amount)),
+        'generated_at': slip.generated_at,
+        'deductions_rows': ded_rows,
+        'gov_share_rows': gov_rows,
+    }
+
+    return render_template(
+        'payroll/plantilla_payslip_view.html',
+        employee=current_user.employee if current_user.employee else None,
+        payslip=payload,
+        is_admin_view=(getattr(current_user, 'role', None) or '').strip().lower() in ('admin', 'hr'),
+    )
 
 
 def _report_employees_access_denied():
@@ -7478,6 +13742,170 @@ def report_employees_list():
     )
 
 
+@bp.route('/reports/service-records')
+@login_required
+def report_service_records():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    department_id = (request.args.get('department_id') or '').strip()
+    status = (request.args.get('status') or 'active').strip().lower()
+    q = _report_employees_base_query()
+    if department_id:
+        try:
+            q = q.filter(Employee.department_id == int(department_id))
+        except (TypeError, ValueError):
+            pass
+    if status and status != 'all':
+        q = q.filter(Employee.status == status)
+    employees = q.order_by(Employee.last_name.asc(), Employee.first_name.asc()).all()
+    departments = Department.query.order_by(Department.name.asc()).all()
+    employee = current_user.employee if current_user.employee else None
+    return render_template(
+        'reports/service_records.html',
+        employees=employees,
+        departments=departments,
+        employee=employee,
+        filter_department_id=department_id,
+        filter_status=status if status in ('active', 'inactive', 'separated', 'all') else 'active',
+    )
+
+
+@bp.route('/reports/employee-id-cards')
+@login_required
+def report_employee_id_cards():
+    """Admin/HR: pick employees and print LGU Jagna ID cards (individual or batch)."""
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    department_id = (request.args.get('department_id') or '').strip()
+    status = (request.args.get('status') or 'active').strip().lower()
+    id_format = (request.args.get('id_format') or 'all').strip().lower()
+    q = _report_employees_base_query()
+    if department_id:
+        try:
+            q = q.filter(Employee.department_id == int(department_id))
+        except (TypeError, ValueError):
+            pass
+    if status and status != 'all':
+        q = q.filter(Employee.status == status)
+    employees = q.order_by(Employee.last_name.asc(), Employee.first_name.asc()).all()
+    from app.employee_id_photo_service import employee_has_id_photo
+    from app.employee_id_card_service import id_card_format_label, is_jo_cos_employee
+    if id_format == 'jo_cos':
+        employees = [e for e in employees if is_jo_cos_employee(e)]
+    elif id_format == 'plantilla':
+        employees = [e for e in employees if not is_jo_cos_employee(e)]
+    photo_flags = {e.id: employee_has_id_photo(e) for e in employees}
+    format_labels = {e.id: id_card_format_label(e) for e in employees}
+    departments = Department.query.order_by(Department.name.asc()).all()
+    employee = current_user.employee if current_user.employee else None
+    return render_template(
+        'reports/employee_id_cards.html',
+        employees=employees,
+        departments=departments,
+        employee=employee,
+        photo_flags=photo_flags,
+        format_labels=format_labels,
+        filter_department_id=department_id,
+        filter_status=status if status in ('active', 'inactive', 'separated', 'all') else 'active',
+        filter_id_format=id_format if id_format in ('all', 'jo_cos', 'plantilla') else 'all',
+    )
+
+
+@bp.route('/reports/employee-id-cards/batch.pdf', methods=['POST'])
+@login_required
+def report_employee_id_cards_batch_pdf():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    raw_ids = request.form.getlist('employee_ids')
+    ids = []
+    for raw in raw_ids:
+        try:
+            ids.append(int(raw))
+        except (TypeError, ValueError):
+            continue
+    if not ids:
+        flash('Select at least one employee to print ID cards.', 'error')
+        return redirect(url_for('routes.report_employee_id_cards'))
+    employees = (
+        Employee.query
+        .filter(Employee.id.in_(ids))
+        .order_by(Employee.last_name.asc(), Employee.first_name.asc())
+        .all()
+    )
+    if not employees:
+        flash('No matching employees found.', 'error')
+        return redirect(url_for('routes.report_employee_id_cards'))
+    from app.employee_id_card_service import build_employee_id_cards_batch_pdf
+    try:
+        pdf_bytes = build_employee_id_cards_batch_pdf(employees)
+    except Exception as exc:
+        flash(f'Could not generate ID cards: {exc}', 'error')
+        return redirect(url_for('routes.report_employee_id_cards'))
+    fname = f'LGU_Jagna_ID_batch_{len(employees)}.pdf'
+    return send_file(
+        io.BytesIO(pdf_bytes),
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name=fname,
+    )
+
+
+@bp.route('/employees/<int:id>/id-card.pdf')
+@login_required
+def employee_id_card_pdf(id: int):
+    """Admin/HR: download one employee's printable LGU Jagna ID card."""
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    emp = Employee.query.get_or_404(id)
+    from app.employee_id_card_service import build_employee_id_card_pdf, id_card_download_name
+    try:
+        pdf_bytes = build_employee_id_card_pdf(emp)
+    except Exception as exc:
+        flash(f'Could not generate ID card: {exc}', 'error')
+        return redirect(request.referrer or url_for('routes.employees_list'))
+    return send_file(
+        io.BytesIO(pdf_bytes),
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name=id_card_download_name(emp),
+    )
+
+
+@bp.route('/reports/leave-credits')
+@login_required
+def report_leave_credits():
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    department_id = (request.args.get('department_id') or '').strip()
+    status = (request.args.get('status') or 'active').strip().lower()
+    q = _report_employees_base_query().filter(
+        Employee.status_of_appointment.in_(LEAVE_CREDITS_STATUSES)
+    )
+    if department_id:
+        try:
+            q = q.filter(Employee.department_id == int(department_id))
+        except (TypeError, ValueError):
+            pass
+    if status and status != 'all':
+        q = q.filter(Employee.status == status)
+    employees = q.order_by(Employee.last_name.asc(), Employee.first_name.asc()).all()
+    departments = Department.query.order_by(Department.name.asc()).all()
+    employee = current_user.employee if current_user.employee else None
+    return render_template(
+        'reports/leave_credits.html',
+        employees=employees,
+        departments=departments,
+        employee=employee,
+        filter_department_id=department_id,
+        filter_status=status if status in ('active', 'inactive', 'separated', 'all') else 'active',
+    )
+
+
 @bp.route('/reports/employees-list/export')
 @login_required
 def report_employees_list_export():
@@ -7611,7 +14039,7 @@ def leave_credits_run_accrual():
             f"Monthly accrual for {y}-{m:02d}: {result['created']} VL/SL row(s) created, "
             f"{result['skipped_duplicate']} VL/SL duplicate(s), "
             f"{result['skipped_not_employed']} not employed that month, "
-            f"{result['skipped_terminated']} terminated (skipped)."
+            f"{result.get('skipped_separated', 0)} separated (skipped)."
         )
         if m == 1:
             msg += (
@@ -7686,6 +14114,191 @@ def leave_credits_undo_accrual():
     return redirect(url_for('routes.leave_credits_list'))
 
 
+def _leave_credits_card_context(employee_id: int):
+    emp = (
+        Employee.query
+        .options(db.joinedload(Employee.department))
+        .filter_by(id=employee_id)
+        .first()
+    )
+    if not emp:
+        abort(404)
+    ledger_entries = (
+        LeaveLedger.query
+        .filter_by(employee_id=emp.id)
+        .order_by(LeaveLedger.transaction_date.desc(), LeaveLedger.id.desc())
+        .all()
+    )
+    from app.lwop_ledger_service import get_lwop_balance
+    lwop_balance = get_lwop_balance(emp.id)
+    return emp, ledger_entries, lwop_balance
+
+
+def _leave_dec_str(val, places: int = 3) -> str:
+    if val is None:
+        return ''
+    try:
+        d = Decimal(str(val))
+    except Exception:
+        return ''
+    if d == 0:
+        return ''
+    fmt = f'{{:,.{places}f}}'
+    return fmt.format(d)
+
+
+def _leave_credits_pdf_bytes(
+    emp: Employee,
+    ledger_entries: list[LeaveLedger],
+    lwop_balance,
+) -> io.BytesIO:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.pdfgen import canvas
+
+    page_w, page_h = landscape(A4)
+    margin = 24
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(page_w, page_h))
+
+    # Same municipal heading style as Service Record PDF.
+    top_y = page_h - margin
+    header_h = 48
+    side_col_w = 64
+    logo_size = 44
+    header_bottom = top_y - header_h
+    header_center_y = header_bottom + header_h / 2
+
+    logo_path = os.path.join(os.path.dirname(__file__), 'static', 'jagna_logo.png')
+    left_col_center = margin + side_col_w / 2
+    if os.path.exists(logo_path):
+        logo_x = left_col_center - logo_size / 2
+        logo_y = header_bottom + (header_h - logo_size) / 2
+        c.drawImage(
+            logo_path, logo_x, logo_y,
+            width=logo_size, height=logo_size,
+            preserveAspectRatio=True, mask='auto',
+        )
+
+    center_x = page_w / 2
+    title_size, sub_size, line_gap = 14, 9.5, 0
+    half_leading = (title_size + line_gap) / 2
+    title_baseline = header_center_y + half_leading
+    sub_baseline = header_center_y - half_leading
+    c.setFont('Helvetica-Bold', title_size)
+    c.drawCentredString(center_x, title_baseline, 'Municipality of Jagna')
+    c.setFont('Helvetica', sub_size)
+    c.drawCentredString(center_x, sub_baseline, 'Poblacion, Jagna, Bohol')
+
+    sep_y = header_bottom - 8
+    c.setStrokeColor(colors.HexColor('#0b3b6f'))
+    c.setLineWidth(0.8)
+    c.line(margin, sep_y, page_w - margin, sep_y)
+    c.setStrokeColor(colors.black)
+    c.setLineWidth(1)
+
+    c.setFont('Helvetica-Bold', 12)
+    c.drawCentredString(center_x, sep_y - 16, 'EMPLOYEE LEAVE CREDITS')
+
+    name = emp.directory_name
+    if emp.middle_name:
+        name = f'{name} {emp.middle_name}'
+    c.setFont('Helvetica', 8)
+    one_liner = (
+        f'Emp ID: {emp.employee_id or "—"}'
+        f'   |   Dept: {emp.department.name if emp.department else "—"}'
+        f'   |   Name: {name}'
+        f'   |   Position: {emp.position or "—"}'
+    )
+    c.drawString(margin, sep_y - 34, one_liner)
+
+    lwop_txt = _leave_dec_str(lwop_balance) or '0.000'
+    c.setFont('Helvetica', 7.5)
+    c.drawString(margin, sep_y - 48, f'Current LWOP balance: {lwop_txt} day(s)')
+
+    headers = [
+        'Date', 'Particulars',
+        'VL Ern', 'VL App', 'VL Bal',
+        'SL Ern', 'SL App', 'SL Bal',
+        'SPL Bal', 'WL Bal', 'CTO Bal', 'LWOP Bal',
+        'Remarks',
+    ]
+    usable = page_w - (2 * margin)
+    col_widths = [52, 130, 36, 36, 40, 36, 36, 40, 40, 40, 40, 44, usable - 570]
+    if col_widths[-1] < 80:
+        col_widths[-1] = 80
+    table_x = margin
+    table_y = sep_y - 62
+    row_h = 16
+
+    def draw_header(y_top: float):
+        c.setFillColor(colors.HexColor('#0b3b6f'))
+        c.rect(table_x, y_top - row_h, sum(col_widths), row_h, fill=1, stroke=1)
+        c.setFillColor(colors.white)
+        c.setFont('Helvetica-Bold', 6.4)
+        x = table_x
+        for idx, head in enumerate(headers):
+            c.drawString(x + 2, y_top - 11, head)
+            x += col_widths[idx]
+        c.setFillColor(colors.black)
+        c.setFont('Helvetica', 6.2)
+
+    draw_header(table_y)
+    y = table_y - row_h
+    if not ledger_entries:
+        y -= row_h
+        c.rect(table_x, y, sum(col_widths), row_h, fill=0, stroke=1)
+        c.drawString(table_x + 3, y + 5, 'No leave ledger entries have been recorded.')
+    else:
+        # Print oldest-first (date asc) to match the expected report ordering.
+        ledger_entries_sorted = sorted(
+            ledger_entries,
+            key=lambda e: ((e.transaction_date or date.min), (e.id or 0)),
+        )
+        for entry in ledger_entries_sorted:
+            y -= row_h
+            if y < 70:
+                c.showPage()
+                y = page_h - margin - 24
+                draw_header(y)
+                y -= row_h
+
+            vals = [
+                entry.transaction_date.strftime('%Y-%m-%d') if entry.transaction_date else '—',
+                entry.particulars or '—',
+                _leave_dec_str(entry.vl_earned),
+                _leave_dec_str(entry.vl_applied),
+                _leave_dec_str(entry.vl_balance) or '0.000',
+                _leave_dec_str(entry.sl_earned),
+                _leave_dec_str(entry.sl_applied),
+                _leave_dec_str(entry.sl_balance) or '0.000',
+                _leave_dec_str(entry.spl_balance),
+                _leave_dec_str(entry.wl_balance),
+                _leave_dec_str(entry.cto_balance),
+                _leave_dec_str(entry.lwop_balance),
+                entry.remarks or '',
+            ]
+            x = table_x
+            for idx, v in enumerate(vals):
+                c.rect(x, y, col_widths[idx], row_h, fill=0, stroke=1)
+                raw = str(v)
+                max_chars = max(4, int(col_widths[idx] / 4.2))
+                if len(raw) > max_chars:
+                    raw = raw[: max_chars - 3] + '...'
+                c.drawString(x + 2, y + 5, raw)
+                x += col_widths[idx]
+
+    sign_y = 44
+    c.setFont('Helvetica', 9)
+    c.line(page_w - 260, sign_y + 12, page_w - 70, sign_y + 12)
+    c.drawCentredString(page_w - 165, sign_y - 2, 'HRMDO Head')
+    c.drawCentredString(page_w - 165, sign_y - 14, 'Signature over Printed Name')
+
+    c.save()
+    buf.seek(0)
+    return buf
+
+
 @bp.route('/leave-credits/<int:id>')
 @login_required
 def leave_credits_card(id):
@@ -7693,23 +14306,42 @@ def leave_credits_card(id):
     denied = _require_admin_or_hr()
     if denied:
         return denied
-    emp = Employee.query.get_or_404(id)
-    # Display ledger entries newest-first (balances are stored per row).
-    ledger_entries = (LeaveLedger.query
-                      .filter_by(employee_id=emp.id)
-                      .order_by(LeaveLedger.transaction_date.desc(), LeaveLedger.id.desc())
-                      .all())
+    emp, ledger_entries, lwop_balance = _leave_credits_card_context(id)
     employee = current_user.employee if current_user.employee else None
-    return render_template('leave_credits/card.html',
-                           emp=emp,
-                           ledger_entries=ledger_entries,
-                           employee=employee)
+    return render_template(
+        'leave_credits/card.html',
+        emp=emp,
+        ledger_entries=ledger_entries,
+        employee=employee,
+        lwop_balance=lwop_balance,
+        can_export_pdf=True,
+        pdf_url=url_for('routes.leave_credits_card_pdf', id=emp.id),
+    )
+
+
+@bp.route('/leave-credits/<int:id>/pdf')
+@login_required
+def leave_credits_card_pdf(id):
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    emp, ledger_entries, lwop_balance = _leave_credits_card_context(id)
+    buf = _leave_credits_pdf_bytes(emp, ledger_entries, lwop_balance)
+    fname = f'leave_credits_{(emp.employee_id or str(emp.id)).strip()}.pdf'
+    return send_file(buf, mimetype='application/pdf', as_attachment=True, download_name=fname)
 
 
 @bp.route('/leave-credits/<int:id>/add', methods=['POST'])
 @login_required
 def leave_ledger_add(id):
-    """Add or edit a leave ledger entry for an employee and recompute running balances."""
+    """Add or edit a leave ledger entry for an employee and recompute running balances.
+
+    Add mode accepts one or more dates (comma-separated ``selected_dates``); each
+    date creates its own ledger row. Filled usage fields are charged as one leave
+    day per date: VL/SL/LWOP use the workweek setting (1.000 on 5-day, 1.250 on
+    4-day); other leave kinds always use 1.000.
+    Edit mode updates a single existing row using form amounts as entered.
+    """
     denied = _require_admin_or_hr()
     if denied:
         return denied
@@ -7718,15 +14350,29 @@ def leave_ledger_add(id):
 
     try:
         entry_id = (request.form.get('entry_id') or '').strip()
-        transaction_date_str = (request.form.get('transaction_date') or '').strip()
+        selected_dates_raw = (request.form.get('selected_dates') or '').strip()
+        # Backward compatible with older single-date form field
+        if not selected_dates_raw:
+            selected_dates_raw = (request.form.get('transaction_date') or '').strip()
         particulars = (request.form.get('particulars') or '').strip()
         remarks = (request.form.get('remarks') or '').strip() or None
 
-        if not transaction_date_str or not particulars:
+        selected_dates = []
+        if selected_dates_raw:
+            for part in selected_dates_raw.split(','):
+                part = part.strip()
+                if not part:
+                    continue
+                try:
+                    selected_dates.append(datetime.strptime(part, '%Y-%m-%d').date())
+                except ValueError as exc:
+                    raise ValueError(f'Invalid date: {part}') from exc
+
+        selected_dates = sorted(set(selected_dates))
+
+        if not selected_dates or not particulars:
             flash('Date and Particulars are required.', 'error')
             return redirect(url_for('routes.leave_credits_card', id=id))
-
-        transaction_date = datetime.strptime(transaction_date_str, '%Y-%m-%d').date()
 
         def get_decimal(name):
             val = (request.form.get(name) or '').strip()
@@ -7748,44 +14394,84 @@ def leave_ledger_add(id):
             'se_calamity_credits', 'se_calamity_used',
             'adopt_credits', 'adopt_used',
             'cto_earned', 'cto_used',
+            'lwop_days',
         ]
+        # Usage fields charged as one leave day per selected date on add.
+        # VL / SL / LWOP follow workweek (1.000 or 1.250); other leave kinds = 1.000.
+        # Earned/credits and tardiness/undertime keep the form values as entered.
+        workweek_usage_fields = {
+            'vl_applied', 'sl_applied', 'lwop_days',
+        }
+        flat_day_usage_fields = {
+            'spl_used', 'wl_used',
+            'ml_used', 'pl_used', 'sp_used', 'avaw_used',
+            'study_used', 'rehab_used', 'slbw_used',
+            'se_calamity_used', 'adopt_used',
+            'cto_used',
+        }
         deltas = {name: get_decimal(name) for name in delta_fields}
+        active_workweek_usage = {
+            name for name in workweek_usage_fields
+            if deltas.get(name, Decimal('0')) > Decimal('0')
+        }
+        active_flat_day_usage = {
+            name for name in flat_day_usage_fields
+            if deltas.get(name, Decimal('0')) > Decimal('0')
+        }
 
-        # Load all entries for this employee ordered by date then id
-        entries = (LeaveLedger.query
-                   .filter_by(employee_id=emp.id)
-                   .order_by(LeaveLedger.transaction_date, LeaveLedger.id)
-                   .all())
+        def deltas_for_date(transaction_date):
+            """Copy form deltas; override usage fields to one leave-day charge."""
+            out = dict(deltas)
+            if active_workweek_usage:
+                day_charge = leave_day_credit_for_workweek(
+                    _arrangement_model_code_for_date(emp, transaction_date)
+                )
+                for name in active_workweek_usage:
+                    out[name] = day_charge
+            if active_flat_day_usage:
+                for name in active_flat_day_usage:
+                    out[name] = Decimal('1.000')
+            return out
 
         if entry_id:
-            # Edit existing entry: replace deltas and meta
-            target = next((e for e in entries if e.id == int(entry_id)), None)
+            if len(selected_dates) != 1:
+                flash('Editing an entry requires exactly one date.', 'error')
+                return redirect(url_for('routes.leave_credits_card', id=id))
+            transaction_date = selected_dates[0]
+            target = LeaveLedger.query.filter_by(id=int(entry_id), employee_id=emp.id).first()
             if not target:
                 flash('Ledger entry not found.', 'error')
                 return redirect(url_for('routes.leave_credits_card', id=id))
             target.transaction_date = transaction_date
             target.particulars = particulars
             target.remarks = remarks
+            # Edit keeps amounts as entered (allows half-day / corrections).
             for k, v in deltas.items():
                 setattr(target, k, v)
+            flash('Leave ledger entry saved successfully.', 'success')
         else:
-            # Add new entry with these deltas
-            target = LeaveLedger(
-                employee_id=emp.id,
-                transaction_date=transaction_date,
-                particulars=particulars,
-                remarks=remarks,
-                created_by=current_user.id,
-            )
-            for k, v in deltas.items():
-                setattr(target, k, v)
-            db.session.add(target)
+            for transaction_date in selected_dates:
+                row_deltas = deltas_for_date(transaction_date)
+                target = LeaveLedger(
+                    employee_id=emp.id,
+                    transaction_date=transaction_date,
+                    particulars=particulars,
+                    remarks=remarks,
+                    created_by=current_user.id,
+                )
+                for k, v in row_deltas.items():
+                    setattr(target, k, v)
+                db.session.add(target)
             db.session.flush()
+            n = len(selected_dates)
+            flash(
+                f'{n} leave ledger {"entry" if n == 1 else "entries"} saved successfully.',
+                'success',
+            )
 
         recompute_leave_ledger_balances(emp.id)
 
         db.session.commit()
-        flash('Leave ledger entry saved successfully.', 'success')
 
     except ValueError as e:
         flash(f'Invalid input: {str(e)}', 'error')
@@ -8533,17 +15219,23 @@ def dashboard():
     ).count()
     pending_approvals = None
 
-    # Step increment due: appointment_date + 3 years, notify when due in next 15 days
-    today = date.today()
-    window_end = today + timedelta(days=15)
+    # Step increment due: last SI (or appointment) + 3 years; includes overdue + next 15 days
     step_increment_due_count = 0
-    for emp in Employee.query.filter(Employee.appointment_date.isnot(None)).all():
-        due = _add_years(emp.appointment_date, 3)
-        if due and today <= due <= window_end:
-            step_increment_due_count += 1
+    try:
+        plantilla_emps = (
+            Employee.query
+            .filter(Employee.appointment_date.isnot(None))
+            .filter(Employee.status.in_(('active', 'inactive')))
+            .all()
+        )
+        step_increment_due_count = len(_step_increment_due_employees(plantilla_emps))
+    except Exception:
+        step_increment_due_count = 0
     
     # Get recent leave requests
     recent_leaves = LeaveRequest.query.order_by(LeaveRequest.created_at.desc()).limit(10).all()
+
+    from app.employee_id_photo_service import employee_has_id_photo
 
     # Manager dashboard: scope leave stats + list to managed department(s)
     manager_leave_scope = None
@@ -8742,13 +15434,19 @@ def dashboard():
                          step_increment_due_count=step_increment_due_count,
                          recent_leaves=recent_leaves,
                          manager_leave_scope=manager_leave_scope,
-                         employee=employee)
+                         employee=employee,
+                         has_id_photo=employee_has_id_photo(employee) if employee else False)
 
 # Employee Management Routes
 @bp.route('/employees')
 @login_required
 def employees_list():
-    employees = Employee.query.order_by(Employee.created_at.desc()).all()
+    employees = (
+        Employee.query
+        .options(db.joinedload(Employee.pds), db.joinedload(Employee.department))
+        .order_by(Employee.created_at.desc())
+        .all()
+    )
     departments = Department.query.all()
     employee = current_user.employee if current_user.employee else None
     return render_template('employees/list.html', employees=employees, departments=departments, employee=employee)
@@ -8758,7 +15456,14 @@ def employees_list():
 @login_required
 def users_manual():
     employee = current_user.employee if current_user.employee else None
-    return render_template('about/users_manual.html', employee=employee)
+    role = (getattr(current_user, 'role', None) or '').strip().lower()
+    role_label = (getattr(current_user, 'role', None) or 'User').strip().title()
+    return render_template(
+        'about/users_manual.html',
+        employee=employee,
+        viewer_role=role,
+        viewer_role_label=role_label,
+    )
 
 
 @bp.route('/about/hrmdo-manual')
@@ -8766,6 +15471,78 @@ def users_manual():
 def hrmdo_manual():
     employee = current_user.employee if current_user.employee else None
     return render_template('about/hrmdo_manual.html', employee=employee)
+
+
+@bp.route('/about/platform')
+@login_required
+def about_platform():
+    employee = current_user.employee if current_user.employee else None
+    from app.platform_about import PLATFORM_ABOUT, PLATFORM_DEVELOPER
+    return render_template(
+        'about/platform.html',
+        employee=employee,
+        platform=PLATFORM_ABOUT,
+        developer=PLATFORM_DEVELOPER,
+    )
+
+
+_DTR_PAYROLL_PROCESS_ROLES = frozenset({'admin', 'hr', 'payroll_maker'})
+_DTR_PAYROLL_PROCESS_FILES = {
+    'docx': (
+        'DTR_to_Payroll_Process_Flow.docx',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'DTR_to_Payroll_Process_Flow.docx',
+    ),
+    'pdf': (
+        'DTR_to_Payroll_Flowchart.pdf',
+        'application/pdf',
+        'DTR_to_Payroll_Flowchart.pdf',
+    ),
+}
+
+
+def _require_dtr_payroll_process_viewer():
+    """Admin, HR, or Payroll Maker may view the DTR→payroll process guide."""
+    role = (getattr(current_user, 'role', None) or '').strip().lower()
+    if role in _DTR_PAYROLL_PROCESS_ROLES or _user_is_admin_or_hr():
+        return None
+    flash('Access denied. Admin, HR, or Payroll Maker role required.', 'error')
+    return redirect(url_for('routes.dashboard'))
+
+
+@bp.route('/about/dtr-payroll-process')
+@login_required
+def dtr_payroll_process():
+    """Help: text process flow from DTR to payroll (Admin / HR / Payroll Maker)."""
+    denied = _require_dtr_payroll_process_viewer()
+    if denied:
+        return denied
+    employee = current_user.employee if current_user.employee else None
+    return render_template('about/dtr_payroll_process.html', employee=employee)
+
+
+@bp.route('/about/dtr-payroll-process/download/<kind>')
+@login_required
+def dtr_payroll_process_download(kind: str):
+    """Download Word process flow or PDF flowchart."""
+    denied = _require_dtr_payroll_process_viewer()
+    if denied:
+        return denied
+    meta = _DTR_PAYROLL_PROCESS_FILES.get((kind or '').strip().lower())
+    if not meta:
+        abort(404)
+    filename, mimetype, download_name = meta
+    docs_dir = os.path.join(os.path.dirname(__file__), 'static', 'docs')
+    path = os.path.join(docs_dir, filename)
+    if not os.path.isfile(path):
+        flash('Process flow file is not available on the server.', 'error')
+        return redirect(url_for('routes.dtr_payroll_process'))
+    return send_file(
+        path,
+        mimetype=mimetype,
+        as_attachment=True,
+        download_name=download_name,
+    )
 
 @bp.route('/employees/add', methods=['GET', 'POST'])
 @login_required
@@ -8802,63 +15579,71 @@ def employee_add():
             residential_province = request.form.get('residential_province', '').strip()
             residential_zip_code = request.form.get('residential_zip_code', '').strip()
             address = request.form.get('address', '').strip()  # Keep for backward compatibility
-            status = request.form.get('status', 'active')
+            status = (request.form.get('status') or 'active').strip().lower()
+            if status not in EMPLOYEE_STATUSES:
+                raise ValueError(f"Invalid status. Allowed: {', '.join(EMPLOYEE_STATUSES)}.")
+            separation_date_raw = (request.form.get('separation_date') or '').strip()
+            separation_type = _parse_employee_separation_type(request.form.get('separation_type'))
+
+            separation_date = None
+            if status == 'separated' and separation_date_raw:
+                separation_date = datetime.strptime(separation_date_raw, '%Y-%m-%d').date()
             
-            # Agency: National if department name is RHU, else Local
+            # Agency: National for MHO/RHU, else Local
             agency = None
             if department_id:
                 dept = Department.query.get(int(department_id))
-                agency = 'National' if dept and dept.name == 'RHU' else 'Local'
+                agency = _agency_from_department(dept)
 
-            # Automatic employee_id generation: max 6-digit numeric + 1.
-            # Also includes a small retry loop to avoid collisions in concurrent adds.
-            new_employee = None
-            for _ in range(5):
-                employee_id = _next_employee_id_6digit()
-                try:
-                    new_employee = Employee(
-                        employee_id=employee_id,
-                        first_name=first_name,
-                        last_name=last_name,
-                        middle_name=middle_name if middle_name else None,
-                        position=position if position else None,
-                        jo_cos_designation_id=jo_cos_designation_id_val,
-                        department_id=int(department_id) if department_id else None,
-                        status_of_appointment=status_of_appointment if status_of_appointment else None,
-                        nature_of_appointment=nature_of_appointment if nature_of_appointment else None,
-                        appointment_date=datetime.strptime(appointment_date, '%Y-%m-%d').date() if appointment_date else None,
-                        phone=phone if phone else None,
-                        mobile_no=mobile_no if mobile_no else None,
-                        agency=agency,
-                        lgu_class_level=lgu_class_level if lgu_class_level else None,
-                        salary_tranche=salary_tranche if salary_tranche else None,
-                        salary_grade=int(salary_grade_val) if salary_grade_val else None,
-                        salary_step=int(salary_step_val) if salary_step_val else None,
-                        flexible_worktime=False,
-                        flexible_start_time=None,
-                        flexible_end_time=None,
-                        residential_house_no=residential_house_no if residential_house_no else None,
-                        residential_street=residential_street if residential_street else None,
-                        residential_subdivision=residential_subdivision if residential_subdivision else None,
-                        residential_barangay=residential_barangay if residential_barangay else None,
-                        residential_city=residential_city if residential_city else None,
-                        residential_province=residential_province if residential_province else None,
-                        residential_zip_code=residential_zip_code if residential_zip_code else None,
-                        address=address if address else None,  # Keep for backward compatibility
-                        status=status
-                    )
+            # Prefer the official badge / employee ID from the form. Fall back to the
+            # suggested 5-digit auto value only when the field is left blank.
+            employee_id = (request.form.get('employee_id') or '').strip()
+            if not employee_id:
+                employee_id = _next_employee_id_5digit()
+            employee_id = _validate_employee_badge_id(employee_id)
+            if Employee.query.filter_by(employee_id=employee_id).first():
+                raise ValueError(f'Employee ID "{employee_id}" is already in use.')
 
-                    db.session.add(new_employee)
-                    db.session.flush()  # Assign new_employee.id and verify unique constraints
-                    break
-                except IntegrityError:
-                    db.session.rollback()
-                    new_employee = None
-                    continue
+            new_employee = Employee(
+                employee_id=employee_id,
+                first_name=first_name,
+                last_name=last_name,
+                middle_name=middle_name if middle_name else None,
+                position=position if position else None,
+                jo_cos_designation_id=jo_cos_designation_id_val,
+                department_id=int(department_id) if department_id else None,
+                status_of_appointment=status_of_appointment if status_of_appointment else None,
+                nature_of_appointment=nature_of_appointment if nature_of_appointment else None,
+                appointment_date=datetime.strptime(appointment_date, '%Y-%m-%d').date() if appointment_date else None,
+                phone=phone if phone else None,
+                mobile_no=mobile_no if mobile_no else None,
+                agency=agency,
+                lgu_class_level=lgu_class_level if lgu_class_level else None,
+                salary_tranche=salary_tranche if salary_tranche else None,
+                salary_grade=int(salary_grade_val) if salary_grade_val else None,
+                salary_step=int(salary_step_val) if salary_step_val else None,
+                flexible_worktime=False,
+                flexible_start_time=None,
+                flexible_end_time=None,
+                residential_house_no=residential_house_no if residential_house_no else None,
+                residential_street=residential_street if residential_street else None,
+                residential_subdivision=residential_subdivision if residential_subdivision else None,
+                residential_barangay=residential_barangay if residential_barangay else None,
+                residential_city=residential_city if residential_city else None,
+                residential_province=residential_province if residential_province else None,
+                residential_zip_code=residential_zip_code if residential_zip_code else None,
+                address=address if address else None,  # Keep for backward compatibility
+                status=status,
+                separation_date=separation_date if status == 'separated' else None,
+                separation_type=separation_type if status == 'separated' else None,
+            )
 
-            if not new_employee:
-                raise RuntimeError("Could not generate a unique Employee ID. Please retry.")
-            
+            try:
+                db.session.add(new_employee)
+                db.session.flush()  # Assign new_employee.id and verify unique constraints
+            except IntegrityError:
+                db.session.rollback()
+                raise ValueError(f'Employee ID "{employee_id}" is already in use.')
             # Get user email if employee has a user account
             user_email = None
             if new_employee.user_id:
@@ -8889,6 +15674,7 @@ def employee_add():
                 created_by_user_id=getattr(current_user, 'id', None),
             )
             _sync_employee_flexi_days(new_employee.id, [])
+            _seed_opening_appointment_history(new_employee)
             db.session.commit()
             flash('Employee added successfully.', 'success')
             return redirect(url_for('routes.employees_list'))
@@ -8907,7 +15693,7 @@ def employee_add():
                 salary_grades=salary_grades,
                 salary_grades_json=salary_grades_json,
                 jo_cos_designations=_jo_cos_designations_ordered(),
-                next_employee_id=_next_employee_id_6digit(),
+                next_employee_id=_next_employee_id_5digit(),
                 employee=employee,
                 **_employee_form_flexi_kwargs(),
             )
@@ -8924,7 +15710,7 @@ def employee_add():
         salary_grades=salary_grades,
         salary_grades_json=salary_grades_json,
         jo_cos_designations=_jo_cos_designations_ordered(),
-        next_employee_id=_next_employee_id_6digit(),
+        next_employee_id=_next_employee_id_5digit(),
         employee=employee,
         **_employee_form_flexi_kwargs(),
     )
@@ -8967,7 +15753,24 @@ def employee_edit(id):
             residential_province = request.form.get('residential_province', '').strip()
             residential_zip_code = request.form.get('residential_zip_code', '').strip()
             address = request.form.get('address', '').strip()  # Keep for backward compatibility
-            status = request.form.get('status', 'active')
+            status = (request.form.get('status') or 'active').strip().lower()
+            if status not in EMPLOYEE_STATUSES:
+                raise ValueError(f"Invalid status. Allowed: {', '.join(EMPLOYEE_STATUSES)}.")
+            separation_date_raw = (request.form.get('separation_date') or '').strip()
+            separation_type = _parse_employee_separation_type(request.form.get('separation_type'))
+
+            separation_date = None
+            if status == 'separated' and separation_date_raw:
+                separation_date = datetime.strptime(separation_date_raw, '%Y-%m-%d').date()
+
+            # Employee ID: only Admin may change an existing badge number
+            old_employee_id = (emp.employee_id or '').strip()
+            if not _can_edit_employee_id():
+                employee_id = old_employee_id
+            if not employee_id:
+                raise ValueError('Employee ID is required.')
+            if employee_id != old_employee_id:
+                employee_id = _validate_employee_badge_id(employee_id)
             
             # Check if employee_id already exists (excluding current employee)
             existing = Employee.query.filter_by(employee_id=employee_id).first()
@@ -8978,7 +15781,37 @@ def employee_edit(id):
                 salary_grades = SalaryGrade.query.all()
                 employee = current_user.employee if current_user.employee else None
                 salary_grades_json = _serialize_salary_grades(salary_grades)
-                return render_template('employees/form.html', emp=emp, departments=departments, positions=positions, salary_grades=salary_grades, salary_grades_json=salary_grades_json, jo_cos_designations=_jo_cos_designations_ordered(), employee=employee, **_employee_form_flexi_kwargs(emp))
+                return render_template(
+                    'employees/form.html',
+                    emp=emp,
+                    departments=departments,
+                    positions=positions,
+                    salary_grades=salary_grades,
+                    salary_grades_json=salary_grades_json,
+                    jo_cos_designations=_jo_cos_designations_ordered(),
+                    employee=employee,
+                    can_edit_employee_id=_can_edit_employee_id(),
+                    **_employee_form_flexi_kwargs(emp),
+                )
+
+            if employee_id != old_employee_id:
+                # Keep login badge in sync when the employee has a user account
+                linked_user = None
+                if emp.user_id:
+                    linked_user = User.query.get(emp.user_id)
+                if linked_user is None:
+                    linked_user = User.query.filter_by(employee_id=old_employee_id).first()
+                if linked_user:
+                    clash = User.query.filter(
+                        User.employee_id == employee_id,
+                        User.id != linked_user.id,
+                    ).first()
+                    if clash:
+                        raise ValueError(
+                            f'Cannot change Employee ID to "{employee_id}": '
+                            'another user account already uses that ID.'
+                        )
+                    linked_user.employee_id = employee_id
 
             # Capture old appointment-related values for history (before update)
             old_appointment_date = emp.appointment_date
@@ -8990,12 +15823,12 @@ def employee_edit(id):
             old_salary_grade = emp.salary_grade
             old_salary_step = emp.salary_step
 
-            # Agency: National if department name is RHU, else Local
+            # Agency follows salary schedule: National for MHO/RHU, else Local
             agency = None
             dept = None
             if department_id:
                 dept = Department.query.get(int(department_id))
-                agency = 'National' if dept and dept.name == 'RHU' else 'Local'
+                agency = _agency_from_department(dept)
 
             # New appointment/salary values (for change detection)
             new_appointment_date = datetime.strptime(appointment_date, '%Y-%m-%d').date() if appointment_date else None
@@ -9016,7 +15849,9 @@ def employee_edit(id):
             emp.department_id = int(department_id) if department_id else None
             emp.status_of_appointment = status_of_appointment if status_of_appointment else None
             emp.nature_of_appointment = nature_of_appointment if nature_of_appointment else None
-            emp.appointment_date = datetime.strptime(appointment_date, '%Y-%m-%d').date() if appointment_date else None
+            # Original appointment date stays fixed unless Admin corrects it.
+            if _can_edit_employee_id():
+                emp.appointment_date = new_appointment_date
             emp.phone = phone if phone else None
             emp.mobile_no = mobile_no if mobile_no else None
             emp.agency = agency
@@ -9036,6 +15871,12 @@ def employee_edit(id):
             emp.residential_zip_code = residential_zip_code if residential_zip_code else None
             emp.address = address if address else None  # Keep for backward compatibility
             emp.status = status
+            if status == 'separated':
+                emp.separation_date = separation_date
+                emp.separation_type = separation_type
+            else:
+                emp.separation_date = None
+                emp.separation_type = None
             emp.updated_at = datetime.utcnow()
             
             # Get user email if employee has a user account
@@ -9045,9 +15886,12 @@ def employee_edit(id):
                 if user:
                     user_email = user.email
             
-            # Sync address, mobile, phone, and email to employee_pds table
+            # Sync name + address, mobile, phone, and email to employee_pds table
             pds = EmployeePDS.query.filter_by(employee_id=id).first()
             if pds:
+                pds.surname = emp.last_name
+                pds.first_name = emp.first_name
+                pds.middle_name = emp.middle_name
                 pds.telephone_no = phone if phone else None
                 pds.mobile_no = mobile_no if mobile_no else None
                 pds.email_address = user_email
@@ -9078,10 +15922,10 @@ def employee_edit(id):
                 )
                 db.session.add(pds)
 
-            # If appointment/salary-related fields changed, append to history
+            # If appointment/salary-related fields changed, append to history.
+            # Original appointment_date is not used as effectivity for later changes.
             appointment_changed = (
-                old_appointment_date != new_appointment_date
-                or old_status_of_appointment != new_status
+                old_status_of_appointment != new_status
                 or old_nature_of_appointment != new_nature
                 or old_agency != agency
                 or old_lgu_class_level != new_lgu
@@ -9089,41 +15933,37 @@ def employee_edit(id):
                 or old_salary_grade != new_sal_grade
                 or old_salary_step != new_sal_step
             )
+            if _can_edit_employee_id() and old_appointment_date != emp.appointment_date:
+                appointment_changed = True
             if appointment_changed:
-                from sqlalchemy import func as sql_func
-                emp_dept_name = dept.name if dept else (emp.department.name if emp.department else None)
-                sal_amount = None
-                if emp.salary_grade and emp.salary_step and (agency or emp.agency) is not None:
-                    sg_row = SalaryGrade.query.filter(
-                        SalaryGrade.sg == emp.salary_grade,
-                        sql_func.coalesce(SalaryGrade.sg_agency, '') == (agency or emp.agency or ''),
-                        sql_func.coalesce(SalaryGrade.sg_lgu_class, '') == (emp.lgu_class_level or ''),
-                        sql_func.coalesce(SalaryGrade.sg_tranche, '') == (emp.salary_tranche or '')
-                    ).first()
-                    if sg_row and 1 <= emp.salary_step <= 8:
-                        sal_amount = getattr(sg_row, f'sg_step_{emp.salary_step}', None)
-                history_entry = EmployeeAppointmentHistory(
-                    emp_id=emp.id,
-                    emp_dept=emp_dept_name,
-                    emp_position=emp.position,
-                    appoint_date=emp.appointment_date,
-                    appoint_status=emp.status_of_appointment,
-                    appoint_nature=emp.nature_of_appointment,
-                    agency=emp.agency,
-                    lgu_class=emp.lgu_class_level,
-                    sal_grade=emp.salary_grade,
-                    sal_step=emp.salary_step,
-                    sal_amount=sal_amount,
-                    location=request.remote_addr,
-                    user_id=current_user.id if current_user else None
-                )
-                db.session.add(history_entry)
+                effectivity = date.today()
+                if _can_edit_employee_id() and new_appointment_date and new_appointment_date != old_appointment_date:
+                    # Admin corrected original date — keep effectivity as today for the update row
+                    effectivity = date.today()
+                db.session.add(_build_appointment_history_entry(
+                    emp,
+                    change_type=APPOINTMENT_CHANGE_UPDATE,
+                    effectivity_date=effectivity,
+                    from_sal_step=old_salary_step,
+                    to_sal_step=emp.salary_step,
+                    remarks='Updated via Employees edit',
+                ))
 
             ensure_appointment_spl_wl_grant(
                 emp.id,
                 created_by_user_id=getattr(current_user, 'id', None),
             )
             _sync_employee_flexi_days(emp.id, [])
+
+            from app.employee_id_photo_service import link_employee_id_photo_by_ermt_number
+            photo_number = (request.form.get('id_photo_ermt_number') or '').strip()
+            if photo_number:
+                ok, photo_msg = link_employee_id_photo_by_ermt_number(emp, photo_number)
+                if not ok:
+                    raise ValueError(photo_msg)
+            else:
+                emp.id_photo_ermt_record_id = None
+
             db.session.commit()
             flash('Employee updated successfully.', 'success')
             return redirect(url_for('routes.employees_list'))
@@ -9135,14 +15975,112 @@ def employee_edit(id):
             salary_grades = SalaryGrade.query.all()
             employee = current_user.employee if current_user.employee else None
             salary_grades_json = _serialize_salary_grades(salary_grades)
-            return render_template('employees/form.html', emp=emp, departments=departments, positions=positions, salary_grades=salary_grades, salary_grades_json=salary_grades_json, jo_cos_designations=_jo_cos_designations_ordered(), employee=employee, **_employee_form_flexi_kwargs(emp))
+            return render_template(
+                'employees/form.html',
+                emp=emp,
+                departments=departments,
+                positions=positions,
+                salary_grades=salary_grades,
+                salary_grades_json=salary_grades_json,
+                jo_cos_designations=_jo_cos_designations_ordered(),
+                employee=employee,
+                can_edit_employee_id=_can_edit_employee_id(),
+                **_employee_form_flexi_kwargs(emp),
+            )
     
     departments = Department.query.all()
     positions = Position.query.order_by(Position.title).all()
     salary_grades = SalaryGrade.query.all()
     employee = current_user.employee if current_user.employee else None
     salary_grades_json = _serialize_salary_grades(salary_grades)
-    return render_template('employees/form.html', emp=emp, departments=departments, positions=positions, salary_grades=salary_grades, salary_grades_json=salary_grades_json, jo_cos_designations=_jo_cos_designations_ordered(), employee=employee, **_employee_form_flexi_kwargs(emp))
+    return render_template(
+        'employees/form.html',
+        emp=emp,
+        departments=departments,
+        positions=positions,
+        salary_grades=salary_grades,
+        salary_grades_json=salary_grades_json,
+        jo_cos_designations=_jo_cos_designations_ordered(),
+        employee=employee,
+        can_edit_employee_id=_can_edit_employee_id(),
+        **_employee_form_flexi_kwargs(emp),
+    )
+
+def _purge_employee_dependent_rows(
+    employee_pk: int,
+    *,
+    deleted_by_user_id=None,
+    deleted_by_username=None,
+):
+    """
+    Remove / unlink all NOT-NULL FK rows that block employee delete.
+
+    SQLAlchemy otherwise SET NULLs relationships like dtr_upload_batch_items.employee_id,
+    which violates NOT NULL constraints.
+    """
+    eid = employee_pk
+
+    # Soft-nulls (nullable FKs)
+    Department.query.filter_by(manager_id=eid).update(
+        {Department.manager_id: None},
+        synchronize_session=False,
+    )
+
+    # Leave ledger: keep deletion audit trail, then remove rows
+    ledger_rows = LeaveLedger.query.filter_by(employee_id=eid).all()
+    for ledger_entry in ledger_rows:
+        record_leave_ledger_deletion(
+            ledger_entry,
+            deleted_by_user_id=deleted_by_user_id,
+            deleted_by_username=deleted_by_username,
+            source='employee_delete',
+        )
+
+    # Delete in dependency-friendly order. Many of these have NOT NULL employee_id
+    # and ORM backrefs that would otherwise try to null the FK on parent delete.
+    delete_specs = (
+        (DtrUploadPunchFlag, 'employee_id'),
+        (DtrUploadPunch, 'employee_id'),
+        (DtrUploadBatchItem, 'employee_id'),
+        (DtrJustification, 'employee_id'),
+        (DtrAccomplishmentReport, 'employee_id'),
+        (DtrMonthlySubmission, 'employee_id'),
+        (DtrQuincenaWorktimeSummary, 'employee_id'),
+        (WorkHours, 'employee_id'),
+        (FlexibleWorktime, 'employee_id'),
+        (OvertimeAuthorization, 'employee_id'),
+        (JoCosExtendService, 'employee_id'),
+        (JoCosOvertime, 'employee_id'),
+        (JoCosOvertimeLedger, 'employee_id'),
+        (JoCosOvertimeOffsetRequest, 'employee_id'),
+        (JoCosPayslip, 'employee_id'),
+        (PlantillaPayslip, 'employee_id'),
+        (GsisLoanDeduction, 'employee_id'),
+        (GsisLoanRecord, 'employee_id'),
+        (GsisContribution, 'employee_id'),
+        (PhicContribution, 'employee_id'),
+        (LbpBillingDeduction, 'employee_id'),
+        (LbpBillingRecord, 'employee_id'),
+        (JofemcoBillingDeduction, 'employee_id'),
+        (JofemcoBillingRecord, 'employee_id'),
+        (WithholdingTaxDeduction, 'employee_id'),
+        (WithholdingTaxRecord, 'employee_id'),
+        (HdmfContributionDeduction, 'employee_id'),
+        (HdmfContributionRecord, 'employee_id'),
+        (HdmfLoanDeduction, 'employee_id'),
+        (HdmfLoanRecord, 'employee_id'),
+        (LeaveBalance, 'employee_id'),
+        (LeaveLedger, 'employee_id'),
+        (LeaveRequest, 'employee_id'),
+        (DailyTimeRecord, 'employee_id'),
+        (Attendance, 'employee_id'),
+        (EmployeeAppointmentHistory, 'emp_id'),
+        (EmployeeFlexiDay, 'employee_id'),
+        (EmployeePDS, 'employee_id'),
+    )
+    for model, col in delete_specs:
+        model.query.filter_by(**{col: eid}).delete(synchronize_session=False)
+
 
 @bp.route('/employees/delete/<int:id>', methods=['POST'])
 @login_required
@@ -9157,24 +16095,12 @@ def employee_delete(id):
         if emp.user:
             flash('Cannot delete employee with associated user account. Delete the user account first.', 'error')
             return redirect(url_for('routes.employees_list'))
-        
-        # Delete dependent rows first (PDS has NOT NULL employee_id FK, so it must be deleted)
-        EmployeePDS.query.filter_by(employee_id=emp.id).delete(synchronize_session=False)
-        ledger_rows = LeaveLedger.query.filter_by(employee_id=emp.id).all()
-        for ledger_entry in ledger_rows:
-            record_leave_ledger_deletion(
-                ledger_entry,
-                deleted_by_user_id=current_user.id,
-                deleted_by_username=getattr(current_user, 'username', None),
-                source='employee_delete',
-            )
-        LeaveLedger.query.filter_by(employee_id=emp.id).delete(synchronize_session=False)
-        LeaveRequest.query.filter_by(employee_id=emp.id).delete(synchronize_session=False)
-        DailyTimeRecord.query.filter_by(employee_id=emp.id).delete(synchronize_session=False)
-        Attendance.query.filter_by(employee_id=emp.id).delete(synchronize_session=False)
-        EmployeeAppointmentHistory.query.filter_by(emp_id=emp.id).delete(synchronize_session=False)
-        EmployeeFlexiDay.query.filter_by(employee_id=emp.id).delete(synchronize_session=False)
 
+        _purge_employee_dependent_rows(
+            emp.id,
+            deleted_by_user_id=current_user.id,
+            deleted_by_username=getattr(current_user, 'username', None),
+        )
         db.session.delete(emp)
         db.session.commit()
         flash('Employee deleted successfully.', 'success')
@@ -9214,7 +16140,9 @@ def employee_pds(id):
             # Only process Personal Information if this is the personal_information section
             if section == 'personal_information':
                 # Personal Information
-                pds.name_extension = request.form.get('name_extension', '').strip() or None
+                pds.name_extension = Employee.normalize_name_extension(
+                    request.form.get('name_extension', '')
+                ) or None
                 dob = request.form.get('date_of_birth', '').strip()
                 pds.date_of_birth = datetime.strptime(dob, '%Y-%m-%d').date() if dob else None
                 pds.place_of_birth = request.form.get('place_of_birth', '').strip() or None
@@ -9596,10 +16524,53 @@ def users_list():
     denied = _require_admin_or_hr()
     if denied:
         return denied
-    users = User.query.order_by(User.created_at.desc()).all()
+    from app.user_provision_service import count_active_employees_without_user
+    users = (
+        User.query
+        .options(db.joinedload(User.employee))
+        .order_by(User.created_at.desc())
+        .all()
+    )
     employees = Employee.query.filter_by(user_id=None).order_by(Employee.employee_id).all()
     employee = current_user.employee if current_user.employee else None
-    return render_template('users/list.html', users=users, employees=employees, employee=employee)
+    return render_template(
+        'users/list.html',
+        users=users,
+        employees=employees,
+        employee=employee,
+        active_without_user_count=count_active_employees_without_user(),
+    )
+
+
+@bp.route('/users/provision-active', methods=['POST'])
+@login_required
+def users_provision_active():
+    """Create user accounts for all active employees missing one."""
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    from app.user_provision_service import provision_users_for_active_employees
+
+    result = provision_users_for_active_employees()
+    if not result.get('ok'):
+        flash(result.get('errors', ['Provisioning failed.'])[0], 'error')
+        return redirect(url_for('routes.users_list'))
+
+    parts = []
+    if result.get('created'):
+        parts.append(f"{result['created']} user account(s) created")
+    if result.get('linked'):
+        parts.append(f"{result['linked']} employee(s) linked to existing account(s)")
+    if result.get('skipped'):
+        parts.append(f"{result['skipped']} skipped (already have accounts)")
+    flash(
+        'Provisioning complete: ' + (', '.join(parts) if parts else 'no changes needed') + '. '
+        'Initial password for new accounts is the employee ID.',
+        'success',
+    )
+    if result.get('errors'):
+        flash('Some rows were skipped: ' + '; '.join(result['errors'][:3]), 'info')
+    return redirect(url_for('routes.users_list'))
 
 @bp.route('/users/add', methods=['GET', 'POST'])
 @login_required
@@ -9754,10 +16725,13 @@ def user_delete(id):
         return redirect(url_for('routes.users_list'))
     
     try:
-        # Unlink employee if exists
+        # Unlink employee if exists (keep PDS/employee row)
         if user.employee:
             user.employee.user_id = None
-        
+
+        # Notifications.user_id is NOT NULL — remove rows instead of nulling the FK.
+        HrmsNotification.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+
         db.session.delete(user)
         db.session.commit()
         flash('User deleted successfully.', 'success')
@@ -10432,6 +17406,188 @@ def _add_years(d, years):
         return date(d.year + years, 2, 28)
 
 
+STEP_INCREMENT_YEARS = 3
+STEP_INCREMENT_NOTIFY_DAYS = 15
+MAX_SALARY_STEP = 8
+APPOINTMENT_CHANGE_ORIGINAL = 'Original Appointment'
+APPOINTMENT_CHANGE_CHANGE = 'Appointment Change'
+APPOINTMENT_CHANGE_STEP_INCREMENT = 'Step Increment'
+APPOINTMENT_CHANGE_UPDATE = 'Appointment Update'
+APPOINTMENT_CHANGE_HISTORY_ENTRY = 'History Entry'
+
+APPOINTMENT_STATUS_OPTIONS = (
+    'Permanent', 'Casual', 'Contractual', 'Temporary', 'Coterminous',
+    'Job Order', 'Contract of Service',
+)
+APPOINTMENT_NATURE_OPTIONS = (
+    'Original', 'Reemployment', 'Reappointment', 'Transfer', 'Promotion', 'Demotion',
+)
+
+
+def _salary_amount_for_grade_step(emp, sal_grade, sal_step):
+    """Salary amount for a specific SG/step using the employee's agency/LGU/tranche."""
+    if not emp or not sal_grade or not sal_step or sal_step < 1 or sal_step > MAX_SALARY_STEP:
+        return None
+    from sqlalchemy import func as sql_func
+    row = SalaryGrade.query.filter(
+        SalaryGrade.sg == sal_grade,
+        sql_func.coalesce(SalaryGrade.sg_agency, '') == (emp.agency or ''),
+        sql_func.coalesce(SalaryGrade.sg_lgu_class, '') == (emp.lgu_class_level or ''),
+        sql_func.coalesce(SalaryGrade.sg_tranche, '') == (emp.salary_tranche or ''),
+    ).first()
+    if not row:
+        return None
+    val = getattr(row, f'sg_step_{sal_step}', None)
+    return val
+
+
+def _is_plantilla_for_appointment_history(emp) -> bool:
+    """Plantilla (non-JO/COS) employees participate in appointment/SI history."""
+    return bool(emp) and not _is_jo_cos_employee(emp)
+
+
+def _build_appointment_history_entry(
+    emp,
+    *,
+    change_type,
+    effectivity_date,
+    appoint_status=None,
+    appoint_nature=None,
+    sal_grade=None,
+    sal_step=None,
+    from_sal_step=None,
+    to_sal_step=None,
+    remarks=None,
+    appoint_date=None,
+):
+    """Build an EmployeeAppointmentHistory row (not yet added to session)."""
+    status = appoint_status if appoint_status is not None else emp.status_of_appointment
+    nature = appoint_nature if appoint_nature is not None else emp.nature_of_appointment
+    grade = sal_grade if sal_grade is not None else emp.salary_grade
+    step = sal_step if sal_step is not None else emp.salary_step
+    sal_amount = _salary_amount_for_grade_step(emp, grade, step) if grade and step else None
+    return EmployeeAppointmentHistory(
+        emp_id=emp.id,
+        emp_dept=emp.department.name if emp.department else None,
+        emp_position=emp.position,
+        appoint_date=appoint_date if appoint_date is not None else emp.appointment_date,
+        appoint_status=status,
+        appoint_nature=nature,
+        agency=emp.agency,
+        lgu_class=emp.lgu_class_level,
+        sal_grade=grade,
+        sal_step=step,
+        sal_amount=sal_amount,
+        change_type=change_type,
+        effectivity_date=effectivity_date,
+        from_sal_step=from_sal_step,
+        to_sal_step=to_sal_step if to_sal_step is not None else step,
+        remarks=remarks,
+        location=request.remote_addr if request else None,
+        user_id=current_user.id if current_user and getattr(current_user, 'is_authenticated', False) else None,
+    )
+
+
+def _seed_opening_appointment_history(emp, *, force=False):
+    """
+    Insert Original Appointment from current employee fields when none exists.
+    Returns True if a row was inserted.
+    """
+    if not emp or not _is_plantilla_for_appointment_history(emp):
+        return False
+    if not force and emp.appointment_history.count() > 0:
+        return False
+    effectivity = emp.appointment_date or date.today()
+    entry = _build_appointment_history_entry(
+        emp,
+        change_type=APPOINTMENT_CHANGE_ORIGINAL,
+        effectivity_date=effectivity,
+        appoint_date=emp.appointment_date,
+        from_sal_step=None,
+        to_sal_step=emp.salary_step,
+        remarks='Opening appointment (seeded)',
+    )
+    db.session.add(entry)
+    return True
+
+
+def _step_increment_eligible(emp) -> bool:
+    """Plantilla employees below step 8 with an appointment date can earn SI."""
+    if not emp or (emp.status or '').strip().lower() not in ('active', 'inactive'):
+        return False
+    if _is_jo_cos_employee(emp):
+        return False
+    if not emp.appointment_date:
+        return False
+    if emp.salary_step is None or emp.salary_step < 1 or emp.salary_step >= MAX_SALARY_STEP:
+        return False
+    if not emp.salary_grade:
+        return False
+    return True
+
+
+def _step_increment_base_date(emp, history_rows=None):
+    """
+    Base date for next SI due:
+    last Step Increment / step-raising history effectivity, else original appointment_date.
+    """
+    if history_rows is None:
+        history_rows = list(
+            emp.appointment_history.order_by(
+                EmployeeAppointmentHistory.timestamp.desc(),
+                EmployeeAppointmentHistory.id.desc(),
+            ).all()
+        )
+    for h in history_rows:
+        ctype = (h.change_type or '').strip()
+        nature = (h.appoint_nature or '').strip()
+        step_raised = (
+            h.from_sal_step is not None
+            and h.to_sal_step is not None
+            and h.to_sal_step > h.from_sal_step
+        )
+        if (
+            ctype == APPOINTMENT_CHANGE_STEP_INCREMENT
+            or nature == APPOINTMENT_CHANGE_STEP_INCREMENT
+            or step_raised
+        ):
+            return h.effectivity_date or h.appoint_date
+    return emp.appointment_date
+
+
+def _step_increment_due_date(emp, history_rows=None):
+    """Next SI due date, or None if not eligible."""
+    if not _step_increment_eligible(emp):
+        return None
+    base = _step_increment_base_date(emp, history_rows=history_rows)
+    return _add_years(base, STEP_INCREMENT_YEARS)
+
+
+def _step_increment_due_employees(employees, notify_days=STEP_INCREMENT_NOTIFY_DAYS):
+    """
+    Employees with SI due on or before (today + notify_days).
+    Includes overdue (not yet recorded) and upcoming within the notify window.
+    Returns list of (emp, due_date, overdue: bool).
+    """
+    today = date.today()
+    window_end = today + timedelta(days=notify_days)
+    out = []
+    for emp in employees:
+        history = list(
+            emp.appointment_history.order_by(
+                EmployeeAppointmentHistory.timestamp.desc(),
+                EmployeeAppointmentHistory.id.desc(),
+            ).all()
+        )
+        due = _step_increment_due_date(emp, history_rows=history)
+        if due is None:
+            continue
+        if due <= window_end:
+            out.append((emp, due, due < today))
+    out.sort(key=lambda x: (x[1], (x[0].last_name or ''), (x[0].first_name or '')))
+    return out
+
+
 @bp.route('/status-of-appointment')
 @login_required
 def status_of_appointment_list():
@@ -10442,22 +17598,26 @@ def status_of_appointment_list():
     employees = Employee.query.options(db.joinedload(Employee.department)).order_by(
         Employee.last_name, Employee.first_name
     ).all()
-    today = date.today()
-    window_end = today + timedelta(days=15)
-    step_increment_due_count = 0
-    step_increment_due_list = []
+    due_list = _step_increment_due_employees(employees)
+    step_increment_due_count = len(due_list)
+    step_increment_due_list = [(emp, due, overdue) for emp, due, overdue in due_list]
+    plantilla_no_history = 0
     employees_with_amount = []
     for emp in employees:
         amount = _current_salary_amount(emp)
-        # appointment_history is lazy='dynamic', so do not joinedload it; query it per employee
-        history = list(emp.appointment_history.order_by(EmployeeAppointmentHistory.timestamp.desc()).all())
-        employees_with_amount.append((emp, amount, history))
-        # Step increment due: appointment_date + 3 years, notify 15 days before (window: [today, today+15])
-        if emp.appointment_date:
-            due_date = _add_years(emp.appointment_date, 3)
-            if due_date is not None and today <= due_date <= window_end:
-                step_increment_due_count += 1
-                step_increment_due_list.append((emp, due_date))
+        history = list(
+            emp.appointment_history.order_by(
+                EmployeeAppointmentHistory.effectivity_date.desc().nullslast(),
+                EmployeeAppointmentHistory.timestamp.desc(),
+                EmployeeAppointmentHistory.id.desc(),
+            ).all()
+        )
+        si_due = _step_increment_due_date(emp, history_rows=history)
+        can_si = _step_increment_eligible(emp)
+        is_plantilla = _is_plantilla_for_appointment_history(emp)
+        if is_plantilla and not history:
+            plantilla_no_history += 1
+        employees_with_amount.append((emp, amount, history, si_due, can_si, is_plantilla))
     employee = current_user.employee if current_user.employee else None
     return render_template(
         'status_of_appointment/list.html',
@@ -10465,7 +17625,351 @@ def status_of_appointment_list():
         employee=employee,
         step_increment_due_count=step_increment_due_count,
         step_increment_due_list=step_increment_due_list,
+        step_increment_years=STEP_INCREMENT_YEARS,
+        max_salary_step=MAX_SALARY_STEP,
+        today=date.today().isoformat(),
+        plantilla_no_history=plantilla_no_history,
+        can_edit_original_appointment=_can_edit_employee_id(),
+        appointment_status_options=APPOINTMENT_STATUS_OPTIONS,
+        appointment_nature_options=APPOINTMENT_NATURE_OPTIONS,
+        appointment_change_types=(
+            APPOINTMENT_CHANGE_ORIGINAL,
+            APPOINTMENT_CHANGE_CHANGE,
+            APPOINTMENT_CHANGE_STEP_INCREMENT,
+            APPOINTMENT_CHANGE_HISTORY_ENTRY,
+            APPOINTMENT_CHANGE_UPDATE,
+        ),
     )
+
+
+@bp.route('/status-of-appointment/backfill-opening', methods=['POST'])
+@login_required
+def status_of_appointment_backfill_opening():
+    """
+    Minimal backfill: for plantilla employees with zero history rows, seed an
+    Original Appointment from their *current* employee fields.
+    Does not invent prior Temporary→Permanent periods — use Add history entry for those.
+    """
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    try:
+        inserted = 0
+        skipped = 0
+        employees = Employee.query.options(db.joinedload(Employee.department)).all()
+        for emp in employees:
+            if not _is_plantilla_for_appointment_history(emp):
+                continue
+            if emp.appointment_history.count() > 0:
+                skipped += 1
+                continue
+            if _seed_opening_appointment_history(emp):
+                inserted += 1
+        db.session.commit()
+        flash(
+            f'Opening history backfill complete: {inserted} seeded, '
+            f'{skipped} already had history (unchanged).',
+            'success',
+        )
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error during opening history backfill: {str(e)}', 'error')
+    return redirect(url_for('routes.status_of_appointment_list'))
+
+
+@bp.route('/status-of-appointment/<int:id>/appointment-change', methods=['POST'])
+@login_required
+def status_of_appointment_appointment_change(id):
+    """Record a later appointment change without overwriting original appointment date."""
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    emp = Employee.query.get_or_404(id)
+    try:
+        if not _is_plantilla_for_appointment_history(emp):
+            raise ValueError('Appointment change recording is for plantilla employees only.')
+        effectivity_raw = (request.form.get('effectivity_date') or '').strip()
+        if not effectivity_raw:
+            raise ValueError('Effectivity date is required.')
+        effectivity_date = datetime.strptime(effectivity_raw, '%Y-%m-%d').date()
+        new_status = (request.form.get('status_of_appointment') or '').strip() or None
+        new_nature = (request.form.get('nature_of_appointment') or '').strip() or None
+        grade_raw = (request.form.get('salary_grade') or '').strip()
+        step_raw = (request.form.get('salary_step') or '').strip()
+        new_grade = int(grade_raw) if grade_raw else emp.salary_grade
+        new_step = int(step_raw) if step_raw else emp.salary_step
+        if new_step is not None and (new_step < 1 or new_step > MAX_SALARY_STEP):
+            raise ValueError(f'Salary step must be between 1 and {MAX_SALARY_STEP}.')
+        remarks = (request.form.get('remarks') or '').strip() or None
+
+        old_status = emp.status_of_appointment
+        old_nature = emp.nature_of_appointment
+        old_grade = emp.salary_grade
+        old_step = emp.salary_step
+
+        if (
+            new_status == old_status
+            and new_nature == old_nature
+            and new_grade == old_grade
+            and new_step == old_step
+        ):
+            raise ValueError('No appointment/salary fields changed.')
+
+        emp.status_of_appointment = new_status
+        emp.nature_of_appointment = new_nature
+        emp.salary_grade = new_grade
+        emp.salary_step = new_step
+        emp.updated_at = datetime.utcnow()
+        # Original appointment_date intentionally unchanged.
+
+        db.session.add(_build_appointment_history_entry(
+            emp,
+            change_type=APPOINTMENT_CHANGE_CHANGE,
+            effectivity_date=effectivity_date,
+            from_sal_step=old_step,
+            to_sal_step=new_step,
+            remarks=remarks,
+        ))
+        db.session.commit()
+        flash(
+            f'Appointment change recorded for {emp.employee_id} '
+            f'effective {effectivity_date.isoformat()}.',
+            'success',
+        )
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error recording appointment change: {str(e)}', 'error')
+    return redirect(url_for('routes.status_of_appointment_list'))
+
+
+@bp.route('/status-of-appointment/<int:id>/history-entry', methods=['POST'])
+@login_required
+def status_of_appointment_history_entry(id):
+    """
+    Add / backfill a history row. Optionally apply values to the current employee
+    record, and optionally correct the original appointment date (Admin only).
+    """
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    emp = Employee.query.get_or_404(id)
+    try:
+        if not _is_plantilla_for_appointment_history(emp):
+            raise ValueError('History entries are for plantilla employees only.')
+        effectivity_raw = (request.form.get('effectivity_date') or '').strip()
+        if not effectivity_raw:
+            raise ValueError('Effectivity date is required.')
+        effectivity_date = datetime.strptime(effectivity_raw, '%Y-%m-%d').date()
+        change_type = (request.form.get('change_type') or '').strip() or APPOINTMENT_CHANGE_HISTORY_ENTRY
+        status = (request.form.get('status_of_appointment') or '').strip() or None
+        nature = (request.form.get('nature_of_appointment') or '').strip() or None
+        grade_raw = (request.form.get('salary_grade') or '').strip()
+        step_raw = (request.form.get('salary_step') or '').strip()
+        from_step_raw = (request.form.get('from_sal_step') or '').strip()
+        grade = int(grade_raw) if grade_raw else None
+        step = int(step_raw) if step_raw else None
+        from_step = int(from_step_raw) if from_step_raw else None
+        remarks = (request.form.get('remarks') or '').strip() or None
+        apply_current = request.form.get('apply_to_current') == '1'
+        set_original = request.form.get('set_as_original_appointment_date') == '1'
+
+        if step is not None and (step < 1 or step > MAX_SALARY_STEP):
+            raise ValueError(f'Salary step must be between 1 and {MAX_SALARY_STEP}.')
+
+        if set_original:
+            if not _can_edit_employee_id():
+                raise ValueError('Only Admin can correct the original appointment date.')
+            emp.appointment_date = effectivity_date
+
+        db.session.add(_build_appointment_history_entry(
+            emp,
+            change_type=change_type,
+            effectivity_date=effectivity_date,
+            appoint_status=status if status is not None else emp.status_of_appointment,
+            appoint_nature=nature if nature is not None else emp.nature_of_appointment,
+            sal_grade=grade if grade is not None else emp.salary_grade,
+            sal_step=step if step is not None else emp.salary_step,
+            from_sal_step=from_step,
+            to_sal_step=step if step is not None else emp.salary_step,
+            remarks=remarks,
+            appoint_date=emp.appointment_date,
+        ))
+
+        if apply_current:
+            if status is not None:
+                emp.status_of_appointment = status
+            if nature is not None:
+                emp.nature_of_appointment = nature
+            if grade is not None:
+                emp.salary_grade = grade
+            if step is not None:
+                emp.salary_step = step
+            emp.updated_at = datetime.utcnow()
+
+        db.session.commit()
+        flash(f'History entry added for {emp.employee_id}.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error adding history entry: {str(e)}', 'error')
+    return redirect(url_for('routes.status_of_appointment_list'))
+
+
+def _require_admin_only():
+    """Admin / Portal Admin only. Returns redirect response or None."""
+    if _can_edit_employee_id():
+        return None
+    flash('Access denied. Only Admin can edit or delete appointment history rows.', 'error')
+    return redirect(url_for('routes.status_of_appointment_list'))
+
+
+@bp.route('/status-of-appointment/history/<int:history_id>/edit', methods=['POST'])
+@login_required
+def status_of_appointment_history_edit(history_id):
+    """Admin only: edit an existing employment/appointment history row."""
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    admin_denied = _require_admin_only()
+    if admin_denied:
+        return admin_denied
+
+    row = EmployeeAppointmentHistory.query.get_or_404(history_id)
+    emp = Employee.query.get_or_404(row.emp_id)
+    try:
+        effectivity_raw = (request.form.get('effectivity_date') or '').strip()
+        if not effectivity_raw:
+            raise ValueError('Effectivity date is required.')
+        effectivity_date = datetime.strptime(effectivity_raw, '%Y-%m-%d').date()
+        change_type = (request.form.get('change_type') or '').strip() or row.change_type
+        status = (request.form.get('status_of_appointment') or '').strip() or None
+        nature = (request.form.get('nature_of_appointment') or '').strip() or None
+        grade_raw = (request.form.get('salary_grade') or '').strip()
+        step_raw = (request.form.get('salary_step') or '').strip()
+        from_step_raw = (request.form.get('from_sal_step') or '').strip()
+        appoint_date_raw = (request.form.get('appoint_date') or '').strip()
+        grade = int(grade_raw) if grade_raw else None
+        step = int(step_raw) if step_raw else None
+        from_step = int(from_step_raw) if from_step_raw else None
+        remarks = (request.form.get('remarks') or '').strip() or None
+        apply_current = request.form.get('apply_to_current') == '1'
+        set_original = request.form.get('set_as_original_appointment_date') == '1'
+
+        if step is not None and (step < 1 or step > MAX_SALARY_STEP):
+            raise ValueError(f'Salary step must be between 1 and {MAX_SALARY_STEP}.')
+
+        if appoint_date_raw:
+            row.appoint_date = datetime.strptime(appoint_date_raw, '%Y-%m-%d').date()
+        row.change_type = change_type
+        row.effectivity_date = effectivity_date
+        row.appoint_status = status
+        row.appoint_nature = nature
+        row.sal_grade = grade
+        row.sal_step = step
+        row.from_sal_step = from_step
+        row.to_sal_step = step
+        row.remarks = remarks
+        row.sal_amount = _salary_amount_for_grade_step(emp, grade, step) if grade and step else None
+        row.emp_dept = emp.department.name if emp.department else row.emp_dept
+        row.emp_position = emp.position or row.emp_position
+        row.agency = emp.agency
+        row.lgu_class = emp.lgu_class_level
+
+        if set_original and effectivity_date:
+            emp.appointment_date = effectivity_date
+
+        if apply_current:
+            if status is not None:
+                emp.status_of_appointment = status
+            if nature is not None:
+                emp.nature_of_appointment = nature
+            if grade is not None:
+                emp.salary_grade = grade
+            if step is not None:
+                emp.salary_step = step
+            emp.updated_at = datetime.utcnow()
+
+        db.session.commit()
+        flash(f'History row #{history_id} updated for {emp.employee_id}.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error updating history row: {str(e)}', 'error')
+    return redirect(url_for('routes.status_of_appointment_list'))
+
+
+@bp.route('/status-of-appointment/history/<int:history_id>/delete', methods=['POST'])
+@login_required
+def status_of_appointment_history_delete(history_id):
+    """Admin only: delete an employment/appointment history row."""
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    admin_denied = _require_admin_only()
+    if admin_denied:
+        return admin_denied
+
+    row = EmployeeAppointmentHistory.query.get_or_404(history_id)
+    emp_label = None
+    try:
+        emp = Employee.query.get(row.emp_id)
+        emp_label = emp.employee_id if emp else str(row.emp_id)
+        db.session.delete(row)
+        db.session.commit()
+        flash(f'History row #{history_id} deleted for {emp_label}.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error deleting history row: {str(e)}', 'error')
+    return redirect(url_for('routes.status_of_appointment_list'))
+
+
+@bp.route('/status-of-appointment/<int:id>/step-increment', methods=['POST'])
+@login_required
+def status_of_appointment_step_increment(id):
+    """Record a plantilla step increment and append employment history."""
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+    emp = Employee.query.get_or_404(id)
+    try:
+        if not _step_increment_eligible(emp):
+            raise ValueError(
+                'Employee is not eligible for step increment '
+                '(JO/COS, missing appointment/SG/step, or already at step 8).'
+            )
+        effectivity_raw = (request.form.get('effectivity_date') or '').strip()
+        if not effectivity_raw:
+            raise ValueError('Effectivity date is required.')
+        effectivity_date = datetime.strptime(effectivity_raw, '%Y-%m-%d').date()
+        from_step = int(emp.salary_step)
+        to_step_raw = (request.form.get('to_sal_step') or '').strip()
+        to_step = int(to_step_raw) if to_step_raw else from_step + 1
+        if to_step <= from_step:
+            raise ValueError('New step must be higher than the current step.')
+        if to_step > MAX_SALARY_STEP:
+            raise ValueError(f'Salary step cannot exceed {MAX_SALARY_STEP}.')
+        remarks = (request.form.get('remarks') or '').strip() or None
+
+        emp.salary_step = to_step
+        emp.updated_at = datetime.utcnow()
+
+        db.session.add(_build_appointment_history_entry(
+            emp,
+            change_type=APPOINTMENT_CHANGE_STEP_INCREMENT,
+            effectivity_date=effectivity_date,
+            appoint_nature=APPOINTMENT_CHANGE_STEP_INCREMENT,
+            from_sal_step=from_step,
+            to_sal_step=to_step,
+            remarks=remarks,
+        ))
+        db.session.commit()
+        flash(
+            f'Step increment recorded for {emp.employee_id}: '
+            f'step {from_step} → {to_step} effective {effectivity_date.isoformat()}.',
+            'success',
+        )
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error recording step increment: {str(e)}', 'error')
+    return redirect(url_for('routes.status_of_appointment_list'))
 
 
 # Salary Grade Management Routes

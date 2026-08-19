@@ -122,6 +122,23 @@ MONTHLY_SL_EARNED = Decimal('1.25')
 YEARLY_SPL_EARNED = Decimal('3.00')
 YEARLY_WL_EARNED = Decimal('5.00')
 
+# Full-day leave charge against credits (CSC compressed workweek)
+LEAVE_DAY_CREDIT_5DAY = Decimal('1.000')
+LEAVE_DAY_CREDIT_4DAY = Decimal('1.250')
+
+
+def leave_day_credit_for_workweek(model_code: str | None) -> Decimal:
+    """
+    Days of leave credit charged for one full day of leave.
+
+    5-day / flex / unknown → 1.000
+    4-day compressed → 1.250 (10-hour duty day)
+    """
+    code = (model_code or '5day').strip().lower()
+    if code == '4day':
+        return LEAVE_DAY_CREDIT_4DAY
+    return LEAVE_DAY_CREDIT_5DAY
+
 
 def count_working_weekdays(start: date, end: date) -> int:
     """Count Mon–Fri days inclusive between start and end (for partial-month VL/SL)."""

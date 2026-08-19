@@ -1,0 +1,122 @@
+{% extends "layouts/app.html" %}
+
+{% block title %}Overnight Punch Fix - HRMS{% endblock %}
+
+{% set navbar_title = 'Overnight Punch Fix' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Time & Attendance'},
+    {'label': 'Overnight Punch Fix'}
+] %}
+
+{% block app_content %}
+{% include 'includes/flash_messages.html' %}
+
+<div class="page-header" style="flex-wrap: wrap; gap: 0.75rem;">
+    <div>
+        <h1 class="page-title">Overnight Punch Fix</h1>
+        <p style="margin: 0.35rem 0 0; color: var(--medium-gray); font-size: 0.9rem; max-width: 48rem;">
+            For employees on <strong>Flexible Worktime</strong> overnight shifts (Out earlier than In),
+            move an early-morning <strong>Out</strong> from the next calendar day onto the
+            <strong>shift-start</strong> DTR row when that start day is missing Out.
+            Process Worktime also runs this automatically before computing late/undertime.
+        </p>
+    </div>
+    {% if not is_payroll_maker_scope|default(false) %}
+    <a href="{{ url_for('routes.dtr_regenerate') }}" class="btn-secondary">Process Worktime</a>
+    {% endif %}
+</div>
+
+{% if is_payroll_maker_scope|default(false) %}
+<p class="muted" style="margin: 0 0 1rem;">
+    Payroll Maker view: preview/apply is limited to employees in your department.
+</p>
+{% endif %}
+
+<div class="table-section" style="margin-bottom: 1rem;">
+    <form method="GET" action="{{ url_for('routes.dtr_overnight_punch_fix') }}" class="form-section" style="padding: 1rem 1.25rem; border: 1px solid var(--brand-border, #e5e7eb); border-radius: 8px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; align-items: end;">
+            <div class="form-group" style="margin: 0;">
+                <label for="quincena_period">Quincena</label>
+                <select id="quincena_period" name="quincena_period" class="form-control">
+                    {% for opt in quincena_options %}
+                    <option value="{{ opt.value }}" {% if opt.value == default_quincena %}selected{% endif %}>{{ opt.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-group" style="margin: 0;">
+                <button type="submit" class="btn-secondary">Select period</button>
+            </div>
+        </div>
+    </form>
+</div>
+
+<div class="card" style="margin-bottom: 1rem;">
+    <div class="card-body">
+        <p style="margin: 0 0 0.75rem;"><strong>{{ period_label }}</strong></p>
+        <form method="POST" action="{{ url_for('routes.dtr_overnight_punch_fix') }}" style="display:flex; flex-wrap:wrap; gap:0.65rem; align-items:center;">
+            <input type="hidden" name="quincena_period" value="{{ default_quincena }}">
+            <button type="submit" name="action" value="preview" class="btn-secondary">Preview moves</button>
+            <button type="submit" name="action" value="apply" class="btn-primary"
+                    onclick="return confirm('Apply overnight Out moves for {{ period_label }}? This updates Daily Time Records.');">
+                Apply moves
+            </button>
+            <span class="muted" style="font-size:0.85rem;">
+                {% if is_payroll_maker_scope|default(false) %}
+                After apply, ask Admin/HR to run Process Worktime to refresh worktime snapshots.
+                {% else %}
+                After apply, run Process Worktime to refresh worktime snapshots.
+                {% endif %}
+            </span>
+        </form>
+    </div>
+</div>
+
+<div class="table-section">
+    <div class="search-bar" style="justify-content: space-between;">
+        <span style="font-size:0.9rem; color: var(--medium-gray);">
+            {% if previewed %}
+            <strong>{{ moves|length }}</strong> proposed move(s)
+            {% else %}
+            Click <strong>Preview moves</strong> to scan this quincena.
+            {% endif %}
+        </span>
+    </div>
+    <div class="table-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Employee ID</th>
+                    <th>Name</th>
+                    <th>Flexi start day</th>
+                    <th>Schedule</th>
+                    <th>Move Out from</th>
+                    <th>Out time</th>
+                    <th>Source slot</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if moves %}
+                {% for m in moves %}
+                <tr>
+                    <td>{{ m.badge_id or '—' }}</td>
+                    <td>{{ m.employee_name }}</td>
+                    <td>{{ m.start_date.strftime('%b %d, %Y (%a)') }}</td>
+                    <td>{{ m.schedule_in }} → {{ m.schedule_out }}</td>
+                    <td>{{ m.source_date.strftime('%b %d, %Y (%a)') }}</td>
+                    <td>{{ m.out_time.strftime('%I:%M %p') }}</td>
+                    <td>{{ m.source_slot }}</td>
+                </tr>
+                {% endfor %}
+                {% else %}
+                <tr>
+                    <td colspan="7" class="no-data">
+                        {% if previewed %}No overnight Out moves needed for this quincena.{% else %}No preview yet.{% endif %}
+                    </td>
+                </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

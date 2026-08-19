@@ -5,10 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}HRMS{% endblock %}</title>
     <link rel="icon" type="image/x-icon" href="{{ url_for('routes.favicon') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app-navbar.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app-layout.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app-pages.css') }}">
     {% block extra_css %}{% endblock %}
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
+    <!-- App-wide inactivity screensaver (kiosk / office workstations) -->
+    <div id="screensaver" class="screensaver hidden" aria-hidden="true">
+        <p class="screensaver-tagline">Upholding Merit, Nurturing Growth, and Serving the Public with Excellence.</p>
+    </div>
+
+    {% block global_flashes %}
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         <div style="max-width: 1200px; margin: 0.75rem auto 0; padding: 0 1rem;">
@@ -18,6 +30,7 @@
         </div>
       {% endif %}
     {% endwith %}
+    {% endblock %}
 
     {% block content %}{% endblock %}
 
@@ -79,6 +92,10 @@
     </script>
 
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/brand-tagline-marquee.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app-chrome-height.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app-sidebar.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app-tables.js') }}"></script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>

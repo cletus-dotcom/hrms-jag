@@ -1,0 +1,56 @@
+{% macro service_icon(name) -%}
+{%- set k = (name or '')|lower -%}
+{%- if k == 'briefcase' -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M9 6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2H9V6z"/>
+  <path d="M6 8h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2z"/>
+  <path d="M4 13h16"/>
+</svg>
+{%- elif k == 'calendar' -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M7 3v3M17 3v3"/>
+  <path d="M4 8h16"/>
+  <path d="M6 5h12a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/>
+  <path d="M8 12h4M8 16h6"/>
+</svg>
+{%- elif k == 'clock' -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M12 22a10 10 0 1 0-10-10 10 10 0 0 0 10 10z"/>
+  <path d="M12 6v6l4 2"/>
+</svg>
+{%- elif k == 'folder' -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M3 6a2 2 0 0 1 2-2h5l2 2h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z"/>
+</svg>
+{%- elif k == 'document' -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z"/>
+  <path d="M14 2v5h5"/>
+  <path d="M8 13h8M8 17h6"/>
+</svg>
+{%- elif k == 'shield' -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M12 2l8 4v6c0 5-3.5 9.5-8 10-4.5-.5-8-5-8-10V6l8-4z"/>
+  <path d="M9 12l2 2 4-5"/>
+</svg>
+{%- elif k == 'growth' -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M4 20V4"/>
+  <path d="M4 20h16"/>
+  <path d="M6 14l4-4 3 3 6-7"/>
+  <path d="M18 6h3v3"/>
+</svg>
+{%- elif k == 'users' -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+  <path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/>
+  <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+  <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+</svg>
+{%- else -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M12 2v20M2 12h20"/>
+</svg>
+{%- endif -%}
+{%- endmacro %}
+

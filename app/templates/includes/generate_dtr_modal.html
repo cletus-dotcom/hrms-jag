@@ -1,0 +1,216 @@
+{% if (current_user.role or '')|lower in ('admin', 'hr') %}
+<style>
+  .dtr-generate-status-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 10200;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    background: rgba(15, 23, 42, 0.45);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+  }
+  .dtr-generate-status-overlay.is-visible {
+    display: flex;
+  }
+  .dtr-generate-status-card {
+    max-width: 22rem;
+    width: 100%;
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(0, 0, 0, 0.05);
+    padding: 1.75rem 1.5rem 1.5rem;
+    text-align: center;
+  }
+  .dtr-generate-status-spinner {
+    width: 2.5rem;
+    height: 2.5rem;
+    margin: 0 auto 1.1rem;
+    border: 3px solid #e5e7eb;
+    border-top-color: #1e40af;
+    border-radius: 50%;
+    animation: dtr-generate-spin 0.75s linear infinite;
+  }
+  @keyframes dtr-generate-spin {
+    to { transform: rotate(360deg); }
+  }
+  .dtr-generate-status-title {
+    margin: 0 0 0.35rem;
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: #111827;
+    letter-spacing: -0.02em;
+  }
+  .dtr-generate-status-sub {
+    margin: 0;
+    font-size: 0.9rem;
+    color: #6b7280;
+    line-height: 1.45;
+  }
+</style>
+<div id="generateDtrModal" class="change-password-modal-overlay" style="display:none;">
+  <div class="change-password-modal-dialog">
+    <div class="change-password-modal-header">
+      <h2 class="change-password-modal-title">Generate DTR</h2>
+      <button type="button" class="change-password-modal-close" onclick="document.getElementById('generateDtrModal').style.display='none'">&times;</button>
+    </div>
+    <form id="generateDtrForm" method="POST" action="{{ url_for('routes.dtr_generate') }}" data-dashboard-url="{{ url_for('routes.dashboard') }}">
+      <div class="change-password-modal-body">
+        <div class="generate-dtr-modal-layout">
+          <div class="generate-dtr-modal-col generate-dtr-modal-col-left">
+            <p class="generate-dtr-modal-col-heading">Period</p>
+            <div class="generate-dtr-modal-grid-period">
+              <div class="form-group generate-dtr-period-quincena" id="quincenaWrap">
+                <label>Quincena</label>
+                <select name="quincena" id="dtrGenQuincena" class="form-control">
+                  <option value="1">1st Quincena (1-15)</option>
+                  <option value="2">2nd Quincena (16-31)</option>
+                </select>
+              </div>
+              <div class="form-group generate-dtr-period-month">
+                <label>Month</label>
+                <select name="month" id="dtrGenMonth" class="form-control" required>
+                  <option value="1">January</option>
+                  <option value="2">February</option>
+                  <option value="3">March</option>
+                  <option value="4">April</option>
+                  <option value="5">May</option>
+                  <option value="6">June</option>
+                  <option value="7">July</option>
+                  <option value="8">August</option>
+                  <option value="9">September</option>
+                  <option value="10">October</option>
+                  <option value="11">November</option>
+                  <option value="12">December</option>
+                </select>
+              </div>
+              <div class="form-group generate-dtr-period-year">
+                <label>Year</label>
+                <input type="number" min="2000" max="2100" name="year" id="dtrGenYear" class="form-control" required>
+              </div>
+            </div>
+            <div class="generate-dtr-modal-period-footer" role="group" aria-label="Generate DTR actions">
+              <p class="generate-dtr-flexi-notice" role="note">Creates blank DTR rows for <strong>all active employees</strong> in the selected quincena. Set flexible worktime on <strong>Daily Time Records → Flexible Worktime</strong> before generating when needed.</p>
+              <button type="button" class="btn-secondary" onclick="document.getElementById('generateDtrModal').style.display='none'">Cancel</button>
+              <button type="submit" class="btn-primary">Generate</button>
+            </div>
+          </div>
+          <div class="generate-dtr-modal-col generate-dtr-modal-col-right">
+            <p class="generate-dtr-modal-col-heading">Workweek &amp; holidays</p>
+            <div class="form-group">
+              <label class="generate-dtr-modal-section-title">Compressed Workweek Settings (optional)</label>
+              <p class="generate-dtr-modal-note">
+                Add one or more segments when the workweek changes within the period (e.g. 5-day for week one, 4-day for week two).
+                Sets late/undertime targets only — DTR times stay blank until biometric upload.
+                5-day targets: 8:00 / 12:00 / 13:00 / 17:00 · 4-day: 7:00 / 12:00 / 13:00 / 18:00 (Friday REST DAY).
+              </p>
+            </div>
+            <div class="generate-dtr-workweek-segments-wrap">
+              <div id="dtrWorkweekSegmentsList" class="generate-dtr-workweek-segments-list" aria-live="polite"></div>
+              <button type="button" id="dtrAddWorkweekSegment" class="btn-secondary generate-dtr-add-workweek-segment">Add workweek segment</button>
+              <input type="hidden" name="workweek_segments_json" id="dtrWorkweekSegmentsJson" value="[]">
+            </div>
+            <template id="dtrWorkweekSegmentTemplate">
+              <div class="generate-dtr-workweek-segment" data-segment-index="">
+                <div class="generate-dtr-workweek-segment-head">
+                  <span class="generate-dtr-workweek-segment-title">Segment</span>
+                  <button type="button" class="btn-secondary generate-dtr-workweek-segment-remove" title="Remove segment">&times;</button>
+                </div>
+                <div class="generate-dtr-modal-grid-workweek">
+                  <div class="form-group">
+                    <label>Model</label>
+                    <select class="form-control dtr-ws-model" required>
+                      <option value="5day">5-day compressed</option>
+                      <option value="4day">4-day compressed</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>Applies To</label>
+                    <select class="form-control dtr-ws-applies">
+                      <option value="all">All employees</option>
+                      <option value="regular">Plantilla only</option>
+                      <option value="jo_cos">Non-Plantilla only</option>
+                    </select>
+                  </div>
+                  <div class="form-group">
+                    <label>Start Date</label>
+                    <input type="date" class="form-control dtr-ws-start" required>
+                  </div>
+                  <div class="form-group">
+                    <label>End Date</label>
+                    <input type="date" class="form-control dtr-ws-end" required>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <div class="form-group generate-dtr-modal-holidays-block">
+              <label class="generate-dtr-modal-section-title">Holidays / Work Suspension</label>
+              <p class="generate-dtr-modal-note generate-dtr-holiday-intro-note">
+                Select days on the calendar, choose <strong>Full day</strong>, <strong>AM</strong>, or <strong>PM</strong>, then add to the holiday or work suspension list. You can also type or paste entries (one per line). Format: <strong>YYYY-MM-DD</strong>, optional <strong>AM</strong> or <strong>PM</strong> for half-day. Dates outside the generated period are ignored.
+              </p>
+              <div class="generate-dtr-holiday-split">
+                <div class="generate-dtr-holiday-split-calendar">
+                  <div class="generate-dtr-holiday-panel generate-dtr-holiday-panel--calendar">
+                    <div class="generate-dtr-holiday-panel-head">
+                      <span class="generate-dtr-holiday-panel-title">Calendar</span>
+                      <span class="generate-dtr-holiday-panel-caption">Click days to toggle selection</span>
+                    </div>
+                    <div class="generate-dtr-holiday-picker" aria-label="Holiday and work suspension date picker">
+                      <div id="dtrHolidayCalHost" class="generate-dtr-holiday-cal-host"></div>
+                      <fieldset class="generate-dtr-holiday-halfday" aria-label="Half-day period">
+                        <legend class="generate-dtr-holiday-halfday-legend">Period</legend>
+                        <label class="generate-dtr-holiday-halfday-opt">
+                          <input type="radio" name="dtrSpecialDayHalf" value="" checked>
+                          <span>Full day</span>
+                        </label>
+                        <label class="generate-dtr-holiday-halfday-opt">
+                          <input type="radio" name="dtrSpecialDayHalf" value="AM">
+                          <span>AM</span>
+                        </label>
+                        <label class="generate-dtr-holiday-halfday-opt">
+                          <input type="radio" name="dtrSpecialDayHalf" value="PM">
+                          <span>PM</span>
+                        </label>
+                      </fieldset>
+                      <div class="generate-dtr-holiday-cal-actions">
+                        <button type="button" id="dtrHolidayAddSelectedBtn" class="btn-secondary">Add Selection to Holiday List</button>
+                        <button type="button" id="dtrSuspensionAddSelectedBtn" class="btn-secondary">Add Selection to Work Suspension List</button>
+                        <button type="button" id="dtrHolidayClearPickBtn" class="btn-secondary" title="Clear calendar selection only">Clear selection</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="generate-dtr-holiday-split-lists">
+                  <div class="generate-dtr-holiday-panel generate-dtr-holiday-panel--list">
+                    <div class="generate-dtr-holiday-panel-head">
+                      <label for="dtrHolidayDatesText" class="generate-dtr-holiday-panel-title">Holiday list</label>
+                      <span class="generate-dtr-holiday-panel-caption">Submitted with the form — edit freely</span>
+                    </div>
+                    <textarea name="holiday_dates" id="dtrHolidayDatesText" class="form-control generate-dtr-holiday-textarea" rows="5" placeholder="2026-05-01&#10;2026-05-25 AM"></textarea>
+                  </div>
+                  <div class="generate-dtr-holiday-panel generate-dtr-holiday-panel--list">
+                    <div class="generate-dtr-holiday-panel-head">
+                      <label for="dtrSuspensionDatesText" class="generate-dtr-holiday-panel-title">Work suspension list</label>
+                      <span class="generate-dtr-holiday-panel-caption">Submitted with the form — edit freely</span>
+                    </div>
+                    <textarea name="work_suspension_dates" id="dtrSuspensionDatesText" class="form-control generate-dtr-holiday-textarea" rows="5" placeholder="2026-05-02 PM"></textarea>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+<div id="dtr-generate-status" class="dtr-generate-status-overlay" role="status" aria-live="polite" aria-hidden="true">
+  <div class="dtr-generate-status-card">
+    <div class="dtr-generate-status-spinner" aria-hidden="true"></div>
+    <p class="dtr-generate-status-title">Generating DTR</p>
+    <p class="dtr-generate-status-sub">Please wait a moment.</p>
+  </div>
+</div>
+{% endif %}

@@ -1,0 +1,50 @@
+{% extends 'portal_admin/_layout.html' %}
+{% block portal_title %}Branding{% endblock %}
+{% block portal_content %}
+<div class="portal-admin-page-header">
+    <h1>Site Branding</h1>
+    <p>Customize organization identity and logos for this installation. Uploads are stored under <code>data/site_uploads/</code> next to the app (or next to <code>hrms.exe</code> when packaged). Copy that folder whenever you deploy the executable so logos stay visible.</p>
+</div>
+<form method="POST" enctype="multipart/form-data" class="portal-admin-form-card">
+    <div class="form-grid">
+        <div class="form-group">
+            <label for="portal_name">Portal name (navbar)</label>
+            <input type="text" id="portal_name" name="portal_name" class="form-control" value="{{ branding.portal_name }}" required>
+        </div>
+        <div class="form-group">
+            <label for="org_name">Organization name</label>
+            <input type="text" id="org_name" name="org_name" class="form-control" value="{{ branding.org_name }}" required>
+        </div>
+        <div class="form-group form-group--full">
+            <label for="org_location">Location / LGU line</label>
+            <input type="text" id="org_location" name="org_location" class="form-control" value="{{ branding.org_location }}">
+        </div>
+        <div class="form-group form-group--full">
+            <label for="tagline">Tagline (navbar marquee)</label>
+            <input type="text" id="tagline" name="tagline" class="form-control" value="{{ branding.tagline }}">
+        </div>
+    </div>
+    <hr class="portal-admin-hr">
+    <div class="portal-admin-branding-uploads">
+        <div class="portal-admin-upload-block">
+            <h3>Primary logo</h3>
+            <img src="{{ logo_url }}" alt="Current logo" class="portal-admin-preview-logo portal-admin-preview-logo--lg">
+            <label class="checkbox-label"><input type="checkbox" name="use_uploaded_logo" value="1" {% if branding.use_uploaded_logo %}checked{% endif %}> Use uploaded file</label>
+            <p class="muted">Or static path under <code>app/static/</code>:</p>
+            <input type="text" name="logo_path" class="form-control" value="{{ branding.logo_path }}">
+            <label class="file-label">Upload new logo<input type="file" name="uploaded_logo" accept="image/*,.svg,.ico"></label>
+        </div>
+        <div class="portal-admin-upload-block">
+            <h3>Seal / footer logo</h3>
+            <img src="{{ seal_url }}" alt="Current seal" class="portal-admin-preview-logo portal-admin-preview-logo--lg">
+            <label class="checkbox-label"><input type="checkbox" name="use_uploaded_seal" value="1" {% if branding.use_uploaded_seal %}checked{% endif %}> Use uploaded file</label>
+            <p class="muted">Or static path under <code>app/static/</code>:</p>
+            <input type="text" name="seal_path" class="form-control" value="{{ branding.seal_path }}">
+            <label class="file-label">Upload new seal<input type="file" name="uploaded_seal" accept="image/*,.svg,.ico"></label>
+        </div>
+    </div>
+    <div class="portal-admin-form-actions">
+        <button type="submit" class="btn-primary">Save Branding</button>
+    </div>
+</form>
+{% endblock %}

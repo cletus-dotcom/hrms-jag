@@ -1,0 +1,200 @@
+{% extends "layouts/app.html" %}
+
+{% block title %}Attendance - HRMS{% endblock %}
+
+{% set navbar_title = 'Attendance' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Time & Attendance'},
+    {'label': 'Attendance'}
+] %}
+
+{% block app_content %}
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, message in messages %}
+      <div class="alert alert-{{ category }} alert-dismissible">
+        <span>{{ message }}</span>
+        <button class="alert-close" onclick="this.parentElement.style.display='none'">×</button>
+      </div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
+<div class="page-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.75rem;">
+  <div>
+    <h1 class="page-title" style="margin:0;">Attendance</h1>
+    <p class="muted" style="margin:0.35rem 0 0; font-size:0.9rem;">
+      Flag Raising, Flag Retreat, and Meeting check-ins uploaded from Excel
+      (<code>employeeId</code>, <code>timestamp</code>, <code>lat</code>, <code>long</code>).
+    </p>
+  </div>
+  <button type="button" class="btn-primary" id="btnOpenAttendanceUpload">Upload attendance</button>
+</div>
+
+<div class="table-section" style="margin-bottom:1rem;">
+  <form method="GET" action="{{ url_for('routes.event_attendance_list') }}" class="form-section" style="padding:1rem 1.25rem; border:1px solid var(--brand-border, #e5e7eb); border-radius:8px;">
+    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:0.75rem; align-items:end;">
+      <div class="form-group" style="margin:0;">
+        <label for="filterCategory">Category</label>
+        <select name="category" id="filterCategory" class="form-control">
+          <option value="">All categories</option>
+          {% for cat in categories %}
+          <option value="{{ cat }}" {% if filters.category == cat %}selected{% endif %}>{{ category_labels[cat] }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label for="filterDateFrom">Date from</label>
+        <input type="date" name="date_from" id="filterDateFrom" class="form-control" value="{{ filters.date_from }}">
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label for="filterDateTo">Date to</label>
+        <input type="date" name="date_to" id="filterDateTo" class="form-control" value="{{ filters.date_to }}">
+      </div>
+      <div class="form-group" style="margin:0; grid-column: span 2;">
+        <label for="filterQ">Search</label>
+        <input type="text" name="q" id="filterQ" class="form-control" value="{{ filters.q }}" placeholder="Employee ID, name, or location…" autocomplete="off">
+      </div>
+      <div class="form-group" style="margin:0;">
+        <button type="submit" class="btn-primary">Filter</button>
+        <a href="{{ url_for('routes.event_attendance_list') }}" class="btn-secondary" style="margin-left:0.35rem;">Clear</a>
+      </div>
+    </div>
+  </form>
+</div>
+
+<div class="table-section">
+  <div class="table-container">
+    <table class="data-table" id="attendanceTable">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Category</th>
+          <th>Employee ID</th>
+          <th>Name</th>
+          <th>Check-in</th>
+          <th>Location</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr class="table-row" data-search="{{ r.badge_employee_id|lower }} {{ r.employee.directory_name|lower if r.employee else '' }} {{ category_label(r.category)|lower }} {{ (r.location_text or '')|lower }}">
+          <td>{{ r.event_date.isoformat() if r.event_date else '—' }}</td>
+          <td>
+            <span class="status-badge" style="background:#eef2ff;color:#3730a3;">{{ category_label(r.category) }}</span>
+          </td>
+          <td>{{ r.badge_employee_id }}{% if not r.employee %} <span class="muted" title="No matching employee">(unmatched)</span>{% endif %}</td>
+          <td>{% if r.employee %}{{ r.employee.directory_name }}{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td>{{ r.punched_at.strftime('%Y-%m-%d %H:%M:%S') if r.punched_at else '—' }}</td>
+          <td title="{% if r.latitude is not none and r.longitude is not none %}{{ r.latitude }}, {{ r.longitude }}{% endif %}">
+            {% if r.location_text %}
+              {{ r.location_text }}
+            {% elif r.latitude is not none and r.longitude is not none %}
+              <span class="muted">Resolving…</span>
+            {% else %}
+              <span class="muted">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="no-data">No attendance records for the selected filters.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if rows|length >= 2000 %}
+  <p class="muted" style="margin-top:0.75rem;font-size:0.85rem;">Showing the first 2,000 matches. Narrow the date or category filter.</p>
+  {% endif %}
+</div>
+
+{% if recent_batches %}
+<div class="table-section" style="margin-top:1.25rem;">
+  <h2 style="font-size:1rem;margin:0 0 0.75rem;">Recent uploads</h2>
+  <div class="table-container">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Uploaded</th>
+          <th>Date</th>
+          <th>Category</th>
+          <th>File</th>
+          <th>Rows</th>
+          <th>Added</th>
+          <th>Skipped</th>
+          <th>Unmatched</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for b in recent_batches %}
+        <tr>
+          <td>{{ b.uploaded_at.strftime('%Y-%m-%d %H:%M') if b.uploaded_at else '—' }}</td>
+          <td>{{ b.event_date.isoformat() if b.event_date else '—' }}</td>
+          <td>{{ category_label(b.category) }}</td>
+          <td>{{ b.filename or '—' }}</td>
+          <td>{{ b.row_count }}</td>
+          <td>{{ b.inserted_count }}</td>
+          <td>{{ b.skipped_count }}</td>
+          <td>{{ b.unmatched_count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<div id="attendanceUploadModal" class="modal" style="display:none; position:fixed; inset:0; background:rgba(15,23,42,0.45); z-index:80; align-items:center; justify-content:center; padding:1rem;">
+  <div class="modal-card" style="background:#fff; border-radius:10px; max-width:480px; width:100%; padding:1.25rem 1.35rem; box-shadow:0 20px 40px rgba(0,0,0,0.18);">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem; margin-bottom:0.75rem;">
+      <h2 style="margin:0; font-size:1.1rem;">Upload attendance</h2>
+      <button type="button" class="alert-close" id="btnCloseAttendanceUpload" aria-label="Close">×</button>
+    </div>
+    <p class="muted" style="margin:0 0 1rem; font-size:0.85rem;">
+      Excel columns: <strong>employeeId</strong>, <strong>timestamp</strong> (epoch ms), <strong>lat</strong>, <strong>long</strong>.
+      Choose the event date and category for this file.
+    </p>
+    <form method="POST" action="{{ url_for('routes.event_attendance_upload') }}" enctype="multipart/form-data">
+      <div class="form-group">
+        <label for="uploadEventDate">Event date *</label>
+        <input type="date" name="event_date" id="uploadEventDate" class="form-control" required value="{{ default_event_date }}">
+      </div>
+      <div class="form-group">
+        <label for="uploadCategory">Category *</label>
+        <select name="category" id="uploadCategory" class="form-control" required>
+          <option value="">Select category…</option>
+          {% for cat in categories %}
+          <option value="{{ cat }}" {% if filters.category == cat %}selected{% endif %}>{{ category_labels[cat] }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="uploadFile">Excel file (.xlsx) *</label>
+        <input type="file" name="attendance_file" id="uploadFile" class="form-control" accept=".xlsx,.xlsm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+      </div>
+      <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:1rem;">
+        <button type="button" class="btn-secondary" id="btnCancelAttendanceUpload">Cancel</button>
+        <button type="submit" class="btn-primary">Upload</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+  var modal = document.getElementById('attendanceUploadModal');
+  function openModal() {
+    modal.style.display = 'flex';
+  }
+  function closeModal() {
+    modal.style.display = 'none';
+  }
+  document.getElementById('btnOpenAttendanceUpload').addEventListener('click', openModal);
+  document.getElementById('btnCloseAttendanceUpload').addEventListener('click', closeModal);
+  document.getElementById('btnCancelAttendanceUpload').addEventListener('click', closeModal);
+  modal.addEventListener('click', function (e) {
+    if (e.target === modal) closeModal();
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,33 @@
+{# Welcome card with optional eRMT-proxied ID photo (right side). #}
+{% macro welcome_initials(emp) -%}
+{%- if emp -%}
+{{- (emp.first_name[:1] if emp.first_name else '') -}}{{- (emp.last_name[:1] if emp.last_name else '') -}}
+{%- else -%}HR{%- endif -%}
+{%- endmacro %}
+
+<div class="dashboard-welcome-card{% if employee %} dashboard-welcome-card--with-photo{% endif %}">
+    <div class="dashboard-welcome-text">
+        <h2>Welcome{% if employee %}, {{ employee.first_name }}{% endif %}!</h2>
+        <p>{{ subtitle }}</p>
+        {% if employee and has_id_photo and employee.id_photo_ermt_record %}
+        <p class="dashboard-welcome-photo-meta">ID photo · {{ employee.id_photo_ermt_record.record_number }}</p>
+        {% endif %}
+    </div>
+    {% if employee %}
+    <div class="dashboard-welcome-photo" aria-hidden="false">
+        {% if has_id_photo %}
+        <img
+            class="dashboard-welcome-photo-img"
+            src="{{ url_for('routes.employee_id_photo', id=employee.id) }}"
+            alt="ID photo of {{ employee.full_name }}"
+            width="104"
+            height="104"
+        >
+        {% else %}
+        <div class="dashboard-welcome-photo-placeholder" title="No ID photo linked">
+            <span>{{ welcome_initials(employee) }}</span>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>

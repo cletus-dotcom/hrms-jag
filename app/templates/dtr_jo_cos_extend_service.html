@@ -1,6 +1,13 @@
-{% extends "base.html" %}
+{% extends "layouts/app.html" %}
 
 {% block title %}X-Service Authorization - JO/COS - HRMS{% endblock %}
+
+{% set navbar_title = 'Extend JO/COS Service' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Time & Attendance'},
+    {'label': 'Extend JO/COS Service'}
+] %}
 
 {% block extra_css %}
 <style>
@@ -42,87 +49,8 @@
 </style>
 {% endblock %}
 
-{% block content %}
-<div class="dashboard-container">
-  <div class="header-bar">
-    <div class="header-content">
-      {% include 'includes/navbar_brand.html' %}
-      <nav class="main-nav">
-        <a href="{{ url_for('routes.dashboard') }}" class="nav-link">Dashboard</a>
-        {% if (current_user.role or '')|lower in ('admin', 'hr') %}
-        <div class="nav-dropdown">
-          <a href="#" class="nav-link">Settings <span class="dropdown-arrow">▼</span></a>
-          <div class="dropdown-menu">
-            <a href="{{ url_for('routes.users_list') }}" class="dropdown-item">Manage Users</a>
-            <a href="{{ url_for('routes.employees_list') }}" class="dropdown-item">Manage Employees</a>
-            <a href="{{ url_for('routes.departments_list') }}" class="dropdown-item">Manage Departments</a>
-            <hr class="dropdown-separator">
-            <a href="{{ url_for('routes.positions_list') }}" class="dropdown-item">Positions</a>
-            <a href="{{ url_for('routes.jo_cos_designations_list') }}" class="dropdown-item">JO/COS designations</a>
-            <a href="{{ url_for('routes.jo_cos_rates_list') }}" class="dropdown-item">JO and COS Rates</a>
-            <a href="{{ url_for('routes.flexi_time_schedule_list') }}" class="dropdown-item">Flexi-time schedule</a>
-            <a href="{{ url_for('routes.salary_grades_list') }}" class="dropdown-item">Salary Grade</a>
-            <hr class="dropdown-separator">
-            <a href="{{ url_for('routes.status_of_appointment_list') }}" class="dropdown-item">Status of Appointment</a>
-          </div>
-        </div>
-        {% endif %}
-        <div class="nav-dropdown">
-          <a href="#" class="nav-link nav-link-active">Daily Time Records <span class="dropdown-arrow">▼</span></a>
-          <div class="dropdown-menu">
-            <a href="{{ url_for('routes.dtr_records') }}" class="dropdown-item">View DTR Records</a>
-            {% include 'includes/nav_dtr_upload_link.html' %}
-            <a href="{{ url_for('routes.dtr_justifications') }}" class="dropdown-item">DTR Justifications</a>
-            {% include 'includes/nav_dtr_edit_link.html' %}
-            {% include 'includes/nav_dtr_regenerate_link.html' %}
-          </div>
-        </div>
-        <div class="nav-dropdown">
-          <a href="#" class="nav-link">Leave Management <span class="dropdown-arrow">▼</span></a>
-          <div class="dropdown-menu">
-            {% if (current_user.role or '')|lower in ('admin', 'hr') %}
-            <a href="{{ url_for('routes.leave_settings_list') }}" class="dropdown-item">Leave Settings</a>
-            <a href="{{ url_for('routes.leave_credits_list') }}" class="dropdown-item">Leave Credits</a>
-            <hr class="dropdown-separator">
-            {% endif %}
-            <a href="{{ url_for('routes.leave_apply') }}" class="dropdown-item">Apply for Leave</a>
-            <a href="{{ url_for('routes.leave_list') }}" class="dropdown-item">View Leave</a>
-          </div>
-        </div>
-        {% include 'includes/nav_payroll_top_menu.html' %}
-        {% if (current_user.role or '')|lower in ('admin', 'hr', 'payroll_maker') %}
-        <div class="nav-dropdown">
-          <a href="#" class="nav-link">Reports <span class="dropdown-arrow">▼</span></a>
-          <div class="dropdown-menu">
-            {% include 'includes/reports_dropdown_links.html' %}
-          </div>
-        </div>
-        {% endif %}
-        <div class="nav-dropdown">
-          <a href="#" class="nav-link">ABOUT <span class="dropdown-arrow">▼</span></a>
-          <div class="dropdown-menu">
-            <a href="{{ url_for('routes.users_manual') }}" class="dropdown-item">User's Manual</a>
-            <a href="{{ url_for('routes.hrmdo_manual') }}" class="dropdown-item">HRMDO Manual</a>
-          </div>
-        </div>
-      </nav>
-      <div class="user-dropdown">
-        <a href="#" class="user-info">
-          {% if employee %}{{ employee.full_name }} ({{ current_user.role|title }}){% else %}{{ current_user.username }} ({{ current_user.role|title }}){% endif %}
-          <span class="dropdown-arrow">▼</span>
-        </a>
-        <div class="dropdown-menu dropdown-menu-right">
-          <button type="button" class="dropdown-item btn-change-password" style="width:100%; text-align:left; background:none; border:none; cursor:pointer; font:inherit; padding:0.5rem 1rem;">Change password</button>
-          <form method="POST" action="{{ url_for('routes.logout') }}" style="margin:0;">
-            <button type="submit" class="dropdown-item" style="width:100%; text-align:left; background:none; border:none; cursor:pointer; font:inherit; padding:0.5rem 1rem;">Logout</button>
-          </form>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="dashboard-content">
-    {% with messages = get_flashed_messages(with_categories=true) %}
+{% block app_content %}
+{% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         {% for category, message in messages %}
           <div class="alert alert-{{ category }} alert-dismissible">
@@ -136,8 +64,10 @@
     <div class="page-header" style="flex-wrap: wrap; gap: 0.75rem;">
       <h1 class="page-title">X-Service Authorization — JO/COS</h1>
       <div class="flexi-actions">
+        {% if can_regenerate_dtr|default(false) %}
         <a href="{{ url_for('routes.dtr_overtime_authorization') }}" class="btn-secondary">Overtime Authorization — Plantilla</a>
         <a href="{{ url_for('routes.dtr_regenerate') }}" class="btn-secondary">Regenerate DTR</a>
+        {% endif %}
         <a href="{{ url_for('routes.dashboard') }}" class="btn-secondary">Dashboard</a>
       </div>
     </div>
@@ -152,6 +82,12 @@
       are not counted toward worktime even when DTR rows exist.
       {{ period_label }}
     </p>
+    {% if is_payroll_maker_scope|default(false) %}
+    <p class="muted" style="margin: -0.5rem 0 1rem;">
+      Payroll Maker view: JO/COS employees and X-Service schedules are limited to your department.
+      Saving updates only your department and does not change other departments.
+    </p>
+    {% endif %}
 
     <div class="table-section" style="margin-bottom: 1rem;">
       <form method="GET" action="{{ url_for('routes.dtr_jo_cos_extend_service') }}" class="form-section" style="padding: 1rem 1.25rem; border: 1px solid var(--brand-border, #e5e7eb); border-radius: 8px;">
@@ -176,6 +112,24 @@
             </select>
           </div>
           <div class="form-group" style="margin: 0;">
+            <label for="filterDepartment">Department</label>
+            {% if is_payroll_maker_scope|default(false) %}
+            <input type="hidden" name="department_id" value="{{ filters.department_id }}">
+            <select id="filterDepartment" class="form-control" disabled>
+              {% for dept in departments %}
+              <option value="{{ dept.id }}" selected>{{ dept.name }}</option>
+              {% endfor %}
+            </select>
+            {% else %}
+            <select name="department_id" id="filterDepartment" class="form-control">
+              <option value="">All departments</option>
+              {% for dept in departments %}
+              <option value="{{ dept.id }}" {% if filters.department_id|string == dept.id|string %}selected{% endif %}>{{ dept.name }}</option>
+              {% endfor %}
+            </select>
+            {% endif %}
+          </div>
+          <div class="form-group" style="margin: 0;">
             <button type="submit" class="btn-primary">Load quincena</button>
           </div>
         </div>
@@ -186,6 +140,9 @@
       <input type="hidden" name="year" value="{{ filters.year }}">
       <input type="hidden" name="month" value="{{ filters.month }}">
       <input type="hidden" name="quincena" value="{{ filters.quincena }}">
+      {% if filters.department_id %}
+      <input type="hidden" name="department_id" value="{{ filters.department_id }}">
+      {% endif %}
       <input type="hidden" name="entries_json" id="entriesJson" value="">
 
       <div class="table-section" style="margin-bottom: 1rem;">
@@ -387,7 +344,7 @@
     entries.push({
       employee_id: emp.id,
       employee_code: emp.employee_id,
-      employee_name: emp.last_name + ', ' + emp.first_name,
+      employee_name: emp.directory_name || (emp.last_name + ', ' + emp.first_name),
       date_start: d0,
       date_end: d1,
       time_in: document.getElementById('addTimeIn').value,
