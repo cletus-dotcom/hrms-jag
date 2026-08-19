@@ -10,8 +10,10 @@ from app.routes import (
     _DTR_DUTY_MODELS,
     _arrangement_model_code_for_date,
     _flexible_worktime_entry_date_bounds,
+    _flexible_worktime_entry_date_pairs,
     _flexible_worktime_row_for_date,
     _late_undertime_minutes_for_record,
+    _parse_flexible_worktime_entries_json,
     _pick_late_undertime_schedule,
 )
 
@@ -122,6 +124,56 @@ class FlexibleWorktimeEntryDateBoundsTests(unittest.TestCase):
         lo, hi = _flexible_worktime_entry_date_bounds(start, end)
         self.assertEqual(lo, date(2026, 7, 15))
         self.assertEqual(hi, date(2026, 8, 1))
+
+
+class FlexibleWorktimeRestDatesTests(unittest.TestCase):
+    def test_rest_dates_expand_to_one_day_pairs(self):
+        pairs = _flexible_worktime_entry_date_pairs(
+            {'rest_dates': ['2026-08-10', '2026-08-03', '2026-08-03', '2026-08-06']},
+            1,
+            date(2026, 8, 1),
+            date(2026, 8, 15),
+            'rest',
+        )
+        self.assertEqual(pairs, [
+            (date(2026, 8, 3), date(2026, 8, 3)),
+            (date(2026, 8, 6), date(2026, 8, 6)),
+            (date(2026, 8, 10), date(2026, 8, 10)),
+        ])
+
+    def test_range_still_used_without_rest_dates(self):
+        pairs = _flexible_worktime_entry_date_pairs(
+            {'date_start': '2026-08-03', 'date_end': '2026-08-05'},
+            1,
+            date(2026, 7, 31),
+            date(2026, 8, 16),
+            'rest',
+        )
+        self.assertEqual(pairs, [(date(2026, 8, 3), date(2026, 8, 5))])
+
+    def test_parse_json_expands_rest_dates(self):
+        import json
+        emp = SimpleNamespace(id=7, status='active', department_id=1)
+        raw = json.dumps([{
+            'employee_id': 7,
+            'duty_mode': 'rest',
+            'rest_dates': ['2026-08-03', '2026-08-10'],
+        }])
+        with patch('app.routes.Employee') as Emp:
+            Emp.query.get.return_value = emp
+            parsed = _parse_flexible_worktime_entries_json(
+                raw, date(2026, 8, 1), date(2026, 8, 15)
+            )
+        self.assertEqual(len(parsed), 2)
+        self.assertEqual(
+            [(r['date_start'], r['date_end'], r['duty_mode']) for r in parsed],
+            [
+                (date(2026, 8, 3), date(2026, 8, 3), 'rest'),
+                (date(2026, 8, 10), date(2026, 8, 10), 'rest'),
+            ],
+        )
+        self.assertIsNone(parsed[0]['time_in'])
+        self.assertIsNone(parsed[0]['time_out'])
 
 
 if __name__ == '__main__':

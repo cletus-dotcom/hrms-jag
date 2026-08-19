@@ -10059,6 +10059,76 @@ def _run_dtr_quincena_regeneration(year: int, month: int, quincena: str, created
     return int(pair_n or 0)
 
 
+def _parse_flexible_worktime_rest_dates(
+    raw,
+    idx: int,
+    entry_min: date,
+    entry_max: date,
+) -> list[date]:
+    """Parse optional rest_dates JSON (YYYY-MM-DD list) for one Flexible Worktime row."""
+    if raw in (None, '', []):
+        return []
+    if isinstance(raw, str):
+        parts = [p.strip() for p in raw.replace(';', ',').split(',') if p.strip()]
+        raw = parts
+    if not isinstance(raw, list):
+        raise ValueError(f'Row {idx}: rest_dates must be a list of YYYY-MM-DD dates.')
+    seen: set[date] = set()
+    out: list[date] = []
+    for item in raw:
+        try:
+            d = datetime.strptime(str(item).strip()[:10], '%Y-%m-%d').date()
+        except ValueError as e:
+            raise ValueError(f'Row {idx}: invalid rest date {item!r}.') from e
+        if d < entry_min or d > entry_max:
+            raise ValueError(
+                f'Row {idx}: rest date {d.isoformat()} must fall within the selected quincena '
+                f'(or one day before/after for night shift).'
+            )
+        if d not in seen:
+            seen.add(d)
+            out.append(d)
+    return sorted(out)
+
+
+def _flexible_worktime_entry_date_pairs(
+    item: dict,
+    idx: int,
+    entry_min: date,
+    entry_max: date,
+    duty_mode: str,
+) -> list[tuple[date, date]]:
+    """
+    Date ranges for one JSON entry.
+
+    Rest rows may send ``rest_dates`` (several non-consecutive days in the quincena);
+    each date becomes a one-day rest range. Otherwise Date from / Date to is used.
+    """
+    rest_dates: list[date] = []
+    if duty_mode == 'rest':
+        rest_dates = _parse_flexible_worktime_rest_dates(
+            item.get('rest_dates'), idx, entry_min, entry_max
+        )
+    if rest_dates:
+        return [(d, d) for d in rest_dates]
+    try:
+        d0 = datetime.strptime((item.get('date_start') or '').strip(), '%Y-%m-%d').date()
+        d1 = datetime.strptime((item.get('date_end') or '').strip(), '%Y-%m-%d').date()
+    except ValueError as e:
+        raise ValueError(
+            f'Row {idx}: invalid date range. For rest days, pick dates on the quincena calendar '
+            f'or enter Date from and Date to.'
+        ) from e
+    if d0 > d1:
+        raise ValueError(f'Row {idx}: start date must be on or before end date.')
+    if d0 < entry_min or d1 > entry_max:
+        raise ValueError(
+            f'Row {idx}: dates must fall within the selected quincena '
+            f'(or one day before/after for night shift).'
+        )
+    return [(d0, d1)]
+
+
 def _parse_flexible_worktime_entries_json(
     raw: str,
     start_d: date,
@@ -10093,21 +10163,12 @@ def _parse_flexible_worktime_entries_json(
                 f'Row {idx}: employee is outside your department. '
                 'Payroll Maker may only manage Flexible Worktime for their department.'
             )
-        try:
-            d0 = datetime.strptime((item.get('date_start') or '').strip(), '%Y-%m-%d').date()
-            d1 = datetime.strptime((item.get('date_end') or '').strip(), '%Y-%m-%d').date()
-        except ValueError as e:
-            raise ValueError(f'Row {idx}: invalid date range.') from e
-        if d0 > d1:
-            raise ValueError(f'Row {idx}: start date must be on or before end date.')
-        if d0 < entry_min or d1 > entry_max:
-            raise ValueError(
-                f'Row {idx}: dates must fall within the selected quincena '
-                f'(or one day before/after for night shift).'
-            )
         duty_mode = (item.get('duty_mode') or 'split').strip().lower()
         if duty_mode not in ('split', 'straight', 'rest'):
             raise ValueError(f'Row {idx}: duty mode must be split, straight, or rest.')
+        date_pairs = _flexible_worktime_entry_date_pairs(
+            item, idx, entry_min, entry_max, duty_mode
+        )
         if duty_mode == 'rest':
             time_in = None
             time_out = None
@@ -10126,16 +10187,17 @@ def _parse_flexible_worktime_entries_json(
                 break_in = _parse_flexible_worktime_time(item.get('break_in'))
                 if not break_out or not break_in:
                     raise ValueError(f'Row {idx}: break out and break in are required for split duty.')
-        parsed.append({
-            'employee_id': emp_id,
-            'date_start': d0,
-            'date_end': d1,
-            'duty_mode': duty_mode,
-            'time_in': time_in,
-            'break_out': break_out,
-            'break_in': break_in,
-            'time_out': time_out,
-        })
+        for d0, d1 in date_pairs:
+            parsed.append({
+                'employee_id': emp_id,
+                'date_start': d0,
+                'date_end': d1,
+                'duty_mode': duty_mode,
+                'time_in': time_in,
+                'break_out': break_out,
+                'break_in': break_in,
+                'time_out': time_out,
+            })
     by_emp: dict[int, list[tuple[date, date]]] = {}
     for row in parsed:
         ranges = by_emp.setdefault(row['employee_id'], [])
@@ -10145,7 +10207,8 @@ def _parse_flexible_worktime_entries_json(
                     'Overlapping date ranges for the same employee are not allowed. '
                     'For overnight (e.g. 4:00 pm -> 12:00 am), Date from/to are shift-start days only — '
                     'do not extend Date to into the next morning. Same slot Tue-Thu is OK as one row; '
-                    'do not overlap that range with Fri-Sun.'
+                    'do not overlap that range with Fri-Sun. Rest days may be several non-consecutive '
+                    'dates, but not on a day that already has another Flexible Worktime row.'
                 )
         ranges.append((row['date_start'], row['date_end']))
     return parsed
