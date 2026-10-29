@@ -89,6 +89,23 @@
     color: var(--medium-gray, #6b7280);
   }
 
+  .table-section .table-container {
+    overflow: auto;
+    max-height: min(70vh, calc(100vh - var(--app-chrome-offset, 3.75rem) - 14rem));
+  }
+
+  #leaveCreditsTable {
+    overflow: visible;
+  }
+
+  #leaveCreditsTable thead th {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    background: linear-gradient(180deg, #f0f6fb 0%, #e8f0f8 100%);
+    box-shadow: 0 1px 0 rgba(1, 58, 99, 0.12);
+  }
+
   @media (min-width: 768px) {
     .leave-credits-header {
       flex-direction: row;
@@ -114,7 +131,12 @@
 {% include 'includes/flash_messages.html' %}
 
 <div class="leave-credits-header">
-    <h1 class="page-title">Leave Credits</h1>
+    <div>
+        <h1 class="page-title">Leave Credits</h1>
+        <p style="margin:0.35rem 0 0;">
+            <a href="{{ url_for('routes.leave_credits_workweek') }}" class="btn-secondary">Workweek calendar</a>
+        </p>
+    </div>
     <div class="leave-credits-toolbar">
         <form method="POST" action="{{ url_for('routes.leave_credits_run_accrual') }}" class="leave-accrual-form"
               onsubmit="return confirm('Run accrual for the selected month? This posts VL/SL (and in January: Jan 1 SPL/WL; in December: year-end SPL/WL lapse). Existing rows with the same particulars/date are skipped.');">

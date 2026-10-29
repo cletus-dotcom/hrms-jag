@@ -72,18 +72,17 @@
   }
   .flexi-shift-hrs { font-size: 0.75rem; color: var(--medium-gray); }
   .flexi-time-field.is-hidden { display: none !important; }
-  .flexi-rest-dates {
+  .flexi-duty-dates {
     grid-column: 1 / -1;
     margin-top: 0.25rem;
   }
-  .flexi-rest-dates[hidden] { display: none !important; }
-  .flexi-rest-chip-grid {
+  .flexi-duty-chip-grid {
     display: flex;
     flex-wrap: wrap;
     gap: 0.4rem;
     margin: 0.4rem 0 0.55rem;
   }
-  .flexi-rest-chip {
+  .flexi-duty-chip {
     min-width: 4.4rem;
     border: 1px solid #d1d5db;
     background: #fff;
@@ -94,25 +93,29 @@
     line-height: 1.15;
     color: #1f2937;
   }
-  .flexi-rest-chip:hover { border-color: #6b7280; }
-  .flexi-rest-chip.is-selected {
-    background: #4b5563;
-    border-color: #4b5563;
+  .flexi-duty-chip:hover { border-color: #6b7280; }
+  .flexi-duty-chip.is-selected {
+    background: #1e3a5f;
+    border-color: #1e3a5f;
     color: #fff;
   }
-  .flexi-rest-chip.is-taken {
+  .flexi-duty-chip.is-selected.is-rest {
+    background: #4b5563;
+    border-color: #4b5563;
+  }
+  .flexi-duty-chip.is-taken {
     background: #f3f4f6;
     color: #9ca3af;
     cursor: not-allowed;
     text-decoration: line-through;
   }
-  .flexi-rest-chip.is-buffer { border-style: dashed; }
-  .flexi-rest-chip small {
+  .flexi-duty-chip.is-buffer { border-style: dashed; }
+  .flexi-duty-chip small {
     display: block;
     font-size: 0.68rem;
     opacity: 0.85;
   }
-  .flexi-rest-date-actions { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+  .flexi-duty-date-actions { display: flex; flex-wrap: wrap; gap: 0.45rem; }
 </style>
 {% endblock %}
 
@@ -145,8 +148,8 @@
       <strong>Split</strong> duty uses In / Break-out / Break-in / Out.
       <strong>Straight</strong> duty is continuous In → Out (no meal break; typically 8 hours; two DTR punches).
       <strong>Rest</strong> marks scheduled day(s) off (0 worktime, REST DAY — no duty times).
-      For Rest, click <strong>each rest day</strong> on the quincena calendar (several non-consecutive dates in one add)
-      or use Date from / Date to to mark a contiguous block.
+      For every duty mode (day, straight, night, or rest), click <strong>each date</strong> on the quincena calendar
+      (several non-consecutive dates in one add), or use Date from / Date to with <strong>Mark Date from–to</strong>.
       When Out is earlier than In (e.g. 4:00 pm → 12:00 am, or 10:00 pm → 6:00 am), the shift is
       <strong>overnight</strong>.
       Date range = <strong>shift-start days only</strong> (not the morning checkout date).
@@ -225,10 +228,12 @@
       <div class="table-section" style="margin-bottom: 1rem;">
         <h2 style="font-size: 1rem; margin: 0 0 0.75rem;">Add entry</h2>
         <p style="font-size: 0.85rem; color: var(--medium-gray); margin: 0 0 0.5rem;">
+          Pick dates on the quincena calendar below (same for day, straight, night, and rest).
           Date from / Date to may use one day before or after the quincena
-          ({{ date_entry_min }} – {{ date_entry_max }}) for night-shift coverage.
+          ({{ date_entry_min }} – {{ date_entry_max }}) for night-shift coverage, then click
+          <strong>Mark Date from–to</strong> to select that block.
         </p>
-        <p style="font-size: 0.85rem; color: var(--medium-gray); margin: 0 0 0.5rem;">Quick presets (fills duty mode and time fields below):</p>
+        <p style="font-size: 0.85rem; color: var(--medium-gray); margin: 0 0 0.5rem;">Quick presets (fills duty mode and time fields; dates stay on the calendar):</p>
         <div class="flexi-preset-btns">
           {% for preset in flexi_shift_presets %}
           <button type="button" class="btn-secondary btn-sm flexi-preset-btn"
@@ -262,16 +267,17 @@
             <label for="addDateEnd">Date to</label>
             <input type="date" id="addDateEnd" class="form-control" min="{{ date_entry_min }}" max="{{ date_entry_max }}" title="Quincena ±1 day allowed for night shift">
           </div>
-          <div id="flexiRestDatesWrap" class="flexi-rest-dates" hidden>
-            <label>Rest days this quincena</label>
+          <div id="flexiDutyDatesWrap" class="flexi-duty-dates">
+            <label id="flexiDutyDatesLabel">Duty dates this quincena</label>
             <p style="font-size: 0.82rem; color: var(--medium-gray); margin: 0.15rem 0 0;">
-              Click each rest day for this employee. You can pick several dates at once (they do not need to be consecutive).
+              Click each date for this employee (same for day shift, straight, night shift, and rest).
+              You can pick several dates at once; they do not need to be consecutive.
               Dates already on the list are crossed out. Dashed chips are the ±1 night-shift buffer days.
             </p>
-            <div id="flexiRestDateChips" class="flexi-rest-chip-grid"></div>
-            <div class="flexi-rest-date-actions">
-              <button type="button" class="btn-secondary btn-sm" id="btnRestMarkRange">Mark Date from–to</button>
-              <button type="button" class="btn-secondary btn-sm" id="btnRestClearDates">Clear rest dates</button>
+            <div id="flexiDutyDateChips" class="flexi-duty-chip-grid"></div>
+            <div class="flexi-duty-date-actions">
+              <button type="button" class="btn-secondary btn-sm" id="btnDutyMarkRange">Mark Date from–to</button>
+              <button type="button" class="btn-secondary btn-sm" id="btnDutyClearDates">Clear dates</button>
             </div>
           </div>
           <div class="form-group flexi-time-field" style="margin: 0;">
@@ -339,7 +345,7 @@
   var dateEntryMax = {{ date_entry_max|tojson }};
   var quincenaStart = {{ quincena_start|tojson }};
   var quincenaEnd = {{ quincena_end|tojson }};
-  var restDateSet = {};
+  var dutyDateSet = {};
   var weekdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   function parseISODate(s) {
@@ -396,26 +402,38 @@
     });
   }
 
-  function selectedRestDates() {
-    return Object.keys(restDateSet).filter(function (k) { return restDateSet[k]; }).sort();
+  function selectedDutyDates() {
+    return Object.keys(dutyDateSet).filter(function (k) { return dutyDateSet[k]; }).sort();
   }
 
-  function renderRestDateChips() {
-    var wrap = document.getElementById('flexiRestDateChips');
+  function syncDutyDatesLabel() {
+    var label = document.getElementById('flexiDutyDatesLabel');
+    if (!label) return;
+    var mode = document.getElementById('addDutyMode').value || 'split';
+    label.textContent = mode === 'rest' ? 'Rest days this quincena' : 'Duty dates this quincena';
+  }
+
+  function renderDutyDateChips() {
+    var wrap = document.getElementById('flexiDutyDateChips');
     if (!wrap) return;
     wrap.innerHTML = '';
+    syncDutyDatesLabel();
     var empId = addEmpId.value;
+    var mode = document.getElementById('addDutyMode').value || 'split';
     eachDateISO(dateEntryMin, dateEntryMax).forEach(function (iso) {
       var d = parseISODate(iso);
       var btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'flexi-rest-chip';
-      btn.setAttribute('data-rest-date', iso);
+      btn.className = 'flexi-duty-chip';
+      btn.setAttribute('data-duty-date', iso);
       var inCore = iso >= quincenaStart && iso <= quincenaEnd;
       if (!inCore) btn.classList.add('is-buffer');
       var taken = empId && employeeCoversDate(empId, iso);
       if (taken) btn.classList.add('is-taken');
-      if (restDateSet[iso] && !taken) btn.classList.add('is-selected');
+      if (dutyDateSet[iso] && !taken) {
+        btn.classList.add('is-selected');
+        if (mode === 'rest') btn.classList.add('is-rest');
+      }
       btn.innerHTML = '<strong>' + d.getDate() + '</strong><small>' + weekdayNames[d.getDay()] + '</small>';
       btn.title = iso + (taken ? ' — already on this employee’s list' : (inCore ? '' : ' (buffer day)'));
       btn.disabled = !!taken;
@@ -494,8 +512,6 @@
     document.querySelectorAll('.flexi-break-field').forEach(function (el) {
       el.style.display = (rest || straight) ? 'none' : '';
     });
-    var restWrap = document.getElementById('flexiRestDatesWrap');
-    if (restWrap) restWrap.hidden = !rest;
     var breakOut = document.getElementById('addBreakOut');
     var breakIn = document.getElementById('addBreakIn');
     if (rest || straight) {
@@ -505,8 +521,8 @@
     if (rest) {
       document.getElementById('addTimeIn').value = '';
       document.getElementById('addTimeOut').value = '';
-      renderRestDateChips();
     }
+    renderDutyDateChips();
   }
 
   var tbody = document.getElementById('flexiTableBody');
@@ -558,7 +574,7 @@
       tbody.appendChild(tr);
     });
     syncHidden();
-    renderRestDateChips();
+    renderDutyDateChips();
   }
 
   tbody.addEventListener('change', function (e) {
@@ -630,7 +646,7 @@
         addEmpId.value = String(e.id);
         addEmpSearch.value = e.label;
         addEmpResults.classList.remove('is-open');
-        renderRestDateChips();
+        renderDutyDateChips();
       });
       addEmpResults.appendChild(btn);
     });
@@ -652,31 +668,31 @@
 
   document.getElementById('addDutyMode').addEventListener('change', syncAddDutyModeUi);
 
-  var restChips = document.getElementById('flexiRestDateChips');
-  if (restChips) {
-    restChips.addEventListener('click', function (e) {
-      var btn = e.target.closest('[data-rest-date]');
+  var dutyChips = document.getElementById('flexiDutyDateChips');
+  if (dutyChips) {
+    dutyChips.addEventListener('click', function (e) {
+      var btn = e.target.closest('[data-duty-date]');
       if (!btn || btn.disabled) return;
-      var iso = btn.getAttribute('data-rest-date');
-      if (restDateSet[iso]) delete restDateSet[iso];
-      else restDateSet[iso] = true;
-      renderRestDateChips();
+      var iso = btn.getAttribute('data-duty-date');
+      if (dutyDateSet[iso]) delete dutyDateSet[iso];
+      else dutyDateSet[iso] = true;
+      renderDutyDateChips();
     });
   }
-  var btnRestClear = document.getElementById('btnRestClearDates');
-  if (btnRestClear) {
-    btnRestClear.addEventListener('click', function () {
-      restDateSet = {};
-      renderRestDateChips();
+  var btnDutyClear = document.getElementById('btnDutyClearDates');
+  if (btnDutyClear) {
+    btnDutyClear.addEventListener('click', function () {
+      dutyDateSet = {};
+      renderDutyDateChips();
     });
   }
-  var btnRestMark = document.getElementById('btnRestMarkRange');
-  if (btnRestMark) {
-    btnRestMark.addEventListener('click', function () {
+  var btnDutyMark = document.getElementById('btnDutyMarkRange');
+  if (btnDutyMark) {
+    btnDutyMark.addEventListener('click', function () {
       var d0 = document.getElementById('addDateStart').value;
       var d1 = document.getElementById('addDateEnd').value;
       if (!d0 || !d1) {
-        alert('Enter Date from and Date to first, then mark that range on the rest-day calendar.');
+        alert('Enter Date from and Date to first, then mark that range on the calendar.');
         return;
       }
       if (d0 > d1) {
@@ -685,14 +701,14 @@
       }
       eachDateISO(d0, d1).forEach(function (iso) {
         if (!addEmpId.value || !employeeCoversDate(addEmpId.value, iso)) {
-          restDateSet[iso] = true;
+          dutyDateSet[iso] = true;
         }
       });
-      renderRestDateChips();
+      renderDutyDateChips();
     });
   }
 
-  function pushRestRows(emp, dateRanges) {
+  function pushDutyRows(emp, dateRanges, dutyMode, times) {
     dateRanges.forEach(function (rng) {
       var row = {
         employee_id: emp.id,
@@ -700,11 +716,11 @@
         employee_name: emp.directory_name || (emp.last_name + ', ' + emp.first_name),
         date_start: rng.start,
         date_end: rng.end,
-        duty_mode: 'rest',
-        time_in: '',
-        break_out: '',
-        break_in: '',
-        time_out: ''
+        duty_mode: dutyMode,
+        time_in: times.time_in || '',
+        break_out: times.break_out || '',
+        break_in: times.break_in || '',
+        time_out: times.time_out || ''
       };
       refreshOvernightFlags(row);
       entries.push(row);
@@ -721,73 +737,62 @@
     var d0 = document.getElementById('addDateStart').value;
     var d1 = document.getElementById('addDateEnd').value;
     var dutyMode = document.getElementById('addDutyMode').value || 'split';
-    if (dutyMode === 'rest') {
-      var picked = selectedRestDates().filter(function (iso) {
-        return !employeeCoversDate(emp.id, iso);
-      });
-      if (!picked.length) {
-        if (!d0 || !d1) {
-          alert('Click one or more rest days on the calendar, or enter Date from and Date to.');
-          return;
-        }
-        if (d0 < dateEntryMin || d1 > dateEntryMax || d0 > d1) {
-          alert('Dates must be within the quincena ±1 day and start on or before end.');
-          return;
-        }
-        if (employeeCoversDate(emp.id, d0) || (d0 !== d1 && eachDateISO(d0, d1).some(function (iso) {
-          return employeeCoversDate(emp.id, iso);
-        }))) {
-          alert('Those dates overlap an existing Flexible Worktime row for this employee.');
-          return;
-        }
-        pushRestRows(emp, [{ start: d0, end: d1 }]);
-      } else {
-        pushRestRows(emp, compactDateRanges(picked));
-      }
-      restDateSet = {};
-      renderTable(document.getElementById('flexiSearch').value);
-      renderRestDateChips();
-      return;
-    }
-    if (!d0 || !d1) {
-      alert('Enter date from and date to (quincena ±1 day allowed for night shift).');
-      return;
-    }
-    if (d0 < dateEntryMin || d1 > dateEntryMax || d0 > d1) {
-      alert('Dates must be within the quincena ±1 day and start on or before end.');
-      return;
-    }
     var timeIn = document.getElementById('addTimeIn').value;
     var timeOut = document.getElementById('addTimeOut').value;
     var breakOut = document.getElementById('addBreakOut').value;
     var breakIn = document.getElementById('addBreakIn').value;
-    if (!timeIn || !timeOut) {
-      alert('Time in and time out are required.');
-      return;
-    }
-    if (dutyMode === 'split' && (!breakOut || !breakIn)) {
-      alert('Break out and break in are required for split duty.');
-      return;
-    }
-    if (dutyMode === 'straight') {
+    if (dutyMode === 'rest') {
+      timeIn = '';
+      timeOut = '';
       breakOut = '';
       breakIn = '';
+    } else {
+      if (!timeIn || !timeOut) {
+        alert('Time in and time out are required.');
+        return;
+      }
+      if (dutyMode === 'split' && (!breakOut || !breakIn)) {
+        alert('Break out and break in are required for split duty.');
+        return;
+      }
+      if (dutyMode === 'straight') {
+        breakOut = '';
+        breakIn = '';
+      }
     }
-    var row = {
-      employee_id: emp.id,
-      employee_code: emp.employee_id,
-      employee_name: emp.directory_name || (emp.last_name + ', ' + emp.first_name),
-      date_start: d0,
-      date_end: d1,
-      duty_mode: dutyMode,
+    var times = {
       time_in: timeIn,
       break_out: breakOut,
       break_in: breakIn,
       time_out: timeOut
     };
-    refreshOvernightFlags(row);
-    entries.push(row);
+    var picked = selectedDutyDates().filter(function (iso) {
+      return !employeeCoversDate(emp.id, iso);
+    });
+    var ranges;
+    if (picked.length) {
+      ranges = compactDateRanges(picked);
+    } else {
+      if (!d0 || !d1) {
+        alert('Click one or more dates on the calendar, or enter Date from and Date to.');
+        return;
+      }
+      if (d0 < dateEntryMin || d1 > dateEntryMax || d0 > d1) {
+        alert('Dates must be within the quincena ±1 day and start on or before end.');
+        return;
+      }
+      if (eachDateISO(d0, d1).some(function (iso) {
+        return employeeCoversDate(emp.id, iso);
+      })) {
+        alert('Those dates overlap an existing Flexible Worktime row for this employee.');
+        return;
+      }
+      ranges = [{ start: d0, end: d1 }];
+    }
+    pushDutyRows(emp, ranges, dutyMode, times);
+    dutyDateSet = {};
     renderTable(document.getElementById('flexiSearch').value);
+    renderDutyDateChips();
   });
 
   document.querySelectorAll('.flexi-preset-btn').forEach(function (btn) {

@@ -317,6 +317,10 @@ def arrangement_model_code_for_date(emp: Employee, d: date) -> str:
     """
     if bool(getattr(emp, 'flexible_worktime', False)):
         return 'flex'
+    from app.workweek_calendar_service import calendar_model_code_for_date
+    cal = calendar_model_code_for_date(d)
+    if cal in ('4day', '5day'):
+        return cal
     is_regular = _employee_is_regular_for_arrangement(emp)
     rows = work_arrangement_settings_covering(d)
     for row in rows:

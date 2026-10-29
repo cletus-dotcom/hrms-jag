@@ -58,8 +58,10 @@ def create_app(config_class=Config):
             from sqlalchemy import text
             db.create_all()
             # Ensure leave_ledger_deletion exists (audit log); create_all can miss new tables in some setups
-            from app.models import LeaveLedgerDeletion, JoCosDesignation, JoCosRate, FlexiTimeSchedule, EmployeeFlexiDay, DtrQuincenaWorktimeSummary, WorkHours, FlexibleWorktime, OvertimeAuthorization, JoCosExtendService, JoCosOvertime, JoCosOvertimeLedger, JoCosOvertimeOffsetRequest, HrmsNotification, PlantillaPayslip, ErmtRecord, EventAttendanceBatch, EventAttendance
+            from app.models import LeaveLedgerDeletion, JoCosDesignation, JoCosRate, FlexiTimeSchedule, EmployeeFlexiDay, DtrQuincenaWorktimeSummary, WorkHours, FlexibleWorktime, OvertimeAuthorization, JoCosExtendService, JoCosOvertime, JoCosOvertimeLedger, JoCosOvertimeOffsetRequest, HrmsNotification, PlantillaPayslip, ErmtRecord, EventAttendanceBatch, EventAttendance, WorkweekMonthPlan, WorkweekWeek
             LeaveLedgerDeletion.__table__.create(db.engine, checkfirst=True)
+            WorkweekMonthPlan.__table__.create(db.engine, checkfirst=True)
+            WorkweekWeek.__table__.create(db.engine, checkfirst=True)
             JoCosDesignation.__table__.create(db.engine, checkfirst=True)
             JoCosRate.__table__.create(db.engine, checkfirst=True)
             FlexiTimeSchedule.__table__.create(db.engine, checkfirst=True)
@@ -197,11 +199,12 @@ def create_app(config_class=Config):
                 db.session.rollback()
                 print(f'Warning: could not link temp ID photo: {e}')
             try:
-                from app.ermt_nas_service import ensure_ermt_nas_connected, nas_connection_status
-                ensure_ermt_nas_connected()
+                from app.ermt_nas_service import schedule_ermt_nas_connect, nas_connection_status
+                # Never block create_app on UNC / WNet — connect in background.
                 print(nas_connection_status())
+                schedule_ermt_nas_connect()
             except Exception as e:
-                print(f'Warning: NAS connection check failed: {e}')
+                print(f'Warning: NAS connection schedule failed: {e}')
             try:
                 from migrate_employee_status_values import run_employee_status_migration
                 run_employee_status_migration()

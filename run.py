@@ -26,9 +26,9 @@ if __name__ == '__main__':
         with app.app_context():
             from app.portal_site_service import site_upload_dir
             print(f"Site uploads folder: {site_upload_dir()}")
-            from app.ermt_nas_service import ensure_ermt_nas_connected, nas_connection_status
-            ensure_ermt_nas_connected()
+            from app.ermt_nas_service import schedule_ermt_nas_connect, nas_connection_status
             print(nas_connection_status())
+            schedule_ermt_nas_connect(app)
     except Exception:
         pass
     try:

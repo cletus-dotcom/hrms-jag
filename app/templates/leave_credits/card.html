@@ -13,9 +13,13 @@
 <style>
     .ledger-table {
         width: 100%;
-        border-collapse: collapse;
+        border-collapse: separate;
+        border-spacing: 0;
         font-size: 0.8rem;
         min-width: 1400px;
+        overflow: visible;
+        --ledger-h1: 2.4rem;
+        --ledger-h2: 2.55rem;
     }
     .ledger-table th, .ledger-table td {
         border: 1px solid #ccc;
@@ -27,6 +31,25 @@
         background: #f5f5f5;
         font-weight: 600;
         white-space: nowrap;
+        position: sticky;
+        z-index: 4;
+    }
+    .ledger-table thead tr:nth-child(1) th {
+        top: 0;
+        z-index: 7;
+    }
+    .ledger-table thead tr:nth-child(2) th {
+        top: var(--ledger-h1);
+        z-index: 6;
+    }
+    .ledger-table thead tr:nth-child(3) th {
+        top: calc(var(--ledger-h1) + var(--ledger-h2));
+        z-index: 5;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12);
+    }
+    .ledger-table thead tr:nth-child(1) th[rowspan],
+    .ledger-table thead tr:nth-child(2) th[rowspan] {
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12);
     }
     .ledger-table th.section-header {
         background: #e8e8e8;
@@ -66,7 +89,8 @@
         background: #f9f9f9;
     }
     .table-scroll-container {
-        overflow-x: auto;
+        overflow: auto;
+        max-height: min(72vh, calc(100vh - var(--app-chrome-offset, 3.75rem) - 7.5rem));
         margin-bottom: 1rem;
     }
     .add-entry-btn {
@@ -861,6 +885,19 @@
 </div>
 
 <script>
+(function pinLedgerHeader() {
+    var table = document.querySelector('.ledger-table');
+    if (!table) return;
+    var rows = table.tHead ? table.tHead.rows : [];
+    if (rows.length < 2) return;
+    function syncTops() {
+        table.style.setProperty('--ledger-h1', rows[0].getBoundingClientRect().height + 'px');
+        table.style.setProperty('--ledger-h2', rows[1].getBoundingClientRect().height + 'px');
+    }
+    syncTops();
+    window.addEventListener('resize', syncTops);
+})();
+
 const ledgerCal = {
     year: new Date().getFullYear(),
     month: new Date().getMonth(),

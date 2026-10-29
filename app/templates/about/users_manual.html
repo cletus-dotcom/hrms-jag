@@ -285,7 +285,7 @@
 
             <div class="role-guide{% if viewer_role in ('admin', 'hr') %} is-your-role{% endif %}" id="role-admin-hr">
                 <h3 class="sub">Admin &amp; HR{% if viewer_role in ('admin', 'hr') %}<span class="role-badge">Your role</span>{% endif %}</h3>
-                <p><strong>Sidebar access:</strong> eRMT (add/edit; Admin can delete), Settings, full Time &amp; Attendance (Processing), Leave Credits, Payroll, Reports (Employees List, Service Records, Leave Credits, Employee ID Cards), Notifications.</p>
+                <p><strong>Sidebar access:</strong> eRMT (add/edit; Admin can delete), Settings, full Time &amp; Attendance (Processing), Leave Credits, Workweek calendar (Admin/HR only), Payroll, Reports (Employees List, Service Records, Leave Credits, Employee ID Cards), Notifications.</p>
                 <p><strong>Typical quincena duties:</strong></p>
                 <ol class="steps">
                     <li>Open <code>Quincena Processing</code> and confirm setup checklist (prepare period, authorizations).</li>
@@ -300,7 +300,7 @@
                 <p><strong>Also:</strong></p>
                 <ul>
                     <li><strong>Employees:</strong> Add/edit employees and PDS; link <strong>ID Photo (eRMT)</strong> on the employee form; open <strong>Service Record</strong> or <strong>Print ID</strong> from the list/form.</li>
-                    <li><strong>Leave credits:</strong> Maintain ledger under <code>Leave → Leave Credits</code>; export Leave Credits PDF from the card or <code>Reports → Leave Credits</code>.</li>
+                    <li><strong>Leave credits:</strong> Maintain ledger under <code>Leave → Leave Credits</code>; export Leave Credits PDF from the card or <code>Reports → Leave Credits</code>. Set compressed vs regular months and Friday-holiday weeks under <code>Leave → Workweek calendar</code> (flagged weeks charge 1.000 VL/SL/LWOP and remark <code>5-day workweek</code>).</li>
                     <li><strong>Reports:</strong> <code>Reports → Service Records</code>, <code>Leave Credits</code>, and <code>Employee ID Cards</code>; Employees List export (CSV/Excel/PDF).</li>
                     <li><strong>Payroll:</strong> Upload/manage deductions, load JO/COS and Plantilla payroll, generate payslips for employee self-service.</li>
                     <li><strong>eRMT:</strong> Encode records with cabinet/shelf and <strong>Network PDF path (NAS)</strong> (including type <strong>ID Photo</strong>); see <a href="#um-ermt">eRMT</a> and <a href="#um-id-cards">ID Cards</a>.</li>
@@ -328,7 +328,7 @@
                     <li>Open <code>Time &amp; Attendance → My DTR</code> (you receive a notification).</li>
                     <li>Review each day for <strong>Late</strong>, <strong>Undertime</strong>, or <strong>Absent</strong> flags.</li>
                     <li>Click <strong>Justify this day</strong> on a flagged row before the review deadline; attach proof when available.</li>
-                    <li>Use <strong>Print DTR</strong> to download a PDF copy (includes justification status).</li>
+                    <li>Use <strong>Print DTR</strong> to download a PDF copy (CSC Form 48). Plantilla prints a <strong>Remarks</strong> column with the justification reason when one exists; JO/COS prints Remarks / Accomplishment.</li>
                     <li>HR may still adjust your record before worktime is processed; check Notifications for updates.</li>
                 </ol>
                 <p><strong>Plantilla — monthly submission:</strong> After the 2nd quincena upload, open <code>My DTR → Month (monthly submission)</code>, justify remaining flagged days, <strong>Print monthly DTR</strong>, then <strong>Submit monthly DTR</strong> before the deadline (default: 5th of the following month).</p>
@@ -433,7 +433,7 @@
                     <ul>
                         <li><strong>5-day compressed</strong> — used for late/undertime targets (8:00 AM / 12:00 PM / 1:00 PM / 5:00 PM). DTR In/Out stay blank until biometric upload.</li>
                         <li><strong>4-day compressed</strong> — late/undertime targets Monday–Thursday (7:00 AM / 12:00 PM / 1:00 PM / 6:00 PM); <strong>Friday</strong> marked <code>REST DAY</code>. No default 7:00/6:00 times on the DTR row.</li>
-                        <li>Employees on the <strong>Flexible Worktime</strong> list (or the employee flexi flag) skip the 4-day Friday REST DAY overlay; that day’s flexi row (including Rest mode) owns the schedule. Rest mode can take <strong>several dates in the same quincena</strong> (click each rest day, then Add) — they do not need to be consecutive.</li>
+                        <li>Employees on the <strong>Flexible Worktime</strong> list (or the employee flexi flag) skip the 4-day Friday REST DAY overlay; that day’s flexi row (including Rest mode) owns the schedule. Day, straight, night, and Rest modes all use the same quincena date calendar — click several dates (they need not be consecutive), or Mark Date from–to, then Add to list.</li>
                     </ul>
                 </li>
                 <li>
@@ -446,7 +446,8 @@
             <p class="muted">
                 To print a <strong>full-month</strong> DTR for plantilla employees (monthly submission requirement), open
                 <code>View DTR Records</code>, set <strong>View by</strong> to <strong>Month</strong>, and use <strong>Print monthly DTR</strong>.
-                Day-to-day payroll and review still use the <strong>Quincena</strong> view.
+                The PDF uses the same Civil Service Form No. 48 layout as JO/COS DTR; the last column is
+                <strong>Remarks</strong> (justification reason, if any). Day-to-day payroll and review still use the <strong>Quincena</strong> view.
             </p>
 
             <h3 class="sub">G2) Monthly plantilla DTR submissions (Admin/HR)</h3>
@@ -507,6 +508,14 @@
                 <li>Review the ledger (VL, SL, SPL, WL, CTO, LWOP).</li>
                 <li>Click <strong>Export PDF</strong> (landscape A4).</li>
             </ol>
+
+            <h3 class="sub">L2) Workweek calendar (Admin/HR)</h3>
+            <p>
+                Open <code>Leave → Workweek calendar</code>, choose a year, then set each month to compressed (4-day / 1.250)
+                or regular (5-day / 1.000). Official Friday holidays (including a Friday New Year that sits in the last week of December)
+                are flagged automatically; add local Friday holidays as needed. Save to recompute VL/SL/LWOP on those dates and stamp
+                <code>5-day workweek</code> on flagged leave lines. Until a year is saved, DTR workweek segments still apply.
+            </p>
 
             <h3 class="sub">M) Run Plantilla or JO/COS payroll (Admin/HR)</h3>
             <ol class="steps">
@@ -653,8 +662,10 @@
             <h3 class="sub">eRMT / NAS PDF issues</h3>
             <ul>
                 <li><strong>Browser won’t open the PDF</strong>: Copy the path and open it in File Explorer or Adobe. Browsers often block local/network <code>file://</code> links from web apps.</li>
-                <li><strong>Access denied / path not found</strong>: Confirm you are on the office network and can open
-                    <code>\\192.168.20.3\hrmdo</code> in File Explorer; ask IT if the share moved. The app server must also be able to read that path for ID photo previews/cards.</li>
+                <li><strong>HRMS won’t start / hangs while the NAS is offline</strong>: Startup no longer waits on
+                    <code>\\192.168.20.3\hrmdo</code>. NAS login runs in the background; pages load without photos/PDFs
+                    until the share is back. To disable NAS attempts entirely, set <code>ERMT_NAS_SKIP=1</code> in
+                    <code>.env</code> and restart.</li>
                 <li><strong>Cannot add/edit</strong>: Only Admin/HR can encode records. Only Admin can delete.</li>
             </ul>
 

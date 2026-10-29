@@ -142,7 +142,9 @@
         <div id="sidebarLeave" class="sidebar-submenu{% if not _leave_open %} is-collapsed{% endif %}">
             {% if _is_admin_hr %}
             <p class="sidebar-sublabel">Administration</p>
-            <a href="{{ url_for('routes.leave_credits_list') }}" class="sidebar-sublink{% if request.endpoint == 'routes.leave_credits_list' %} active{% endif %}">Leave Credits</a>
+            <a href="{{ url_for('routes.leave_credits_list') }}" class="sidebar-sublink{% if request.endpoint in ('routes.leave_credits_list', 'routes.leave_credits_card', 'routes.leave_credits_card_pdf') %} active{% endif %}">Leave Credits</a>
+            {# Workweek calendar: Admin / HR / Portal Admin only — never Manager or Employee #}
+            <a href="{{ url_for('routes.leave_credits_workweek') }}" class="sidebar-sublink{% if request.endpoint == 'routes.leave_credits_workweek' %} active{% endif %}">Workweek calendar</a>
             {% endif %}
             <p class="sidebar-sublabel">Self-service</p>
             <a href="{{ url_for('routes.leave_apply') }}" class="sidebar-sublink{% if request.endpoint == 'routes.leave_apply' %} active{% endif %}">Apply for Leave</a>

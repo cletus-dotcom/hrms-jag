@@ -1893,6 +1893,40 @@ class LeaveLedger(db.Model):
         return f'<LeaveLedger id={self.id} emp={self.employee_id} date={self.transaction_date}>'
 
 
+class WorkweekMonthPlan(db.Model):
+    """Per calendar month default duty model for plantilla leave / DTR (4day or 5day)."""
+    __tablename__ = 'workweek_month_plan'
+    __table_args__ = (
+        db.UniqueConstraint('year', 'month', name='uq_workweek_month_plan_year_month'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    year = db.Column(db.Integer, nullable=False)
+    month = db.Column(db.Integer, nullable=False)
+    default_model = db.Column(db.String(10), nullable=False, default='4day')  # 4day | 5day
+    updated_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class WorkweekWeek(db.Model):
+    """ISO week (Monday start). Flagged weeks revert to 5-day when Friday is a holiday."""
+    __tablename__ = 'workweek_week'
+
+    id = db.Column(db.Integer, primary_key=True)
+    week_start = db.Column(db.Date, nullable=False, unique=True)
+    flagged_5day = db.Column(db.Boolean, nullable=False, default=False)
+    holiday_date = db.Column(db.Date, nullable=True)
+    holiday_name = db.Column(db.String(180), nullable=True)
+    holiday_kind = db.Column(db.String(40), nullable=True)
+    holiday_source = db.Column(db.String(40), nullable=True)
+    notes = db.Column(db.String(255), nullable=True)
+    updated_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    def __repr__(self):
+        return f'<WorkweekWeek {self.week_start} flagged={self.flagged_5day}>'
+
+
 class LeaveLedgerDeletion(db.Model):
     """
     Audit trail: snapshot of a leave_ledger row at delete time, with who deleted it.

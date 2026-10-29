@@ -56,3 +56,5 @@ class Config:
     # Server / hrms.exe: set in OS environment (never commit passwords to git).
     ERMT_NAS_USER = os.environ.get('ERMT_NAS_USER') or ''
     ERMT_NAS_PASSWORD = os.environ.get('ERMT_NAS_PASSWORD') or ''
+    # 1/true/yes: skip UNC login so HRMS starts when the office NAS is offline.
+    ERMT_NAS_SKIP = os.environ.get('ERMT_NAS_SKIP') or ''

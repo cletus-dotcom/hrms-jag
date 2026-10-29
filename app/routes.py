@@ -24,6 +24,11 @@ from app.leave_ledger_service import (
     undo_monthly_accrual_for_month,
 )
 from app.leave_utils import minutes_to_day_equivalent, leave_day_credit_for_workweek
+from app.workweek_calendar_service import (
+    build_year_view,
+    calendar_model_code_for_date,
+    save_year_calendar,
+)
 from app.lwop_ledger_service import (
     any_lwop_payroll_deduction,
     delete_lwop_regen_rows_for_quincena,
@@ -1481,6 +1486,10 @@ def _pick_work_arrangement_for_date(emp: Employee, d: date):
             base['pm_out'] = (flex_end.hour, flex_end.minute)
         return base
 
+    cal = calendar_model_code_for_date(d)
+    if cal in _DTR_DUTY_MODELS:
+        return dict(_DTR_DUTY_MODELS[cal])
+
     is_regular = _is_regular_employee(emp)
     rows = dtr_wa.work_arrangement_settings_covering(d)
     for row in rows:
@@ -1509,6 +1518,9 @@ def _arrangement_model_code_for_date(emp: Employee, d: date) -> str:
     """Effective duty model code for late/undertime (e.g. '4day', '5day'); 'flex' if flexible_worktime."""
     if _employee_is_flexible_for_date(emp, d):
         return 'flex'
+    cal = calendar_model_code_for_date(d)
+    if cal in ('4day', '5day'):
+        return cal
     is_regular = _is_regular_employee(emp)
     rows = dtr_wa.work_arrangement_settings_covering(d)
     for row in rows:
@@ -4622,6 +4634,61 @@ def _csc_dtr_employee_name(emp: Employee) -> str:
     return f'{first} {last}'.upper().strip()
 
 
+def _csc_dtr_department_head_name(emp: Employee) -> str:
+    """Printed name of the employee's department manager (blank if none assigned)."""
+    dept = getattr(emp, 'department', None)
+    if dept is None:
+        return ''
+    mgr = getattr(dept, 'manager', None)
+    if mgr is None:
+        mgr_id = getattr(dept, 'manager_id', None)
+        if mgr_id:
+            mgr = Employee.query.get(mgr_id)
+    if mgr is None:
+        return ''
+    return _csc_dtr_employee_name(mgr)
+
+
+def _csc_dtr_is_department_head(emp: Employee) -> bool:
+    if emp is None or not getattr(emp, 'id', None):
+        return False
+    return Department.query.filter_by(manager_id=emp.id).first() is not None
+
+
+def _csc_dtr_mayor_employee() -> Employee | None:
+    """Mayor as assigned manager of the Mayor's Office / MO department."""
+    from sqlalchemy import func as sql_func
+
+    mo_dept = (
+        Department.query
+        .filter(sql_func.lower(Department.name).in_(
+            ['mo', "mayor's office", 'mayors office', 'municipal mayor']
+        ))
+        .first()
+    )
+    if not mo_dept:
+        mo_dept = (
+            Department.query
+            .filter(sql_func.lower(Department.name).like('%mayor%'))
+            .first()
+        )
+    if not mo_dept:
+        return None
+    mgr = getattr(mo_dept, 'manager', None)
+    if mgr is None and getattr(mo_dept, 'manager_id', None):
+        mgr = Employee.query.get(mo_dept.manager_id)
+    return mgr
+
+
+def _csc_dtr_supervisor_name(emp: Employee) -> str:
+    """Supervisor line: department head, or the mayor when the employee is a department head."""
+    if _csc_dtr_is_department_head(emp):
+        mayor = _csc_dtr_mayor_employee()
+        if mayor:
+            return _csc_dtr_employee_name(mayor)
+    return _csc_dtr_department_head_name(emp)
+
+
 def _csc_dtr_period_label(start_d: date, end_d: date) -> str:
     return f'{start_d.strftime("%B %d")} - {end_d.strftime("%d, %Y")}'
 
@@ -4705,8 +4772,13 @@ def _dtr_csc_form48_pdf_bytes(
     *,
     start_d: date,
     end_d: date,
+    remarks_style: str = 'jo_cos',
 ) -> io.BytesIO:
-    """Civil Service Form No. 48 layout (JO/COS), matching municipal DTR print style.
+    """Civil Service Form No. 48 layout (JO/COS and plantilla monthly DTR).
+
+    ``remarks_style``:
+      - ``jo_cos`` — last column is Remarks / Accomplishment (justification + report)
+      - ``plantilla`` — last column is Remarks (justification reason only)
 
     Scales row height so a full-month printout fits on a single letter page.
     """
@@ -4785,8 +4857,11 @@ def _dtr_csc_form48_pdf_bytes(
     y -= 10 if compact else 14
 
     header_h = 20 if compact else 28
+    plantilla_print = (remarks_style or '').strip().lower() == 'plantilla'
     # Leave room for certification + signature; size rows to fit remaining height
     footer_reserve = 108 if compact else 145
+    if plantilla_print:
+        footer_reserve += 42 if compact else 52
     table_top = y
     header_bottom = table_top - header_h
     available = max(header_bottom - footer_reserve, n_rows * 8.5)
@@ -4801,8 +4876,10 @@ def _dtr_csc_form48_pdf_bytes(
         c.line(x0, y_line, x1, y_line)
 
     def _remarks_accomplishment_cell(row: dict, *, span_status: str | None) -> str:
-        parts: list[str] = []
         just = (row.get('justification_reason') or '').strip()
+        if (remarks_style or '').strip().lower() == 'plantilla':
+            return just
+        parts: list[str] = []
         if just:
             parts.append(just)
         acc = (row.get('accomplishment_text') or '').strip()
@@ -4813,6 +4890,12 @@ def _dtr_csc_form48_pdf_bytes(
             if rem and not span_status:
                 parts.append(rem)
         return ' | '.join(parts)
+
+    remarks_header = (
+        'Remarks'
+        if (remarks_style or '').strip().lower() == 'plantilla'
+        else 'Remarks / Accomplishment'
+    )
 
     c.setStrokeColorRGB(0, 0, 0)
     c.setLineWidth(0.55 if compact else 0.7)
@@ -4834,7 +4917,7 @@ def _dtr_csc_form48_pdf_bytes(
     c.drawCentredString((col_x[3] + col_x[5]) / 2, table_top - (7 if compact else 10), 'PM')
     c.drawCentredString(col_x[5] + col_w[5] / 2, table_top - (8 if compact else 11), 'UNDERTIME')
     c.drawCentredString(col_x[5] + col_w[5] / 2, table_top - (15 if compact else 20), '(Hrs / Mins)')
-    c.drawCentredString(col_x[6] + col_w[6] / 2, table_top - (11 if compact else 14), 'Remarks / Accomplishment')
+    c.drawCentredString(col_x[6] + col_w[6] / 2, table_top - (11 if compact else 14), remarks_header)
     c.setFont('Helvetica-Bold', hdr_sub)
     c.drawCentredString(col_x[1] + col_w[1] / 2, header_bottom + 3, 'IN')
     c.drawCentredString(col_x[2] + col_w[2] / 2, header_bottom + 3, 'OUT')
@@ -4915,19 +4998,38 @@ def _dtr_csc_form48_pdf_bytes(
     c.drawCentredString(width / 2, y, 'the hours of work performed, record of which was made daily')
     y -= 10 if compact else 12
     c.drawCentredString(width / 2, y, 'at the time of arrival and departure from office.')
-    y -= 16 if compact else 24
-    c.setFont('Helvetica-Bold', 10 if compact else 12)
-    c.drawCentredString(width / 2, y, name)
-    y -= 16 if compact else 24
-    c.setFont('Helvetica', cert_size)
-    c.drawCentredString(width / 2, y, 'Verified as to prescribed office hours')
-    y -= 22 if compact else 32
     sig_w = 200 if compact else 220
     c.setLineWidth(0.8)
-    c.line(width / 2 - sig_w / 2, y, width / 2 + sig_w / 2, y)
-    y -= 10 if compact else 12
-    c.setFont('Helvetica-Bold', 8 if compact else 9)
-    c.drawCentredString(width / 2, y, 'Supervisor')
+    if plantilla_print:
+        y -= 36 if compact else 48
+        c.line(width / 2 - sig_w / 2, y, width / 2 + sig_w / 2, y)
+        y -= 11 if compact else 13
+        c.setFont('Helvetica-Bold', 10 if compact else 12)
+        c.drawCentredString(width / 2, y, name)
+        y -= 16 if compact else 22
+        c.setFont('Helvetica', cert_size)
+        c.drawCentredString(width / 2, y, 'Verified as to prescribed office hours')
+        y -= 28 if compact else 36
+        head_name = _csc_dtr_supervisor_name(emp)
+        if head_name:
+            c.setFont('Helvetica-Bold', 9 if compact else 10)
+            c.drawCentredString(width / 2, y + 3, head_name)
+        c.line(width / 2 - sig_w / 2, y, width / 2 + sig_w / 2, y)
+        y -= 11 if compact else 13
+        c.setFont('Helvetica-Bold', 8 if compact else 9)
+        c.drawCentredString(width / 2, y, 'Supervisor')
+    else:
+        y -= 16 if compact else 24
+        c.setFont('Helvetica-Bold', 10 if compact else 12)
+        c.drawCentredString(width / 2, y, name)
+        y -= 16 if compact else 24
+        c.setFont('Helvetica', cert_size)
+        c.drawCentredString(width / 2, y, 'Verified as to prescribed office hours')
+        y -= 22 if compact else 32
+        c.line(width / 2 - sig_w / 2, y, width / 2 + sig_w / 2, y)
+        y -= 10 if compact else 12
+        c.setFont('Helvetica-Bold', 8 if compact else 9)
+        c.drawCentredString(width / 2, y, 'Supervisor')
 
     c.save()
     buf.seek(0)
@@ -5742,10 +5844,8 @@ def dtr_records_print():
 
     if mode == 'quincena':
         start_d, end_d = _quincena_date_range(year, month, quincena)
-        period_label = dtr_period.quincena_period_label(year, month, quincena)
     else:
         start_d, end_d = _month_date_range(year, month)
-        period_label = date(year, month, 1).strftime('%B %Y')
 
     if my_only or role == 'employee':
         if not viewer_emp:
@@ -5774,9 +5874,13 @@ def dtr_records_print():
         dtr_monthly.mark_printed(emp, year, month)
     if _is_jo_cos_employee(emp):
         enrich_jo_cos_dtr_rows(emp.id, rows, start_d, end_d)
-        buf = _dtr_csc_form48_pdf_bytes(emp, rows, start_d=start_d, end_d=end_d)
+        buf = _dtr_csc_form48_pdf_bytes(
+            emp, rows, start_d=start_d, end_d=end_d, remarks_style='jo_cos',
+        )
     else:
-        buf = _dtr_records_pdf_bytes(emp, rows, period_label, include_justifications=True)
+        buf = _dtr_csc_form48_pdf_bytes(
+            emp, rows, start_d=start_d, end_d=end_d, remarks_style='plantilla',
+        )
     fname = f'dtr_{emp.employee_id}_{year}_{month:02d}'
     if mode == 'quincena':
         fname += f'_Q{quincena}'
@@ -14079,6 +14183,58 @@ def leave_credits_list():
         accrual_year_default=today.year,
         accrual_month_default=today.month,
         month_choices=month_choices,
+    )
+
+
+@bp.route('/leave-credits/workweek', methods=['GET', 'POST'])
+@login_required
+def leave_credits_workweek():
+    """Year / month / week calendar. Admin and HR only (managers and employees cannot open or POST)."""
+    denied = _require_admin_or_hr()
+    if denied:
+        return denied
+
+    if request.method == 'POST':
+        try:
+            year = int((request.form.get('year') or '').strip())
+        except ValueError:
+            year = date.today().year
+        if year < 2000 or year > 2100:
+            flash('Year must be between 2000 and 2100.', 'error')
+            return redirect(url_for('routes.leave_credits_workweek'))
+        try:
+            result = save_year_calendar(year, request.form, user_id=current_user.id)
+            db.session.commit()
+            flash(
+                f"Workweek calendar saved for {year}. "
+                f"{result['weeks_saved']} week(s) stored. "
+                f"Leave lines updated: {result['ledger_rows']} "
+                f"({result['employees']} employee(s)).",
+                'success',
+            )
+        except PermissionError:
+            flash('Access denied. This section is for Admin and HR only.', 'error')
+            return redirect(url_for(_dashboard_for_user(current_user)))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Could not save workweek calendar: {e}', 'error')
+        return redirect(url_for('routes.leave_credits_workweek', year=year))
+
+    try:
+        year = int((request.args.get('year') or '').strip() or date.today().year)
+    except ValueError:
+        year = date.today().year
+    if year < 2000 or year > 2100:
+        year = date.today().year
+    view = build_year_view(year)
+    employee = current_user.employee if current_user.employee else None
+    return render_template(
+        'leave_credits/workweek.html',
+        employee=employee,
+        view=view,
+        year=year,
+        prev_year=year - 1,
+        next_year=year + 1,
     )
 
 

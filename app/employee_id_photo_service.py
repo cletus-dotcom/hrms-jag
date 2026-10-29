@@ -64,17 +64,19 @@ def resolve_id_photo_filesystem_path(employee) -> tuple[str | None, object | Non
     else:
         from app.ermt_helpers import rewrite_ermt_nas_aliases
         path = rewrite_ermt_nas_aliases(path) or path
-    from app.ermt_nas_service import ensure_ermt_nas_connected
+    from app.ermt_nas_service import ensure_ermt_nas_connected, unc_path_isfile
     if path.startswith('\\\\'):
-        ensure_ermt_nas_connected()
+        if not ensure_ermt_nas_connected():
+            return None, record, 'nas_unavailable'
     ext = Path(path).suffix.lower()
     if ext and ext not in IMAGE_EXTENSIONS:
         return None, record, 'not_image'
-    if not os.path.isfile(path):
+    if not unc_path_isfile(path):
         if path.startswith('\\\\'):
             from app.ermt_nas_service import ensure_ermt_nas_connected, nas_connection_status
-            ensure_ermt_nas_connected(force=True)
-            if not os.path.isfile(path):
+            if not ensure_ermt_nas_connected(force=True):
+                return None, record, 'nas_unavailable'
+            if not unc_path_isfile(path):
                 current_app.logger.warning(
                     'ID photo missing for employee %s at %s (%s)',
                     getattr(employee, 'id', None),

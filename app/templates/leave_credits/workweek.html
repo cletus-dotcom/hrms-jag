@@ -1,0 +1,222 @@
+{% extends "layouts/app.html" %}
+
+{% block title %}Workweek Calendar - HRMS{% endblock %}
+
+{% set navbar_title = 'Workweek Calendar' %}
+{% set breadcrumbs = [
+    {'label': 'Home', 'url': url_for('routes.index')},
+    {'label': 'Leave Management'},
+    {'label': 'Workweek Calendar'}
+] %}
+
+{% block extra_css %}
+<style>
+  .ww-header {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid rgba(1, 58, 99, 0.1);
+  }
+  .ww-year-nav {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .ww-year-nav input[type="number"] {
+    width: 6.5rem;
+    min-height: 2.25rem;
+  }
+  .ww-info {
+    margin: 0 0 1.25rem;
+    padding: 0.9rem 1.1rem;
+    background: #f0f6fb;
+    border: 1px solid rgba(1, 58, 99, 0.12);
+    border-left: 4px solid var(--secondary-blue, #2a6f97);
+    border-radius: 10px;
+    font-size: 0.8125rem;
+    line-height: 1.55;
+    color: var(--text-dark, #1d2d44);
+  }
+  .ww-info p { margin: 0 0 0.45rem; }
+  .ww-info p:last-child { margin-bottom: 0; }
+  .ww-friday-list {
+    margin: 0.4rem 0 0;
+    padding-left: 1.1rem;
+  }
+  .ww-month {
+    background: #fff;
+    border: 1px solid rgba(1, 58, 99, 0.12);
+    border-radius: 10px;
+    margin-bottom: 0.65rem;
+  }
+  .ww-month > summary {
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1.25rem;
+    padding: 0.7rem 1rem;
+    font-weight: 700;
+    color: var(--primary-blue, #013a63);
+  }
+  .ww-month > summary::-webkit-details-marker { display: none; }
+  .ww-month-radios {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1rem;
+    font-weight: 500;
+    font-size: 0.8rem;
+  }
+  .ww-month-body { padding: 0 0.75rem 0.85rem; overflow-x: auto; }
+  .ww-week-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  .ww-week-table th, .ww-week-table td {
+    border-bottom: 1px solid #eef2f7;
+    padding: 0.45rem 0.4rem;
+    text-align: left;
+    vertical-align: middle;
+  }
+  .ww-week-table th {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--primary-blue, #013a63);
+  }
+  .ww-flagged { background: #fff8e1; }
+  .ww-span { font-size: 0.72rem; color: #6b7280; }
+  .ww-local { width: 11rem; min-width: 8rem; }
+  .ww-actions { margin: 1rem 0 0.5rem; display: flex; gap: 0.75rem; flex-wrap: wrap; }
+  .ww-unsaved { font-size: 0.72rem; font-weight: 600; color: #b45309; }
+</style>
+{% endblock %}
+
+{% block app_content %}
+{% include 'includes/flash_messages.html' %}
+
+<div class="ww-header">
+  <h1 class="page-title" style="margin:0;">Workweek calendar</h1>
+  <form method="GET" action="{{ url_for('routes.leave_credits_workweek') }}" class="ww-year-nav">
+    <a class="btn-secondary" href="{{ url_for('routes.leave_credits_workweek', year=prev_year) }}">{{ prev_year }}</a>
+    <label for="yearPick">Year</label>
+    <input type="number" id="yearPick" name="year" min="2000" max="2100" value="{{ year }}">
+    <button type="submit" class="btn-primary">Show year</button>
+    <a class="btn-secondary" href="{{ url_for('routes.leave_credits_workweek', year=next_year) }}">{{ next_year }}</a>
+  </form>
+</div>
+
+<div class="ww-info" role="note">
+  <p>
+    After the year is chosen, official Philippine <strong>regular</strong> and <strong>special non-working</strong>
+    holidays that fall on <strong>Friday</strong> flag that ISO week (Monday–Sunday), including weeks that
+    cross December/January (for example New Year’s Day Friday 1 Jan 2027 flags the week of 28 Dec 2026).
+  </p>
+  <p>
+    <strong>Compressed</strong> = 4-day, 10 hours, VL/SL/LWOP <strong>1.250</strong> per day.
+    <strong>Regular</strong> = 5-day, 8 hours, <strong>1.000</strong> per day.
+    A flagged week is always regular; leave lines on Mon–Fri of that week are recomputed and remarked
+    <code>5-day workweek</code>. Add a local Friday holiday name and check the flag when needed.
+    Unsaved months stay on existing DTR workweek segments until you save.
+  </p>
+  {% if view.friday_holidays %}
+  <p><strong>{{ view.friday_holiday_count }}</strong> Friday holiday(s) touching {{ year }}:</p>
+  <ul class="ww-friday-list">
+    {% for h in view.friday_holidays %}
+    <li>{{ h.date.strftime('%a %d %b %Y') }} — {{ h.name }} ({{ h.kind_label }}; week of {{ h.week_start.strftime('%d %b %Y') }})</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>No official Friday holidays touch this year. You can still flag weeks for local Friday holidays.</p>
+  {% endif %}
+</div>
+
+<form method="POST" action="{{ url_for('routes.leave_credits_workweek') }}">
+  <input type="hidden" name="year" value="{{ year }}">
+  {% for m in view.months %}
+  <details class="ww-month"{% if m.month == 1 %} open{% endif %}>
+    <summary>
+      <span>{{ m.name }} {{ year }}</span>
+      {% if not m.saved %}<span class="ww-unsaved">Not saved yet</span>{% endif %}
+      <span class="ww-month-radios" onclick="event.stopPropagation();">
+        <label>
+          <input type="radio" name="month_{{ m.month }}" value="4day"{% if m.default_model == '4day' %} checked{% endif %}>
+          Compressed (4-day / 10h / 1.250)
+        </label>
+        <label>
+          <input type="radio" name="month_{{ m.month }}" value="5day"{% if m.default_model == '5day' %} checked{% endif %}>
+          Regular (5-day / 8h / 1.000)
+        </label>
+      </span>
+    </summary>
+    <div class="ww-month-body">
+      <table class="ww-week-table">
+        <thead>
+          <tr>
+            <th>Week</th>
+            <th>Friday</th>
+            <th>Holiday</th>
+            <th>Flag 5-day</th>
+            <th>Local Friday holiday</th>
+            <th>Leave charge</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for w in m.weeks %}
+          <tr class="{% if w.flagged %}ww-flagged{% endif %}">
+            <td>
+              {% if w.emit_fields %}
+              <input type="hidden" name="week_start" value="{{ w.week_start_iso }}">
+              <input type="hidden" name="hname_{{ w.week_start_iso }}" value="{{ w.holiday_name or '' }}">
+              <input type="hidden" name="hkind_{{ w.week_start_iso }}" value="{{ w.holiday_kind or '' }}">
+              <input type="hidden" name="hsrc_{{ w.week_start_iso }}" value="{{ w.holiday_source or '' }}">
+              {% if w.holiday_date %}
+              <input type="hidden" name="hdate_{{ w.week_start_iso }}" value="{{ w.holiday_date.isoformat() }}">
+              {% endif %}
+              {% endif %}
+              {{ w.label }}
+              {% if w.spans_other_year %}<div class="ww-span">Spans another year — same week as the other month</div>{% endif %}
+            </td>
+            <td>{{ w.friday.strftime('%d %b %Y') }}</td>
+            <td>
+              {% if w.holiday_name %}
+                {{ w.holiday_name }}
+                <div class="ww-span">{{ w.holiday_kind_label }}</div>
+              {% else %}
+                —
+              {% endif %}
+            </td>
+            <td>
+              {% if w.emit_fields %}
+              <label>
+                <input type="checkbox" name="flag_{{ w.week_start_iso }}" value="1"{% if w.flagged %} checked{% endif %}>
+                5-day week
+              </label>
+              {% else %}
+              {% if w.flagged %}Flagged (edit on first listing of this week){% else %}—{% endif %}
+              {% endif %}
+            </td>
+            <td>
+              {% if w.emit_fields %}
+              <input type="text" class="search-input ww-local" name="local_{{ w.week_start_iso }}"
+                     value="{{ w.local_name or '' }}" placeholder="e.g. town fiesta">
+              {% else %}
+              {{ w.local_name or '—' }}
+              {% endif %}
+            </td>
+            <td>{% if w.effective_model == '4day' %}1.250 (4-day){% else %}1.000 (5-day){% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endfor %}
+  <div class="ww-actions">
+    <button type="submit" class="btn-primary">Save {{ year }} calendar</button>
+    <a href="{{ url_for('routes.leave_credits_list') }}" class="btn-secondary">Back to Leave Credits</a>
+  </div>
+</form>
+{% endblock %}
