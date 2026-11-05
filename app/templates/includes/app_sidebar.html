@@ -121,10 +121,10 @@
             </li>
         </ul>
         <div id="sidebarAttendance" class="sidebar-submenu{% if not _attendance_open %} is-collapsed{% endif %}">
-            <a href="{{ url_for('routes.event_attendance_list') }}" class="sidebar-sublink{% if request.endpoint == 'routes.event_attendance_list' %} active{% endif %}">View / Upload Attendance</a>
-            <a href="{{ url_for('routes.event_attendance_list', category='flag_raising') }}" class="sidebar-sublink">Flag Raising</a>
-            <a href="{{ url_for('routes.event_attendance_list', category='flag_retreat') }}" class="sidebar-sublink">Flag Retreat</a>
-            <a href="{{ url_for('routes.event_attendance_list', category='meeting') }}" class="sidebar-sublink">Meeting</a>
+            <a href="{{ url_for('routes.event_attendance_list') }}" class="sidebar-sublink{% if request.endpoint == 'routes.event_attendance_list' and not request.args.get('category') %} active{% endif %}">View / Upload Attendance</a>
+            <a href="{{ url_for('routes.event_attendance_list', category='flag_raising') }}" class="sidebar-sublink{% if request.args.get('category') == 'flag_raising' %} active{% endif %}">Flag Raising</a>
+            <a href="{{ url_for('routes.event_attendance_list', category='flag_retreat') }}" class="sidebar-sublink{% if request.args.get('category') == 'flag_retreat' %} active{% endif %}">Flag Retreat</a>
+            <a href="{{ url_for('routes.event_attendance_list', category='meeting') }}" class="sidebar-sublink{% if request.args.get('category') == 'meeting' %} active{% endif %}">Meeting</a>
         </div>
         {% endif %}
     </div>
@@ -151,15 +151,13 @@
             <a href="{{ url_for('routes.leave_list') }}" class="sidebar-sublink{% if request.endpoint == 'routes.leave_list' %} active{% endif %}">View Leave</a>
             {% if _role in ('manager', 'admin', 'hr') %}
             <p class="sidebar-sublabel">Approvals</p>
-            {% if _role in ('manager', 'admin') %}
             <a href="{{ url_for('routes.leave_approvals') }}" class="sidebar-sublink{% if request.endpoint == 'routes.leave_approvals' %} active{% endif %}">Leave Approvals</a>
-            {% endif %}
             <a href="{{ url_for('routes.jo_cos_overtime_offset_approvals') }}" class="sidebar-sublink{% if request.endpoint == 'routes.jo_cos_overtime_offset_approvals' %} active{% endif %}">Overtime Offset Approvals</a>
             {% endif %}
         </div>
     </div>
 
-    {% if _is_admin_hr %}
+    {% if _is_admin_hr or _role == 'payroll_maker' %}
     <div class="sidebar-nav-divider" role="separator" aria-hidden="true"></div>
     <div class="sidebar-group">
         <p class="sidebar-label">Payroll</p>
@@ -172,6 +170,7 @@
             </li>
         </ul>
         <div id="sidebarPayroll" class="sidebar-submenu{% if not _payroll_open %} is-collapsed{% endif %}">
+            {% if _is_admin_hr %}
             <p class="sidebar-sublabel">Deductions</p>
             <a href="{{ url_for('routes.payroll_deductions_gsis') }}" class="sidebar-sublink{% if request.endpoint == 'routes.payroll_deductions_gsis' %} active{% endif %}">GSIS</a>
             <button type="button" class="sidebar-sublink sidebar-section-toggle sidebar-sublink-parent{% if _hdmf_open %} active{% endif %}" data-target="sidebarHdmfDeductions" aria-expanded="{{ 'true' if _hdmf_open else 'false' }}">
@@ -186,6 +185,7 @@
             <a href="{{ url_for('routes.payroll_deductions_lbp') }}" class="sidebar-sublink{% if request.endpoint in ('routes.payroll_deductions_lbp', 'routes.payroll_deductions_lbp_preview', 'routes.payroll_deductions_lbp_upload_submit', 'routes.payroll_deductions_lbp_deductions_submit') %} active{% endif %}">LBP</a>
             <a href="{{ url_for('routes.payroll_deductions_jofemco') }}" class="sidebar-sublink{% if request.endpoint in ('routes.payroll_deductions_jofemco', 'routes.payroll_deductions_jofemco_preview', 'routes.payroll_deductions_jofemco_upload_submit', 'routes.payroll_deductions_jofemco_deductions_submit') %} active{% endif %}">JOFEMCO</a>
             <a href="{{ url_for('routes.payroll_deductions_withholding_tax') }}" class="sidebar-sublink{% if request.endpoint in ('routes.payroll_deductions_withholding_tax', 'routes.payroll_deductions_withholding_tax_preview', 'routes.payroll_deductions_withholding_tax_upload_submit', 'routes.payroll_deductions_withholding_tax_deductions_submit') %} active{% endif %}">Withholding Tax</a>
+            {% endif %}
             <p class="sidebar-sublabel">Processing</p>
             <a href="{{ url_for('routes.payroll_worktime_summary') }}" class="sidebar-sublink{% if request.endpoint == 'routes.payroll_worktime_summary' %} active{% endif %}">Worktime Summary</a>
             <a href="{{ url_for('routes.payroll_jo_cos') }}" class="sidebar-sublink{% if request.endpoint == 'routes.payroll_jo_cos' %} active{% endif %}">JO/COS</a>

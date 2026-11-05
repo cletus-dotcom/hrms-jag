@@ -25,8 +25,9 @@
   <div>
     <h1 class="page-title" style="margin:0;">Attendance</h1>
     <p class="muted" style="margin:0.35rem 0 0; font-size:0.9rem;">
-      Flag Raising, Flag Retreat, and Meeting check-ins uploaded from Excel
+      Check-ins uploaded from Excel
       (<code>employeeId</code>, <code>timestamp</code>, <code>lat</code>, <code>long</code>).
+      Choose a category (Flag Raising, Flag Retreat, Meeting, or type another) when uploading, then filter the list by category.
     </p>
   </div>
   <button type="button" class="btn-primary" id="btnOpenAttendanceUpload">Upload attendance</button>
@@ -39,8 +40,8 @@
         <label for="filterCategory">Category</label>
         <select name="category" id="filterCategory" class="form-control">
           <option value="">All categories</option>
-          {% for cat in categories %}
-          <option value="{{ cat }}" {% if filters.category == cat %}selected{% endif %}>{{ category_labels[cat] }}</option>
+          {% for cat, lab in category_choices %}
+          <option value="{{ cat }}" {% if filters.category == cat %}selected{% endif %}>{{ lab }}</option>
           {% endfor %}
         </select>
       </div>
@@ -152,21 +153,29 @@
     </div>
     <p class="muted" style="margin:0 0 1rem; font-size:0.85rem;">
       Excel columns: <strong>employeeId</strong>, <strong>timestamp</strong> (epoch ms), <strong>lat</strong>, <strong>long</strong>.
-      Choose the event date and category for this file.
+      Choose the event date and a category, or type a new category name.
     </p>
-    <form method="POST" action="{{ url_for('routes.event_attendance_upload') }}" enctype="multipart/form-data">
+    <form method="POST" action="{{ url_for('routes.event_attendance_upload') }}" enctype="multipart/form-data" id="attendanceUploadForm">
       <div class="form-group">
         <label for="uploadEventDate">Event date *</label>
         <input type="date" name="event_date" id="uploadEventDate" class="form-control" required value="{{ default_event_date }}">
       </div>
       <div class="form-group">
-        <label for="uploadCategory">Category *</label>
-        <select name="category" id="uploadCategory" class="form-control" required>
+        <label for="uploadCategorySelect">Category *</label>
+        <select name="category_select" id="uploadCategorySelect" class="form-control">
           <option value="">Select category…</option>
-          {% for cat in categories %}
-          <option value="{{ cat }}" {% if filters.category == cat %}selected{% endif %}>{{ category_labels[cat] }}</option>
+          {% for cat, lab in category_choices %}
+          <option value="{{ cat }}" {% if filters.category == cat %}selected{% endif %}>{{ lab }}</option>
           {% endfor %}
         </select>
+        <label for="uploadCategoryCustom" style="margin-top:0.65rem;">Or type a category</label>
+        <input type="text" name="category_custom" id="uploadCategoryCustom" class="form-control" maxlength="80" list="uploadCategorySuggestions" placeholder="e.g. General Assembly" autocomplete="off">
+        <datalist id="uploadCategorySuggestions">
+          {% for cat, lab in category_choices %}
+          <option value="{{ lab }}"></option>
+          {% endfor %}
+        </datalist>
+        <small class="muted">A typed name is used instead of the dropdown. New categories appear in the view filter after upload.</small>
       </div>
       <div class="form-group">
         <label for="uploadFile">Excel file (.xlsx) *</label>
@@ -195,6 +204,27 @@
   modal.addEventListener('click', function (e) {
     if (e.target === modal) closeModal();
   });
+  var form = document.getElementById('attendanceUploadForm');
+  var selectEl = document.getElementById('uploadCategorySelect');
+  var customEl = document.getElementById('uploadCategoryCustom');
+  if (selectEl && customEl) {
+    selectEl.addEventListener('change', function () {
+      if (selectEl.value) customEl.value = '';
+    });
+    customEl.addEventListener('input', function () {
+      if (customEl.value.trim()) selectEl.selectedIndex = 0;
+    });
+  }
+  if (form) {
+    form.addEventListener('submit', function (e) {
+      var custom = (customEl && customEl.value || '').trim();
+      var selected = (selectEl && selectEl.value || '').trim();
+      if (!custom && !selected) {
+        e.preventDefault();
+        alert('Select a category or type a new one.');
+      }
+    });
+  }
 })();
 </script>
 {% endblock %}

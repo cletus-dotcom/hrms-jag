@@ -127,7 +127,7 @@
                 <div class="full"><strong>Designation:</strong> {{ payslip.designation }}</div>
                 <div class="full"><strong>Department:</strong> {{ payslip.department_name }}</div>
                 <div><strong>Period:</strong> {{ payslip.period_label }}</div>
-                <div><strong>Payment:</strong> ATM</div>
+                <div><strong>Payment:</strong> {{ payslip.fund_release or 'ATM' }}</div>
             </div>
 
             <table class="payslip-table">

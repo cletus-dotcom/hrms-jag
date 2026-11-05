@@ -192,7 +192,11 @@ def format_plantilla_id_name(employee) -> str:
     """Plantilla card: FIRSTNAME M.I. LASTNAME [EXT] (all caps)."""
     first = (employee.first_name or '').strip().upper()
     last = (employee.last_name or '').strip().upper()
-    middle = (employee.middle_name or '').strip()
+    normalize_part = getattr(type(employee), 'normalize_name_part', None)
+    if callable(normalize_part):
+        middle = normalize_part(employee.middle_name)
+    else:
+        middle = (employee.middle_name or '').strip()
     normalize = getattr(type(employee), 'normalize_name_extension', None)
     if callable(normalize):
         ext = normalize(getattr(employee, 'name_extension', None)).upper()

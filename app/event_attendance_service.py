@@ -1,6 +1,7 @@
-"""Parse and persist Flag Raising / Flag Retreat / Meeting attendance Excel uploads."""
+"""Parse and persist event attendance Excel uploads (preset or custom category)."""
 from __future__ import annotations
 
+import re
 import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -13,6 +14,7 @@ from app import db
 from app.models import (
     EVENT_ATTENDANCE_CATEGORIES,
     EVENT_ATTENDANCE_CATEGORY_LABELS,
+    EVENT_ATTENDANCE_CATEGORY_MAX_LEN,
     Employee,
     EventAttendance,
     EventAttendanceBatch,
@@ -26,11 +28,21 @@ _GEO_CACHE_DECIMALS = 4
 
 
 def category_label(category: str) -> str:
-    return EVENT_ATTENDANCE_CATEGORY_LABELS.get(category, category or '—')
+    key = (category or '').strip()
+    if not key:
+        return '—'
+    return EVENT_ATTENDANCE_CATEGORY_LABELS.get(key, key.replace('_', ' ').title())
 
 
 def normalize_category(raw: str | None) -> str | None:
-    s = (raw or '').strip().lower().replace(' ', '_').replace('-', '_')
+    """Map preset names/aliases, or accept a typed custom category as a slug."""
+    text = (raw or '').strip()
+    if not text:
+        return None
+    slug = re.sub(r'[^a-z0-9]+', '_', text.lower()).strip('_')
+    slug = re.sub(r'_+', '_', slug)
+    if not slug:
+        return None
     aliases = {
         'flag_raising': 'flag_raising',
         'flagraising': 'flag_raising',
@@ -41,8 +53,35 @@ def normalize_category(raw: str | None) -> str | None:
         'meeting': 'meeting',
         'meetings': 'meeting',
     }
-    key = aliases.get(s, s)
-    return key if key in EVENT_ATTENDANCE_CATEGORIES else None
+    slug = aliases.get(slug, slug)
+    if len(slug) > EVENT_ATTENDANCE_CATEGORY_MAX_LEN:
+        slug = slug[:EVENT_ATTENDANCE_CATEGORY_MAX_LEN].rstrip('_')
+    return slug or None
+
+
+def attendance_category_choices() -> list[tuple[str, str]]:
+    """Preset categories first, then any custom slugs already stored."""
+    seen: set[str] = set()
+    out: list[tuple[str, str]] = []
+    for cat in EVENT_ATTENDANCE_CATEGORIES:
+        seen.add(cat)
+        out.append((cat, category_label(cat)))
+    used = (
+        db.session.query(EventAttendance.category)
+        .distinct()
+        .order_by(EventAttendance.category.asc())
+        .all()
+    )
+    extras = []
+    for (cat,) in used:
+        key = (cat or '').strip()
+        if key and key not in seen:
+            seen.add(key)
+            extras.append(key)
+    extras.sort(key=lambda c: category_label(c).lower())
+    for cat in extras:
+        out.append((cat, category_label(cat)))
+    return out
 
 
 def _header_map(row: tuple) -> dict[str, int]:
@@ -312,9 +351,7 @@ def upload_event_attendance(
 ) -> EventAttendanceBatch:
     cat = normalize_category(category)
     if not cat:
-        raise ValueError(
-            'Category must be Flag Raising, Flag Retreat, or Meeting.'
-        )
+        raise ValueError('Select a category or type a new one.')
     if not event_date:
         raise ValueError('Event date is required.')
 

@@ -62,8 +62,8 @@
     .csf6 td, .csf6 th { padding: 4px 6px; }
   }
 
-  {% if (leave.status or '')|lower != 'approved' %}
-  /* If not approved, prevent any meaningful print output */
+  {% if not can_print_leave %}
+  /* Pending applications cannot be printed until approved or disapproved */
   @media print {
     body * { visibility: hidden !important; }
     .print-blocked { visibility: visible !important; display: block !important; }
@@ -90,15 +90,33 @@
         <p style="margin:0.25rem 0 0; color: var(--medium-gray, #666); font-size: 0.9rem;">Application #{{ leave.id }}</p>
       </div>
       <div class="print-actions">
-        {% if (current_user.role or '')|lower == 'manager' %}
+        {% if (current_user.role or '')|lower in ('manager', 'admin', 'hr') %}
           <a href="{{ url_for('routes.leave_approvals') }}" class="btn-secondary">Back</a>
         {% else %}
           <a href="{{ url_for('routes.leave_list') }}" class="btn-secondary">Back</a>
         {% endif %}
-        {% if leave.status == 'approved' %}
+        {% if can_edit_leave %}
+          <a href="{{ url_for('routes.leave_edit', id=leave.id) }}" class="btn-secondary">Edit</a>
+        {% endif %}
+        {% if can_cancel_leave %}
+          <form method="POST" action="{{ url_for('routes.leave_cancel', id=leave.id) }}" style="display:inline;" onsubmit="return confirm('Cancel this leave application?');">
+            <button type="submit" class="btn-secondary" style="height: 32px;">Cancel leave</button>
+          </form>
+        {% endif %}
+        {% if can_act_on_leave %}
+          <form method="POST" action="{{ url_for('routes.leave_approve', id=leave.id) }}" style="display:inline;">
+            <input type="text" name="manager_remarks" class="form-control" placeholder="Remarks (optional)" style="display:inline; width: 160px; height: 32px; font-size: 0.85rem;">
+            <button type="submit" class="btn-primary" style="height: 32px;">Approve</button>
+          </form>
+          <form method="POST" action="{{ url_for('routes.leave_disapprove', id=leave.id) }}" style="display:inline;">
+            <input type="hidden" name="manager_remarks" value="Dis-approved">
+            <button type="submit" class="btn-secondary" style="height: 32px;">Disapprove</button>
+          </form>
+        {% endif %}
+        {% if can_print_leave %}
           <button type="button" class="btn-primary" onclick="window.print()">Print</button>
         {% else %}
-          <button type="button" class="btn-secondary" disabled style="opacity:0.6; cursor:not-allowed;">Print (Approved only)</button>
+          <button type="button" class="btn-secondary" disabled style="opacity:0.6; cursor:not-allowed;">Print (after approval or disapproval)</button>
         {% endif %}
       </div>
     </div>
@@ -383,10 +401,11 @@
                 {# New rule: if applicant is any department manager, blank 7.B details + signatory. #}
                 {% set _hide_7b_all = applicant_is_department_manager %}
                 {% if not _hide_7b_all %}
+                {% set _st = (leave.status or '')|lower %}
                 <div style="margin-top: 6px;">
                   {% if not _hide_7b_choices %}
-                  <div><span class="check"></span>For approval</div>
-                  <div><span class="check"></span>For disapproval due to <span class="line" style="min-width: 200px;"></span></div>
+                  <div><span class="check{% if _st == 'approved' %} on{% endif %}"></span>For approval</div>
+                  <div><span class="check{% if _st == 'rejected' %} on{% endif %}"></span>For disapproval due to <span class="line" style="min-width: 200px;">{% if _st == 'rejected' %}{{ leave.rejection_reason or '' }}{% endif %}</span></div>
                   {% endif %}
                 </div>
                 <div style="position:absolute; left:0; right:0; bottom:10px; text-align:center;">
@@ -426,7 +445,7 @@
                 {# Match CSC Form 6 layout: lines aligned under "APPROVED" #}
                 {% set _indent = 24 %}
                 {% set _line_w = 80 %}
-                <div style="padding-left: {{ _indent }}px;"><span class="line" style="min-width: {{ _line_w }}px;"> {{ days }}</span> days with pay</div>
+                <div style="padding-left: {{ _indent }}px;"><span class="line" style="min-width: {{ _line_w }}px;">{% if (leave.status or '')|lower == 'approved' %} {{ days }}{% endif %}</span> days with pay</div>
                 <div style="padding-left: {{ _indent }}px;"><span class="line" style="min-width: {{ _line_w }}px;"></span> days without pay</div>
                 <div style="padding-left: {{ _indent }}px;"><span class="line" style="min-width: {{ _line_w }}px;"></span> others (specify)</div>
               </div>
@@ -434,7 +453,7 @@
             <td style="width: 48%; border-left: none; border-bottom: none;">
               <div class="bold muted">7.D DISAPPROVED DUE TO:</div>
               <div style="margin-top: 6px;">
-                <span class="line" style="min-width: 260px;"></span>
+                <span class="line" style="min-width: 260px;">{% if (leave.status or '')|lower == 'rejected' %}{{ leave.rejection_reason or '' }}{% endif %}</span>
               </div>
             </td>
           </tr>
@@ -450,16 +469,16 @@
     </div>
   </div>
 </div>
-{% if (leave.status or '')|lower != 'approved' %}
+{% if not can_print_leave %}
 <div class="print-blocked" style="display:none; padding: 24mm; font-size: 14px;">
-  Printing is disabled. This leave application must be approved before it can be printed.
+  Printing is disabled until this leave application is approved or disapproved.
 </div>
 <script>
 (function () {
-  const isApproved = {{ 'true' if (leave.status or '')|lower == 'approved' else 'false' }};
-  if (isApproved) return;
+  const canPrint = {{ 'true' if can_print_leave else 'false' }};
+  if (canPrint) return;
 
-  const msg = 'Printing is disabled. This leave application must be approved before it can be printed.';
+  const msg = 'Printing is disabled until this leave application is approved or disapproved.';
 
   // Block common keyboard shortcuts (Ctrl+P / Cmd+P)
   window.addEventListener('keydown', function (e) {
@@ -479,6 +498,11 @@
     return;
   };
 })();
+</script>
+{% endif %}
+{% if auto_print %}
+<script>
+window.addEventListener('load', function () { window.print(); });
 </script>
 {% endif %}
 {% endblock %}

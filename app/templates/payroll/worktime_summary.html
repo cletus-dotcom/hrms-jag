@@ -150,7 +150,9 @@
                     <div class="form-group" style="margin: 0;">
                         <label for="department_id">Department</label>
                         <select name="department_id" id="department_id" class="form-control">
+                            {% if not lock_department|default(false) %}
                             <option value="" {% if not filters.department_id %}selected{% endif %}>All departments</option>
+                            {% endif %}
                             {% for d in departments %}
                             <option value="{{ d.id }}" {% if filters.department_id|string == d.id|string %}selected{% endif %}>{{ d.name }}</option>
                             {% endfor %}

@@ -13,6 +13,8 @@ with app.app_context():
         'ALTER TABLE event_attendance ADD COLUMN IF NOT EXISTS municipality VARCHAR(120)',
         'ALTER TABLE event_attendance ADD COLUMN IF NOT EXISTS province VARCHAR(120)',
         'ALTER TABLE event_attendance ADD COLUMN IF NOT EXISTS location_text VARCHAR(255)',
+        'ALTER TABLE event_attendance ALTER COLUMN category TYPE VARCHAR(80)',
+        'ALTER TABLE event_attendance_batches ALTER COLUMN category TYPE VARCHAR(80)',
     ):
         db.session.execute(text(stmt))
     db.session.commit()

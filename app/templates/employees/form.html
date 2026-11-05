@@ -194,6 +194,15 @@
                         <small style="color: var(--medium-gray);">No designations yet. HR/Admin: add them under Settings → JO/COS designations, or run <code>python migrate_jo_cos_designation.py</code>.</small>
                         {% endif %}
                     </div>
+                    <div class="form-group" id="payroll_fund_release_group" style="grid-column: 1 / -1; display: none;">
+                        <label for="payroll_fund_release">JO/COS funds release</label>
+                        {% set _pfr = (emp.payroll_fund_release if emp and emp.payroll_fund_release else 'ATM') %}
+                        <select id="payroll_fund_release" name="payroll_fund_release" class="form-control">
+                            <option value="ATM" {% if _pfr == 'ATM' %}selected{% endif %}>ATM</option>
+                            <option value="NON-ATM" {% if _pfr == 'NON-ATM' %}selected{% endif %}>NON-ATM</option>
+                        </select>
+                        <small style="color: var(--medium-gray);">Used on JO/COS daily-wage payroll and payslips. HR, Admin, and Payroll Maker can also change this on <code>Payroll → JO/COS</code>.</small>
+                    </div>
                 </div>
                 
                 <div class="form-grid">
@@ -718,6 +727,8 @@ document.addEventListener('DOMContentLoaded', function() {
     var statusAppt = document.getElementById('status_of_appointment');
     var regGroup = document.getElementById('position_regular_group');
     var jocosGroup = document.getElementById('position_jocos_group');
+    var fundReleaseGroup = document.getElementById('payroll_fund_release_group');
+    var fundReleaseSel = document.getElementById('payroll_fund_release');
     var regSel = document.getElementById('position');
     var jocosSel = document.getElementById('jo_cos_designation_id');
     function syncPositionAppointmentUI() {
@@ -726,8 +737,10 @@ document.addEventListener('DOMContentLoaded', function() {
         var isJo = (v === 'Job Order' || v === 'Contract of Service');
         if (regGroup) regGroup.style.display = isJo ? 'none' : '';
         if (jocosGroup) jocosGroup.style.display = isJo ? '' : 'none';
+        if (fundReleaseGroup) fundReleaseGroup.style.display = isJo ? '' : 'none';
         if (regSel) regSel.disabled = isJo;
         if (jocosSel) jocosSel.disabled = !isJo;
+        if (fundReleaseSel) fundReleaseSel.disabled = !isJo;
         refreshSalaryDisplay();
     }
     if (statusAppt) statusAppt.addEventListener('change', syncPositionAppointmentUI);

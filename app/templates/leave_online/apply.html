@@ -1,12 +1,12 @@
 {% extends "layouts/app.html" %}
 
-{% block title %}Apply Leave - HRMS{% endblock %}
+{% block title %}{{ 'Edit Leave' if edit_leave is defined and edit_leave else 'Apply Leave' }} - HRMS{% endblock %}
 
-{% set navbar_title = 'Apply for Leave' %}
+{% set navbar_title = 'Edit Leave' if edit_leave is defined and edit_leave else 'Apply for Leave' %}
 {% set breadcrumbs = [
     {'label': 'Home', 'url': url_for('routes.index')},
     {'label': 'Leave Management'},
-    {'label': 'Apply for Leave'}
+    {'label': 'Edit Leave' if edit_leave is defined and edit_leave else 'Apply for Leave'}
 ] %}
 
 {% block extra_css %}
@@ -59,8 +59,12 @@
     {% endwith %}
 
     <div class="page-header" style="margin-bottom: 1rem;">
-      <h1 class="page-title" style="margin: 0;">Apply Leave</h1>
-      <p class="helper">Select one or more dates from the calendar, then submit for Manager approval.</p>
+      <h1 class="page-title" style="margin: 0;">{{ 'Edit Leave Application' if edit_leave is defined and edit_leave else 'Apply Leave' }}</h1>
+      {% if edit_leave is defined and edit_leave %}
+      <p class="helper">HR/Admin: update the leave type, reason, or dates for {{ employee.full_name }}. Approved leaves will refresh the leave ledger.</p>
+      {% else %}
+      <p class="helper">Select one or more dates from the calendar, then submit for Department Head / HR approval.</p>
+      {% endif %}
     </div>
 
     <div class="leave-grid">
@@ -83,14 +87,15 @@
       </div>
 
       <div class="apply-card">
-        <form method="POST" action="{{ url_for('routes.leave_apply') }}">
+        <form method="POST" action="{% if edit_leave is defined and edit_leave %}{{ url_for('routes.leave_edit', id=edit_leave.id) }}{% else %}{{ url_for('routes.leave_apply') }}{% endif %}">
           <div class="field-row">
             <div><strong>Type of Leave:</strong></div>
             <div>
               <select name="leave_type" id="leave_type" class="form-control" required>
                 <option value="">Select type</option>
+                {% set _sel_code = (edit_leave.leave_type if edit_leave is defined and edit_leave else '')|upper %}
                 {% for code, label in leave_type_options %}
-                  <option value="{{ code }}">{{ label }}</option>
+                  <option value="{{ code }}" {% if code|upper == _sel_code %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
               </select>
             </div>
@@ -99,7 +104,7 @@
           <div class="field-row" id="reasonRow">
             <div><strong>Reason:</strong></div>
             <div>
-              <textarea name="reason" id="reasonText" class="form-control" rows="3" placeholder="Reason for leave" required></textarea>
+              <textarea name="reason" id="reasonText" class="form-control" rows="3" placeholder="Reason for leave" required>{{ edit_fields.reason if edit_fields is defined and edit_fields else '' }}</textarea>
             </div>
           </div>
 
@@ -107,11 +112,12 @@
             <div><strong>In case of sick leave:</strong></div>
             <div>
               <div class="radio-row" role="radiogroup" aria-label="Sick leave in hospital or out-patient">
-                <label><input type="radio" name="sl_case" value="IN_HOSPITAL"> In-Hospital</label>
-                <label><input type="radio" name="sl_case" value="OUT_PATIENT"> Out-Patient</label>
+                {% set _sl = (edit_fields.sl_case if edit_fields is defined and edit_fields else '')|upper %}
+                <label><input type="radio" name="sl_case" value="IN_HOSPITAL" {% if _sl == 'IN_HOSPITAL' %}checked{% endif %}> In-Hospital</label>
+                <label><input type="radio" name="sl_case" value="OUT_PATIENT" {% if _sl == 'OUT_PATIENT' %}checked{% endif %}> Out-Patient</label>
               </div>
               <div style="margin-top: 0.5rem;">
-                <input type="text" name="sl_illness" id="sl_illness" class="form-control" placeholder="Specify illness (e.g., fever)">
+                <input type="text" name="sl_illness" id="sl_illness" class="form-control" placeholder="Specify illness (e.g., fever)" value="{{ edit_fields.sl_illness if edit_fields is defined and edit_fields else '' }}">
               </div>
             </div>
           </div>
@@ -120,11 +126,12 @@
             <div><strong>Location (VL/SPL):</strong></div>
             <div>
               <div class="radio-row" role="radiogroup" aria-label="Vacation/SPL leave location">
-                <label><input type="radio" name="vl_location" value="WITHIN_PH"> Within the Philippines</label>
-                <label><input type="radio" name="vl_location" value="ABROAD"> Abroad</label>
+                {% set _vl = (edit_fields.vl_location if edit_fields is defined and edit_fields else '')|upper %}
+                <label><input type="radio" name="vl_location" value="WITHIN_PH" {% if _vl == 'WITHIN_PH' %}checked{% endif %}> Within the Philippines</label>
+                <label><input type="radio" name="vl_location" value="ABROAD" {% if _vl == 'ABROAD' %}checked{% endif %}> Abroad</label>
               </div>
               <div style="margin-top: 0.5rem;">
-                <input type="text" name="vl_abroad_place" id="vl_abroad_place" class="form-control" placeholder="If Abroad, specify place" disabled>
+                <input type="text" name="vl_abroad_place" id="vl_abroad_place" class="form-control" placeholder="If Abroad, specify place" value="{{ edit_fields.vl_abroad if edit_fields is defined and edit_fields else '' }}" {% if not (edit_fields is defined and edit_fields and (edit_fields.vl_location or '')|upper == 'ABROAD') %}disabled{% endif %}>
               </div>
             </div>
           </div>
@@ -140,8 +147,9 @@
           <div class="field-row">
             <div><strong>Commutation:</strong></div>
             <div style="display:flex; gap:1rem; flex-wrap:wrap;">
-              <label style="display:flex; gap:0.35rem; align-items:center;"><input type="radio" name="commutation" value="Requested"> Requested</label>
-              <label style="display:flex; gap:0.35rem; align-items:center;"><input type="radio" name="commutation" value="Not Requested" checked> Not Requested</label>
+              {% set _comm = (edit_fields.commutation if edit_fields is defined and edit_fields else 'Not Requested') %}
+              <label style="display:flex; gap:0.35rem; align-items:center;"><input type="radio" name="commutation" value="Requested" {% if _comm == 'Requested' %}checked{% endif %}> Requested</label>
+              <label style="display:flex; gap:0.35rem; align-items:center;"><input type="radio" name="commutation" value="Not Requested" {% if _comm != 'Requested' %}checked{% endif %}> Not Requested</label>
             </div>
           </div>
 
@@ -161,7 +169,12 @@
           <input type="hidden" name="selected_dates" id="selected_dates">
 
           <div style="display:flex; justify-content:flex-end; margin-top: 1rem;">
+            {% if edit_leave is defined and edit_leave %}
+            <a href="{{ url_for('routes.leave_detail', id=edit_leave.id) }}" class="btn-secondary" style="min-width: 140px; text-align:center;">Cancel</a>
+            <button type="submit" class="btn-primary" style="min-width: 140px;">Save changes</button>
+            {% else %}
             <button type="submit" class="btn-primary" style="min-width: 140px;">Submit</button>
+            {% endif %}
           </div>
         </form>
       </div>
@@ -170,7 +183,9 @@
 </div>
 
 <script>
-const state = { year: new Date().getFullYear(), month: new Date().getMonth(), selected: new Set() };
+const relaxDateRules = {{ 'true' if relax_date_rules|default(false) else 'false' }};
+const initialDates = {{ (edit_selected_dates if edit_selected_dates is defined else [])|tojson }};
+const state = { year: new Date().getFullYear(), month: new Date().getMonth(), selected: new Set(initialDates || []) };
 const monthNames = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
 function iso(d){
@@ -181,6 +196,10 @@ function iso(d){
   return `${y}-${m}-${dd}`;
 }
 function parseIso(s){ const [y,m,dd]=s.split('-').map(Number); return new Date(y, m-1, dd); }
+if (initialDates && initialDates.length) {
+  const d0 = parseIso(initialDates[0]);
+  if (!isNaN(d0.getTime())) { state.year = d0.getFullYear(); state.month = d0.getMonth(); }
+}
 
 function startOfDay(d){
   const x = new Date(d);
@@ -201,6 +220,8 @@ function currentLeaveCode(){
 
 function minSelectableDate(){
   // Rule: if NOT Sick Leave, only allow dates 6 days from today and onwards.
+  // HR/Admin edits may keep original dates (including shorter notice).
+  if (relaxDateRules) return null;
   const code = currentLeaveCode();
   if(code && code !== 'SL'){
     return startOfDay(addDays(new Date(), 6));

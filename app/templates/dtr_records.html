@@ -571,7 +571,7 @@
               <td>{{ r.undertime }}</td>
               {% if dtr_edit_mode and selected_employee %}
               <td style="text-align:left;">
-                <input type="text" class="form-control dtr-edit-remarks" name="rem_{{ r.date.isoformat() }}" value="{{ r.stored_remarks }}" maxlength="100" placeholder="DB remarks (e.g. HOLIDAY, REST DAY)" title="Stored remarks on the DTR row">
+                <input type="text" class="form-control dtr-edit-remarks" name="rem_{{ r.date.isoformat() }}" value="{{ r.stored_remarks }}" maxlength="100" placeholder="DB remarks (e.g. HOLIDAY, NON-WORKING DAY)" title="Stored remarks on the DTR row">
               </td>
               {% else %}
               <td>{{ r.remarks }}</td>

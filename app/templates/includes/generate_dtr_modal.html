@@ -56,7 +56,7 @@
       <h2 class="change-password-modal-title">Generate DTR</h2>
       <button type="button" class="change-password-modal-close" onclick="document.getElementById('generateDtrModal').style.display='none'">&times;</button>
     </div>
-    <form id="generateDtrForm" method="POST" action="{{ url_for('routes.dtr_generate') }}" data-dashboard-url="{{ url_for('routes.dashboard') }}">
+    <form id="generateDtrForm" method="POST" action="{{ url_for('routes.dtr_generate') }}" data-dashboard-url="{{ url_for('routes.dashboard') }}" data-workweek-preview-url="{{ url_for('routes.dtr_generate_workweek_preview') }}">
       <div class="change-password-modal-body">
         <div class="generate-dtr-modal-layout">
           <div class="generate-dtr-modal-col generate-dtr-modal-col-left">
@@ -99,18 +99,30 @@
           </div>
           <div class="generate-dtr-modal-col generate-dtr-modal-col-right">
             <p class="generate-dtr-modal-col-heading">Workweek &amp; holidays</p>
+            <div id="dtrWorkweekCalendarPanel" class="generate-dtr-workweek-calendar-panel" hidden>
+              <label class="generate-dtr-modal-section-title">Workweek calendar (this quincena)</label>
+              <p class="generate-dtr-modal-note" id="dtrWorkweekCalendarNote"></p>
+              <div id="dtrWorkweekCalendarHost" class="generate-dtr-workweek-calendar-host"></div>
+              <p class="generate-dtr-modal-note">
+                Compressed weeks default to <strong>Friday</strong> as NON-WORKING DAY.
+                If a local declaration moves that rest day, choose another weekday for the week.
+                Flagged Friday-holiday weeks stay 5-day (no rest-day transfer).
+              </p>
+            </div>
+            <div id="dtrWorkweekSegmentsPanel" class="generate-dtr-workweek-segments-panel">
             <div class="form-group">
               <label class="generate-dtr-modal-section-title">Compressed Workweek Settings (optional)</label>
               <p class="generate-dtr-modal-note">
-                Add one or more segments when the workweek changes within the period (e.g. 5-day for week one, 4-day for week two).
-                Sets late/undertime targets only — DTR times stay blank until biometric upload.
-                5-day targets: 8:00 / 12:00 / 13:00 / 17:00 · 4-day: 7:00 / 12:00 / 13:00 / 18:00 (Friday REST DAY).
+                This month is not on the year workweek calendar yet.
+                Save it under <strong>Leave → Workweek calendar</strong>, or add a segment here as a fallback.
+                5-day targets: 8:00 / 12:00 / 13:00 / 17:00 · 4-day: 7:00 / 12:00 / 13:00 / 18:00 (rest day Friday unless transferred).
               </p>
             </div>
             <div class="generate-dtr-workweek-segments-wrap">
               <div id="dtrWorkweekSegmentsList" class="generate-dtr-workweek-segments-list" aria-live="polite"></div>
               <button type="button" id="dtrAddWorkweekSegment" class="btn-secondary generate-dtr-add-workweek-segment">Add workweek segment</button>
               <input type="hidden" name="workweek_segments_json" id="dtrWorkweekSegmentsJson" value="[]">
+            </div>
             </div>
             <template id="dtrWorkweekSegmentTemplate">
               <div class="generate-dtr-workweek-segment" data-segment-index="">

@@ -28,7 +28,7 @@
   }
   @media (min-width: 900px) {
     .jo-cos-payroll-filters {
-      grid-template-columns: 5.25rem minmax(6.5rem, 7.5rem) minmax(8.5rem, 9.5rem) minmax(12rem, 1fr) auto;
+      grid-template-columns: 5.25rem minmax(6.5rem, 7.5rem) minmax(8.5rem, 9.5rem) minmax(12rem, 1fr) minmax(8rem, 9rem) auto;
     }
   }
   @media (max-width: 899px) {
@@ -90,6 +90,7 @@
 
         <p style="color: var(--medium-gray); margin-bottom: 1rem; font-size: 0.9rem;">
             Daily wage payroll for Job Order and Contract of Service employees. Worktime is taken from DTR quincena regeneration (<code>work_hours</code> / snapshot). Rates come from <strong>Settings → JO and COS Rates</strong>.
+            Set each employee to <strong>ATM</strong> or <strong>NON-ATM</strong> here (or on the employee form). Filter by funds release to print separate ATM and NON-ATM batches.
         </p>
 
         <div class="table-section" style="margin-bottom: 1rem;">
@@ -114,6 +115,14 @@
                         <select name="quincena" id="quincena" class="form-control" required>
                             <option value="1" {% if filters.quincena == '1' %}selected{% endif %}>1st (1–15)</option>
                             <option value="2" {% if filters.quincena == '2' %}selected{% endif %}>2nd (16–end)</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin: 0;">
+                        <label for="fund_release">Funds release</label>
+                        <select name="fund_release" id="fund_release" class="form-control">
+                            <option value="ALL" {% if (filters.fund_release or 'ALL') == 'ALL' %}selected{% endif %}>All</option>
+                            <option value="ATM" {% if filters.fund_release == 'ATM' %}selected{% endif %}>ATM</option>
+                            <option value="NON-ATM" {% if filters.fund_release == 'NON-ATM' %}selected{% endif %}>NON-ATM</option>
                         </select>
                     </div>
                     <div class="form-group" style="margin: 0;">
@@ -145,20 +154,21 @@
                         <input type="hidden" name="month" value="{{ filters.month }}">
                         <input type="hidden" name="quincena" value="{{ filters.quincena }}">
                         <input type="hidden" name="department_id" value="{{ filters.department_id }}">
+                        <input type="hidden" name="fund_release" value="{{ filters.fund_release or 'ALL' }}">
                         <button type="submit" class="btn-primary">Generate Payslip</button>
                     </form>
                     {% if payslip_count %}
-                    <a class="btn-secondary" href="{{ url_for('routes.payroll_jo_cos_payslips_export', year=filters.year, month=filters.month, quincena=filters.quincena, department_id=filters.department_id) }}">Export Payslips PDF</a>
+                    <a class="btn-secondary" href="{{ url_for('routes.payroll_jo_cos_payslips_export', year=filters.year, month=filters.month, quincena=filters.quincena, department_id=filters.department_id, fund_release=filters.fund_release or 'ALL') }}">Export Payslips PDF</a>
                     {% endif %}
                     {% endif %}
-                    <a class="btn-secondary" href="{{ url_for('routes.payroll_jo_cos_export', format='pdf', year=filters.year, month=filters.month, quincena=filters.quincena, department_id=filters.department_id, load=1) }}">Export Payroll PDF</a>
+                    <a class="btn-secondary" href="{{ url_for('routes.payroll_jo_cos_export', format='pdf', year=filters.year, month=filters.month, quincena=filters.quincena, department_id=filters.department_id, fund_release=filters.fund_release or 'ALL', load=1) }}">Export Payroll PDF</a>
                 </div>
             </div>
 
             <div class="jo-cos-payroll-header">
                 <h2>DAILY WAGE PAYROLL</h2>
                 <p>For labor on <strong>{{ department_name }}</strong>, at <strong>JAGNA, BOHOL</strong></p>
-                <p>Period: <strong>{{ period_label }}</strong> &nbsp;·&nbsp; Payment: <strong>ATM</strong></p>
+                <p>Period: <strong>{{ period_label }}</strong> &nbsp;·&nbsp; Payment: <strong>{{ payment_banner or filters.fund_release or 'ATM' }}</strong></p>
             </div>
 
             <div class="table-container jo-cos-payroll-wrap">
@@ -166,6 +176,7 @@
                     <thead>
                         <tr>
                             <th rowspan="2">Name</th>
+                            <th rowspan="2">Funds<br>release</th>
                             <th rowspan="2">No. of Days<br>Worked</th>
                             <th rowspan="2" class="num">Rate<br>Per Day</th>
                             <th rowspan="2" class="num">Gross<br>Salary</th>
@@ -182,6 +193,25 @@
                         {% for r in rows %}
                         <tr class="table-row" data-search="{{ r.search_text }}">
                             <td class="name-col">{{ r.employee_name }}</td>
+                            <td>
+                                {% if can_edit_fund_release %}
+                                <form method="POST" action="{{ url_for('routes.payroll_jo_cos_fund_release') }}" style="margin:0;">
+                                    <input type="hidden" name="employee_id" value="{{ r.employee_pk }}">
+                                    <input type="hidden" name="year" value="{{ filters.year }}">
+                                    <input type="hidden" name="month" value="{{ filters.month }}">
+                                    <input type="hidden" name="quincena" value="{{ filters.quincena }}">
+                                    <input type="hidden" name="department_id" value="{{ filters.department_id }}">
+                                    <input type="hidden" name="fund_release" value="{{ filters.fund_release or 'ALL' }}">
+                                    <select name="fund_release_value" class="form-control" style="min-width: 7.5rem; font-size: 0.8rem;" onchange="this.form.submit()">
+                                        {% for opt in fund_release_options %}
+                                        <option value="{{ opt }}" {% if r.fund_release == opt %}selected{% endif %}>{{ opt }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </form>
+                                {% else %}
+                                {{ r.fund_release }}
+                                {% endif %}
+                            </td>
                             <td class="num num-center">{{ r.days_worked_display }}</td>
                             <td class="num">{{ r.rate_per_day_display }}</td>
                             <td class="num">{{ r.gross_salary_display }}</td>
@@ -192,12 +222,12 @@
                         </tr>
                         {% else %}
                         <tr id="joCosPayrollEmpty">
-                            <td colspan="8" class="no-data">No active JO/COS employees in this department, or no worktime for the selected quincena. Run <strong>Regenerate DTR</strong> first.</td>
+                            <td colspan="9" class="no-data">No active JO/COS employees in this department, or no worktime for the selected quincena. Run <strong>Regenerate DTR</strong> first.</td>
                         </tr>
                         {% endfor %}
                         {% if rows %}
                         <tr class="jo-cos-payroll-totals">
-                            <td colspan="3"><strong>TOTAL</strong></td>
+                            <td colspan="4"><strong>TOTAL</strong></td>
                             <td class="num">{{ totals.gross_salary }}</td>
                             <td class="num num-center"></td>
                             <td class="num">{{ totals.late }}</td>

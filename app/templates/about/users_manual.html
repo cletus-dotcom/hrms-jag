@@ -170,15 +170,18 @@
         <div class="manual-doc" style="font-family: Calibri, Arial, sans-serif;">
             <h2 class="title">HRMS User’s Manual</h2>
             <p class="subtitle">
-                Welcome! This guide covers the HRMS portal by role—leave, DTR, payroll, eRMT electronic records,
+                Welcome! This guide covers the HRMS portal by role—leave, DTR, event attendance, payroll, eRMT electronic records,
                 Service Record / Leave Credits reports, Employee ID Cards, and self-service payslips.
+            </p>
+            <p class="downloads" style="margin: -0.5rem 0 1.1rem;">
+                <a class="btn-primary" href="{{ url_for('routes.users_manual_download') }}">Download Word (.docx)</a>
             </p>
 
             <div class="callout">
                 <strong>Your role:</strong> {{ viewer_role_label }}
                 {% if viewer_role in ('admin', 'hr') %}
                 — use the <a href="#role-admin-hr">Admin &amp; HR guide</a>, <a href="#um-dtr-workflow">DTR-to-payroll workflow</a>,
-                <a href="#um-id-cards">Employee ID Cards</a>, and <a href="#um-ermt">eRMT</a> below.
+                <a href="#um-id-cards">Employee ID Cards</a>, <a href="#um-event-attendance">event attendance</a>, and <a href="#um-ermt">eRMT</a> below.
                 {% elif viewer_role == 'employee' %}
                 — start with <a href="#role-employee">Employee guide</a>, <a href="#um-dtr-workflow">My DTR review</a>, and <a href="#um-ermt">eRMT</a> (view/search).
                 {% elif viewer_role == 'manager' %}
@@ -207,6 +210,7 @@
                         </ol>
                     </li>
                     <li><a href="#um-common-tasks">Common tasks (step-by-step)</a></li>
+                    <li><a href="#um-event-attendance">Event attendance</a></li>
                     <li><a href="#um-ermt">eRMT (electronic records)</a></li>
                     <li><a href="#um-id-cards">Employee ID Cards &amp; ID photo</a></li>
                     <li><a href="#um-best-practices">Best practices</a></li>
@@ -238,19 +242,23 @@
                 </div>
                 <div class="card">
                     <div class="card-title">Settings (Admin/HR)</div>
-                    <p class="muted" style="margin:0;">Users, employees, departments, positions, JO/COS rates, flexi-time, salary grades, leave settings, and (portal admin) Portal Console.</p>
+                    <p class="muted" style="margin:0;">Users, employees, departments, positions, JO/COS designations and rates, flexi-time, salary grades, status of appointment, leave settings, and (portal admin) Portal Console.</p>
                 </div>
                 <div class="card">
                     <div class="card-title">Daily Time Records (DTR)</div>
-                    <p class="muted" style="margin:0;">My DTR / View DTR, upload logs, justifications, and (HR) quincena processing, monthly submissions, prepare period, and process worktime.</p>
+                    <p class="muted" style="margin:0;">My DTR / View DTR, upload logs, justifications, flexible worktime, overnight punch fix, and (HR) quincena processing, monthly submissions, prepare period, process worktime, overtime and X-Service authorization.</p>
                 </div>
                 <div class="card">
                     <div class="card-title">Leave Management</div>
-                    <p class="muted" style="margin:0;">Apply/view leave; Managers/Admin approve leave; Admin/HR maintain leave credits and export Leave Credits PDF.</p>
+                    <p class="muted" style="margin:0;">Apply/view leave; employees may cancel their own applications; Department Heads, Admin, and HR approve or disapprove (including when the applicant is a department head). CSC Form 6 is printable after approval or disapproval. Admin/HR may edit or cancel an application and maintain leave credits / workweek calendar.</p>
                 </div>
                 <div class="card">
-                    <div class="card-title">Payroll (Admin/HR)</div>
-                    <p class="muted" style="margin:0;">Deductions (GSIS, HDMF, PHIC, LBP, JOFEMCO, withholding tax), Worktime Summary, JO/COS and Plantilla payroll.</p>
+                    <div class="card-title">Attendance (Admin/HR)</div>
+                    <p class="muted" style="margin:0;"><code>Time &amp; Attendance → Attendance</code>: upload Excel check-ins (Flag Raising, Flag Retreat, Meeting, or a typed custom category) and filter the list by category.</p>
+                </div>
+                <div class="card">
+                    <div class="card-title">Payroll</div>
+                    <p class="muted" style="margin:0;">Deductions (GSIS, HDMF, PHIC, LBP, JOFEMCO, withholding tax) for Admin/HR only. Worktime Summary, JO/COS (ATM / NON-ATM funds release), and Plantilla payroll for Admin/HR and Payroll Maker (Payroll Maker is limited to the department linked to their account).</p>
                 </div>
                 <div class="card">
                     <div class="card-title">Reports</div>
@@ -268,12 +276,12 @@
                 <code>Time &amp; Attendance → Quincena Processing</code>.
             </p>
             <ol class="flow-steps">
-                <li><strong><a href="#um-prepare-dtr-period">Prepare DTR period</a></strong> (HR/Admin) — Generate blank rows for <strong>all employees</strong> in the quincena, plus holidays and workweek segments. Set flexible worktime, overtime authorization, and X-Service authorization.</li>
+                <li><strong><a href="#um-prepare-dtr-period">Prepare DTR period</a></strong> (HR/Admin) — Generate blank rows for <strong>all employees</strong> in the quincena, plus holidays and the year workweek calendar (or fallback segments). Set flexible worktime, overtime authorization, and X-Service authorization.</li>
                 <li><strong>Upload DTR log</strong> (HR/Admin/DTR Uploader) — Upload the biometric <code>.dat</code> file for the quincena. Employees are notified to review their DTR.</li>
                 <li><strong>Employee review</strong> — Employees open <code>My DTR</code>, check late/undertime/absence flags, submit justifications, and may print their DTR.</li>
                 <li><strong>HR review &amp; adjustment</strong> — HR closes employee review, approves or rejects justifications, and uses <code>Adjust DTR</code> to correct times or remarks.</li>
                 <li><strong>Process worktime</strong> (HR/Admin) — Recomputes late, undertime, absences, worktime summaries, leave ledger entries, and JO/COS overtime credits.</li>
-                <li><strong>Payroll</strong> (HR/Admin) — Worktime Summary, deductions, JO/COS or Plantilla payroll, and payslips for employee self-service.</li>
+                <li><strong>Payroll</strong> (HR/Admin; Payroll Maker for their department) — Worktime Summary, JO/COS or Plantilla payroll, and payslips. Deduction uploads stay Admin/HR. JO/COS wages can be marked ATM or NON-ATM per employee.</li>
             </ol>
             <p class="muted">
                 <strong>Quincena statuses:</strong> Draft → Review open → Review closed → Processed.
@@ -285,24 +293,26 @@
 
             <div class="role-guide{% if viewer_role in ('admin', 'hr') %} is-your-role{% endif %}" id="role-admin-hr">
                 <h3 class="sub">Admin &amp; HR{% if viewer_role in ('admin', 'hr') %}<span class="role-badge">Your role</span>{% endif %}</h3>
-                <p><strong>Sidebar access:</strong> eRMT (add/edit; Admin can delete), Settings, full Time &amp; Attendance (Processing), Leave Credits, Workweek calendar (Admin/HR only), Payroll, Reports (Employees List, Service Records, Leave Credits, Employee ID Cards), Notifications.</p>
+                <p><strong>Sidebar access:</strong> eRMT (add/edit; Admin can delete), Settings, full Time &amp; Attendance (including Attendance upload/view and Processing), Leave Credits, Workweek calendar, Payroll (deductions + processing), Reports (Employees List, Service Records, Leave Credits, Employee ID Cards), Notifications.</p>
                 <p><strong>Typical quincena duties:</strong></p>
                 <ol class="steps">
                     <li>Open <code>Quincena Processing</code> and confirm setup checklist (prepare period, authorizations).</li>
-                    <li>Use <code>Prepare DTR Period</code> to create blank rows and set <a href="#um-prepare-dtr-period">workweek segments</a> and holidays for the quincena.</li>
+                    <li>Use <code>Prepare DTR Period</code> to create blank rows, apply the <a href="#um-prepare-dtr-period">workweek calendar</a> for the quincena, and mark holidays.</li>
                     <li>Upload DTR log or verify uploader completed upload.</li>
                     <li>Monitor pending justifications; approve or reject with supporting review.</li>
                     <li>Track plantilla <code>Monthly DTR Submissions</code> after the 2nd quincena upload.</li>
                     <li>Close employee review when the deadline passes.</li>
                     <li>Use <code>View DTR Records → Adjust DTR</code> to correct employee rows.</li>
-                    <li>Run <code>Process Worktime</code>, then review <code>Worktime Summary</code> and proceed to JO/COS or Plantilla payroll.</li>
+                    <li>Run <code>Process Worktime</code>, then review <code>Worktime Summary</code> and proceed to JO/COS or Plantilla payroll (ATM / NON-ATM filter on JO/COS).</li>
                 </ol>
                 <p><strong>Also:</strong></p>
                 <ul>
-                    <li><strong>Employees:</strong> Add/edit employees and PDS; link <strong>ID Photo (eRMT)</strong> on the employee form; open <strong>Service Record</strong> or <strong>Print ID</strong> from the list/form.</li>
+                    <li><strong>Employees:</strong> Add/edit employees and PDS; for Job Order / COS set designation and <strong>JO/COS funds release</strong> (ATM or NON-ATM); link <strong>ID Photo (eRMT)</strong>; open <strong>Service Record</strong> or <strong>Print ID</strong> from the list/form.</li>
+                    <li><strong>Attendance:</strong> <code>Time &amp; Attendance → View / Upload Attendance</code>. Upload Excel (<code>employeeId</code>, <code>timestamp</code>, <code>lat</code>, <code>long</code>) with event date; pick Flag Raising / Flag Retreat / Meeting or type a new category. Filter the list by category (presets plus any custom names already uploaded).</li>
+                    <li><strong>Leave applications:</strong> Approve or disapprove pending leave from the dashboard or <code>Leave → Leave Approvals</code> (in addition to the Department Head, including when the applicant is a department head). Employees may cancel their own pending or approved leave. HR/Admin may edit dates/reason/type or cancel an application (approved cancellations reverse the leave-ledger deduction). After approval or disapproval, HR and the employee can print CSC Form 6.</li>
                     <li><strong>Leave credits:</strong> Maintain ledger under <code>Leave → Leave Credits</code>; export Leave Credits PDF from the card or <code>Reports → Leave Credits</code>. Set compressed vs regular months and Friday-holiday weeks under <code>Leave → Workweek calendar</code> (flagged weeks charge 1.000 VL/SL/LWOP and remark <code>5-day workweek</code>).</li>
                     <li><strong>Reports:</strong> <code>Reports → Service Records</code>, <code>Leave Credits</code>, and <code>Employee ID Cards</code>; Employees List export (CSV/Excel/PDF).</li>
-                    <li><strong>Payroll:</strong> Upload/manage deductions, load JO/COS and Plantilla payroll, generate payslips for employee self-service.</li>
+                    <li><strong>Payroll:</strong> Upload/manage deductions, load JO/COS and Plantilla payroll, generate payslips for employee self-service. On a JO/COS employee form (or inline on <code>Payroll → JO/COS</code>), set <strong>Funds release</strong> to ATM or NON-ATM; filter the payroll list to print those batches separately.</li>
                     <li><strong>eRMT:</strong> Encode records with cabinet/shelf and <strong>Network PDF path (NAS)</strong> (including type <strong>ID Photo</strong>); see <a href="#um-ermt">eRMT</a> and <a href="#um-id-cards">ID Cards</a>.</li>
                     <li><strong>Admin only:</strong> Delete eRMT records (DB entry only; NAS file is kept). Portal Console when signed in as portal admin.</li>
                 </ul>
@@ -312,7 +322,7 @@
                 <h3 class="sub">Manager{% if viewer_role == 'manager' %}<span class="role-badge">Your role</span>{% endif %}</h3>
                 <p><strong>Sidebar access:</strong> Dashboard, eRMT (view/search), DTR records (department scope), leave apply/view, leave approvals, overtime offset approvals, My Records (if linked), Notifications.</p>
                 <ul>
-                    <li><strong>Leave:</strong> Approve or reject leave for staff in your department via <code>Leave → Leave Approvals</code>.</li>
+                    <li><strong>Leave:</strong> Approve or reject leave for staff in your department via <code>Leave → Leave Approvals</code>. Office heads listed as department manager can act even if their user role is Employee. HR/Admin can also approve or disapprove the same applications (including a department head’s own leave).</li>
                     <li><strong>DTR:</strong> View DTR for employees in your managed department(s). You cannot upload logs or process worktime.</li>
                     <li><strong>Overtime offset:</strong> Review JO/COS overtime offset requests when assigned.</li>
                     <li><strong>Self-service:</strong> Apply leave, review your own DTR/justifications if linked, view My PDS / Service Record / Payslips.</li>
@@ -333,7 +343,7 @@
                 </ol>
                 <p><strong>Plantilla — monthly submission:</strong> After the 2nd quincena upload, open <code>My DTR → Month (monthly submission)</code>, justify remaining flagged days, <strong>Print monthly DTR</strong>, then <strong>Submit monthly DTR</strong> before the deadline (default: 5th of the following month).</p>
                 <ul>
-                    <li><strong>Leave:</strong> <code>Leave → Apply for Leave</code>; track under <code>View Leave</code>.</li>
+                    <li><strong>Leave:</strong> <code>Leave → Apply for Leave</code>; track under <code>View Leave</code>. You may <strong>cancel</strong> a pending or approved application (approved cancellations reverse the leave-credit deduction). Print CSC Form 6 after approval or disapproval.</li>
                     <li><strong>My Records:</strong> My PDS, My Service Record (appointment history), My Payslips (JO/COS or Plantilla). Dashboard shows your ID photo when HR has linked one.</li>
                     <li><strong>JO/COS:</strong> Overtime Credits when applicable.</li>
                     <li><strong>eRMT:</strong> Search records; use <strong>Copy path</strong> or try browser open for NAS PDFs (open via File Explorer / Adobe if the browser blocks <code>file://</code>).</li>
@@ -351,19 +361,20 @@
                     <li>Review the summary (records saved, dates outside quincena skipped, missing days).</li>
                     <li>If you uploaded the wrong file, use <strong>Undo upload</strong> on your own recent batch (Admin/HR can undo any batch).</li>
                 </ol>
-                <p class="muted">You can view DTR records and use self-service leave/DTR if your account is linked to an employee. You cannot process worktime or run payroll.</p>
+                <p class="muted">You can view DTR records and use self-service leave/DTR if your account is linked to an employee. You cannot process worktime, upload event attendance, or run payroll.</p>
             </div>
 
             <div class="role-guide{% if viewer_role == 'payroll_maker' %} is-your-role{% endif %}" id="role-payroll-maker">
                 <h3 class="sub">Payroll Maker{% if viewer_role == 'payroll_maker' %}<span class="role-badge">Your role</span>{% endif %}</h3>
-                <p><strong>Sidebar access:</strong> Dashboard, eRMT (view), View DTR Records, DTR Justifications, Leave self-service, Reports → Employees List, My Records (if linked), Notifications.</p>
+                <p><strong>Sidebar access:</strong> Dashboard, eRMT (view), View DTR Records, DTR Justifications, Leave self-service, <code>Payroll</code> (Worktime Summary, JO/COS, Plantilla — your department), Reports → Employees List, My Records (if linked), Notifications.</p>
                 <ul>
                     <li><strong>DTR records:</strong> View attendance for active employees in your department.</li>
                     <li><strong>Justifications:</strong> Review submissions; use <strong>Forward</strong> to send to HR/Admin for approve/reject.</li>
+                    <li><strong>Payroll:</strong> Load Worktime Summary, JO/COS, and Plantilla for your department; set JO/COS ATM or NON-ATM; generate payslips and export PDFs. Deduction uploads remain Admin/HR.</li>
                     <li><strong>Reports:</strong> <code>Reports → Employees List</code> (CSV, Excel, or PDF). Service Records, Leave Credits, and Employee ID Cards are Admin/HR only.</li>
                     <li><strong>eRMT:</strong> View/search only.</li>
                 </ul>
-                <p class="muted">Payroll load and Process Worktime are performed by HR/Admin after employee review is closed.</p>
+                <p class="muted">Process Worktime (quincena close) and deduction uploads remain HR/Admin. Your payroll screens are limited to the department linked to your employee record. If you see “No department is linked,” ask HR to link your user to an employee in that office.</p>
             </div>
 
             <h2 class="section" id="um-common-tasks">Common tasks (step-by-step)</h2>
@@ -378,9 +389,10 @@
 
             <h3 class="sub">B) Add a new employee (Admin/HR)</h3>
             <ol class="steps">
-                <li>Go to <code>Employee Management → Employees</code>.</li>
+                <li>Go to <code>Settings → Manage Employees</code>.</li>
                 <li>Click <strong>+ Add Employee</strong>.</li>
                 <li>The <strong>Employee ID</strong> is automatically generated. Fill in the rest of the form.</li>
+                <li>For Job Order / Contract of Service, choose the JO/COS designation and <strong>JO/COS funds release</strong> (ATM or NON-ATM). Payroll Maker can also set funds release later on <code>Payroll → JO/COS</code>.</li>
                 <li>Click <strong>Add Employee</strong>.</li>
             </ol>
             <p class="muted" style="margin-top:-0.25rem;">
@@ -400,14 +412,15 @@
                 <li>Select the leave type and dates.</li>
                 <li>Add details (reason, where required).</li>
                 <li>Submit your application.</li>
-                <li>Check status in <code>Leave Management → View Leave</code>.</li>
+                <li>Check status in <code>Leave Management → View Leave</code>. You may <strong>cancel</strong> a pending or approved application from that list or the detail page.</li>
             </ol>
 
-            <h3 class="sub">E) Approve leave (Manager/Admin)</h3>
+            <h3 class="sub">E) Approve, edit, or cancel leave</h3>
             <ol class="steps">
-                <li>Open <code>Leave Management → Leave Approvals</code>.</li>
-                <li>Review the request details carefully.</li>
-                <li>Approve or reject (when available).</li>
+                <li>Department Head: open <code>Leave Management → Leave Approvals</code> for staff in your office (your user role may be Manager or Employee if you are listed as the department’s manager).</li>
+                <li>Admin/HR: the same page and the dashboard show pending applications, including department-head applicants. You may <strong>Approve</strong> or <strong>Disapprove</strong>.</li>
+                <li>Admin/HR may <strong>edit</strong> dates, reason, or leave type, or <strong>cancel</strong> an application. Cancelling an approved leave reverses the leave-ledger deduction.</li>
+                <li>After approval or disapproval, HR and the employee can print CSC Form 6 (including disapproved applications).</li>
             </ol>
 
             <h3 class="sub" id="um-prepare-dtr-period">F) Prepare DTR period (Admin/HR)</h3>
@@ -419,21 +432,21 @@
                 <li>Open <code>Time &amp; Attendance → Prepare DTR Period</code> (also available from <code>Quincena Processing</code>).</li>
                 <li>Select <strong>Quincena</strong> (1st or 2nd half), <strong>Month</strong>, and <strong>Year</strong>. Preparation always covers <strong>all active employees</strong> for that quincena (plantilla and non-plantilla).</li>
                 <li>
-                    <strong>Compressed workweek segments (optional)</strong> — use when the duty scheme is 4-day or 5-day compressed, or when it
-                    <strong>changes within the same quincena</strong>:
-                    <ol style="margin-top:0.35rem;">
-                        <li>Click <strong>Add workweek segment</strong> for each date range.</li>
-                        <li>Per segment, set <strong>Model</strong> (5-day or 4-day), <strong>Applies To</strong> (all employees, plantilla only, or non-plantilla only), and <strong>Start</strong> / <strong>End</strong> dates.</li>
-                        <li>Example: Segment 1 — 5-day, all employees, May 1–7; Segment 2 — 4-day, all employees, May 8–15.</li>
-                        <li>Each segment must fall entirely within the selected period. Segments that overlap for the <em>same</em> employee group are not allowed (e.g. two “all employees” ranges on the same dates). Different groups may overlap (e.g. plantilla 5-day and non-plantilla 4-day on the same dates).</li>
-                        <li>Leave segments empty if you only need blank rows (no REST DAY overlay).</li>
-                    </ol>
+                    <strong>Workweek calendar</strong> — if the year is already saved under <code>Leave → Workweek calendar</code>,
+                    this modal shows that quincena’s weeks (compressed vs regular, Friday-holiday flags). You do not add workweek segments.
+                    On a compressed (4-day) week the rest day defaults to <strong>Friday</strong> (<code>NON-WORKING DAY</code>).
+                    If a local declaration transfers that rest day, choose another weekday (Mon–Thu) for that week.
+                    Flagged Friday-holiday weeks stay regular (5-day) and have no rest-day transfer.
+                </li>
+                <li>
+                    <strong>Compressed workweek segments (fallback only)</strong> — shown only when this month is <em>not</em> on the year calendar.
+                    Save the year calendar when you can; otherwise add segments for 4-day / 5-day date ranges as before.
                 </li>
                 <li><strong>What each model does</strong> (excluding holidays and work suspensions):
                     <ul>
-                        <li><strong>5-day compressed</strong> — used for late/undertime targets (8:00 AM / 12:00 PM / 1:00 PM / 5:00 PM). DTR In/Out stay blank until biometric upload.</li>
-                        <li><strong>4-day compressed</strong> — late/undertime targets Monday–Thursday (7:00 AM / 12:00 PM / 1:00 PM / 6:00 PM); <strong>Friday</strong> marked <code>REST DAY</code>. No default 7:00/6:00 times on the DTR row.</li>
-                        <li>Employees on the <strong>Flexible Worktime</strong> list (or the employee flexi flag) skip the 4-day Friday REST DAY overlay; that day’s flexi row (including Rest mode) owns the schedule. Day, straight, night, and Rest modes all use the same quincena date calendar — click several dates (they need not be consecutive), or Mark Date from–to, then Add to list.</li>
+                        <li><strong>5-day / regular</strong> — late/undertime targets (8:00 AM / 12:00 PM / 1:00 PM / 5:00 PM). DTR In/Out stay blank until biometric upload.</li>
+                        <li><strong>4-day / compressed</strong> — late/undertime targets on the four duty days (7:00 AM / 12:00 PM / 1:00 PM / 6:00 PM); the rest day (Friday unless transferred) is marked <code>NON-WORKING DAY</code>.</li>
+                        <li>Employees on the <strong>Flexible Worktime</strong> list (or the employee flexi flag) skip the office rest-day overlay; that day’s flexi row (including Rest mode) owns the schedule.</li>
                     </ul>
                 </li>
                 <li>
@@ -441,7 +454,7 @@
                     (<code>YYYY-MM-DD</code>, optional <code>AM</code> or <code>PM</code>). These apply org-wide for the listed days.
                 </li>
                 <li>Before generating, set <code>Flexible Worktime</code>, <code>Overtime Authorization</code>, and <code>X-Service Authorization</code> on the same Time &amp; Attendance menu when required for the period.</li>
-                <li>Click <strong>Generate</strong>. The system saves workweek settings for late/undertime lookup and creates or updates DTR rows for the quincena.</li>
+                <li>Click <strong>Generate</strong>. Blank DTR rows are created for the quincena; compressed rest days are stamped <code>NON-WORKING DAY</code> from the year calendar (or from fallback segments if that month is unsaved).</li>
             </ol>
             <p class="muted">
                 To print a <strong>full-month</strong> DTR for plantilla employees (monthly submission requirement), open
@@ -486,10 +499,10 @@
                 <li>Run <code>Process Worktime</code>, then open <code>Worktime Summary</code> before payroll.</li>
             </ol>
 
-            <h3 class="sub">J) View worktime summary (Admin/HR)</h3>
+            <h3 class="sub">J) View worktime summary (Admin/HR; Payroll Maker for their department)</h3>
             <ol class="steps">
                 <li>Open <code>Payroll → Worktime Summary</code>.</li>
-                <li>Select year, month, quincena, employee type, and optional department or employee filters.</li>
+                <li>Select year, month, quincena, employee type (Plantilla or JO/COS), and optional department or employee filters. Payroll Maker is locked to their linked department.</li>
                 <li>Click <strong>Apply</strong> to load the report.</li>
                 <li>Use <strong>CSV</strong> or <strong>PDF</strong> export if needed.</li>
             </ol>
@@ -514,15 +527,25 @@
                 Open <code>Leave → Workweek calendar</code>, choose a year, then set each month to compressed (4-day / 1.250)
                 or regular (5-day / 1.000). Official Friday holidays (including a Friday New Year that sits in the last week of December)
                 are flagged automatically; add local Friday holidays as needed. Save to recompute VL/SL/LWOP on those dates and stamp
-                <code>5-day workweek</code> on flagged leave lines. Until a year is saved, DTR workweek segments still apply.
+                <code>5-day workweek</code> on flagged leave lines. After a month is saved, Prepare DTR shows that quincena’s calendar
+                (not workweek segments). Transfer a compressed rest day off Friday on the Generate DTR modal when a local declaration requires it.
             </p>
 
-            <h3 class="sub">M) Run Plantilla or JO/COS payroll (Admin/HR)</h3>
+            <h3 class="sub">M) Run Plantilla or JO/COS payroll (Admin/HR; Payroll Maker for their department)</h3>
             <ol class="steps">
                 <li>Confirm the quincena is <strong>Processed</strong> and Worktime Summary looks correct.</li>
-                <li>Upload or refresh deduction schedules (GSIS, HDMF, PHIC, LBP, JOFEMCO, withholding tax) as needed.</li>
-                <li>Open <code>Payroll → Plantilla</code> or <code>Payroll → JO/COS</code>, select department/period, and load payroll.</li>
-                <li>Generate payslips so employees can open them under <code>My Payslips</code>.</li>
+                <li>Admin/HR: upload or refresh deduction schedules (GSIS, HDMF, PHIC, LBP, JOFEMCO, withholding tax) as needed. Payroll Maker does not upload deductions.</li>
+                <li>For JO/COS, set <strong>Funds release</strong> to ATM or NON-ATM on the employee form (Admin/HR) or on the payroll row (Admin/HR/Payroll Maker). Default is ATM.</li>
+                <li>Open <code>Payroll → Plantilla</code> or <code>Payroll → JO/COS</code>, select period and department (Payroll Maker is locked to theirs). On JO/COS, also choose Funds release: All, ATM, or NON-ATM.</li>
+                <li>Load payroll, then generate payslips so employees can open them under <code>My Payslips</code>. Filter first if you need a separate ATM or NON-ATM PDF.</li>
+            </ol>
+
+            <h3 class="sub" id="um-event-attendance">O) Upload and view event attendance (Admin/HR)</h3>
+            <ol class="steps">
+                <li>Open <code>Time &amp; Attendance → View / Upload Attendance</code> (shortcuts: Flag Raising, Flag Retreat, Meeting).</li>
+                <li>Click <strong>Upload attendance</strong>. Set the event date, then either choose a category from the list or <strong>type a new category</strong> (for example a special assembly).</li>
+                <li>Attach the Excel file with columns <code>employeeId</code>, <code>timestamp</code> (epoch ms), <code>lat</code>, and <code>long</code>.</li>
+                <li>On the same page, use the <strong>Category</strong> filter to view All, a preset, or any custom category already uploaded. Search by employee ID, name, or location.</li>
             </ol>
 
             <h3 class="sub">N) Print Employee ID Cards (Admin/HR)</h3>
@@ -610,7 +633,8 @@
                 <li><strong>Follow the quincena workflow</strong>: Do not run payroll until worktime is processed for that quincena.</li>
                 <li><strong>Close employee review</strong> before adjusting DTR and processing worktime.</li>
                 <li><strong>Be consistent</strong>: Use complete names and correct departments to keep reports accurate.</li>
-                <li><strong>Double-check dates</strong>: Leave and DTR are date-sensitive; wrong dates cause payroll issues. Workweek segment dates must match the quincena or month you are preparing.</li>
+                <li><strong>Double-check dates</strong>: Leave and DTR are date-sensitive; wrong dates cause payroll issues. Save the year on <code>Leave → Workweek calendar</code> before Prepare DTR so the quincena uses that scheme (and transfer a rest day on the Generate DTR modal only when a local declaration requires it).</li>
+                <li><strong>JO/COS funds release</strong>: Set ATM vs NON-ATM before generating payslips if you need separate payment batches.</li>
                 <li><strong>Attach proof when needed</strong>: Justifications are faster to review with supporting files.</li>
                 <li><strong>eRMT paths</strong>: Prefer stable UNC paths on the shared NAS; avoid personal desktop folders.</li>
                 <li><strong>ID photos</strong>: Use a clear front-facing photo; keep the eRMT path pointing at the current file after NAS folder moves.</li>
@@ -632,15 +656,16 @@
             <ul>
                 <li>Your role may not have permission for that page. Confirm your role with Admin/HR.</li>
                 <li>Try logging out and logging back in after role changes.</li>
-                <li>Service Records / Leave Credits / Employee ID Cards under Reports, Payroll menu, and eRMT edit/delete require Admin or HR (delete = Admin).</li>
+                <li>Service Records / Leave Credits / Employee ID Cards under Reports, deduction uploads, event attendance, and eRMT edit/delete require Admin or HR (delete = Admin).</li>
+                <li>Payroll Maker should see <code>Payroll → Worktime Summary</code>, JO/COS, and Plantilla for their department after a fresh login. Deduction menus stay Admin/HR.</li>
             </ul>
 
-            <h3 class="sub">Prepare DTR / workweek segment issues</h3>
+            <h3 class="sub">Prepare DTR / workweek issues</h3>
             <ul>
-                <li><strong>Overlapping segments</strong>: Two segments for the same employee group cannot cover the same dates. Split or adjust ranges, or use different <em>Applies To</em> values when plantilla and non-plantilla follow different schemes.</li>
-                <li><strong>Dates outside the period</strong>: Start and end dates must fall within the selected quincena or month. Change the period or shorten the segment.</li>
-                <li><strong>Wrong late/undertime targets</strong>: The system uses the workweek segment active on each calendar day. Re-run <code>Prepare DTR Period</code> with corrected segments before upload if you prepared the wrong scheme.</li>
-                <li><strong>No default times stamped</strong>: Workweek segments are optional. Add at least one segment, or adjust DTR manually after upload.</li>
+                <li><strong>Year calendar already saved</strong>: Prepare DTR shows the quincena workweek, not “Add workweek segment.” Change 4-day vs 5-day on <code>Leave → Workweek calendar</code>; transfer a compressed rest day on the Generate DTR week table.</li>
+                <li><strong>Overlapping segments</strong> (only if the month is not on the year calendar): Two segments for the same employee group cannot cover the same dates.</li>
+                <li><strong>Wrong rest day</strong>: Compressed weeks default to Friday. If the rest day was transferred locally, pick the new weekday on Generate DTR before generating.</li>
+                <li><strong>No default times stamped</strong>: The calendar (or segments) only mark rest days. In/Out times come from biometric upload.</li>
             </ul>
 
             <h3 class="sub">DTR upload issues</h3>
@@ -683,9 +708,23 @@
 
             <h3 class="sub">Leave printing / export issues</h3>
             <ul>
-                <li>Some print/export options may only work when a leave request is <strong>Approved</strong>.</li>
+                <li>CSC Form 6 print is available to the employee and to HR after the application is <strong>Approved</strong> or <strong>Disapproved</strong>.</li>
+                <li>If a department head’s leave is missing from Leave Approvals, sign in as Admin/HR — they can act on any pending application, including office heads.</li>
                 <li>If PDF export looks clipped, try browser print settings: set paper to A4 and margins to “Default”.</li>
                 <li>Leave Credits PDF is Admin/HR only (landscape).</li>
+            </ul>
+
+            <h3 class="sub">Event attendance issues</h3>
+            <ul>
+                <li><strong>Category not in the view filter</strong>: Type it on upload; after a successful upload it appears in the Category dropdown.</li>
+                <li><strong>Unmatched badge</strong>: The Excel <code>employeeId</code> must match an employee ID in HRMS (leading zeros are tolerated).</li>
+                <li><strong>Wrong file type</strong>: Upload <code>.xlsx</code> (not the biometric <code>.dat</code> used for DTR).</li>
+            </ul>
+
+            <h3 class="sub">JO/COS payroll / funds release</h3>
+            <ul>
+                <li>Default funds release is <strong>ATM</strong>. Change it on the JO/COS employee form or on the payroll row; then filter All / ATM / NON-ATM before export.</li>
+                <li>Payroll Maker cannot open deduction pages. They can load payroll and generate payslips for their department only.</li>
             </ul>
 
             <h3 class="sub">If something looks wrong</h3>

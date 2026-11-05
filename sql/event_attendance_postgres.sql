@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS event_attendance_batches (
     id SERIAL PRIMARY KEY,
-    category VARCHAR(40) NOT NULL,
+    category VARCHAR(80) NOT NULL,
     event_date DATE NOT NULL,
     filename VARCHAR(255) NOT NULL DEFAULT '',
     row_count INTEGER NOT NULL DEFAULT 0,
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS event_attendance (
     batch_id INTEGER REFERENCES event_attendance_batches(id) ON DELETE CASCADE,
     employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
     badge_employee_id VARCHAR(50) NOT NULL DEFAULT '',
-    category VARCHAR(40) NOT NULL,
+    category VARCHAR(80) NOT NULL,
     event_date DATE NOT NULL,
     punched_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
     timestamp_ms BIGINT NOT NULL,
@@ -45,4 +45,6 @@ ALTER TABLE event_attendance ADD COLUMN IF NOT EXISTS barangay VARCHAR(120);
 ALTER TABLE event_attendance ADD COLUMN IF NOT EXISTS municipality VARCHAR(120);
 ALTER TABLE event_attendance ADD COLUMN IF NOT EXISTS province VARCHAR(120);
 ALTER TABLE event_attendance ADD COLUMN IF NOT EXISTS location_text VARCHAR(255);
+ALTER TABLE event_attendance ALTER COLUMN category TYPE VARCHAR(80);
+ALTER TABLE event_attendance_batches ALTER COLUMN category TYPE VARCHAR(80);
 

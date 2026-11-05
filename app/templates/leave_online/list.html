@@ -24,7 +24,7 @@
     <div class="page-header" style="display:flex; justify-content: space-between; align-items:center; gap:1rem; flex-wrap:wrap;">
       <div>
         <h1 class="page-title" style="margin:0;">View Leave</h1>
-        <p style="margin:0.25rem 0 0; color: var(--medium-gray, #666); font-size: 0.9rem;">Search and open applications. Print is enabled when approved.</p>
+        <p style="margin:0.25rem 0 0; color: var(--medium-gray, #666); font-size: 0.9rem;">All leave applications. Department Head and HR may approve or disapprove. Print is enabled after approval or disapproval.</p>
       </div>
       <a href="{{ url_for('routes.leave_apply') }}" class="btn-primary">Apply for Leave</a>
     </div>
@@ -37,26 +37,61 @@
         <table class="data-table" id="leaveTable">
           <thead>
             <tr>
+              {% if show_employee_column %}
+              <th>Employee</th>
+              {% endif %}
               <th>Applied Date(s)</th>
               <th>Type of Leave</th>
               <th>Description</th>
               <th>Date Submitted</th>
               <th>Status</th>
               <th>Manager Remarks</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {% for l in leaves %}
               <tr class="leave-row" data-href="{{ url_for('routes.leave_detail', id=l.id) }}">
+                {% if show_employee_column %}
+                <td>
+                  {{ l.employee.full_name if l.employee else '' }}
+                  {% if l.employee_id in (department_head_employee_ids or []) %}
+                  <span class="muted" style="display:block; font-size:0.75rem;">Department Head — HR/Admin action</span>
+                  {% endif %}
+                </td>
+                {% endif %}
                 <td>{{ l.start_date.strftime('%Y-%m-%d') }}{% if l.end_date and l.end_date != l.start_date %} to {{ l.end_date.strftime('%Y-%m-%d') }}{% endif %}</td>
                 <td>{{ l.leave_type }}</td>
                 <td style="max-width: 420px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ (l.reason or '')|replace('\n',' ') }}</td>
                 <td>{{ l.created_at.strftime('%Y-%m-%d %H:%M') if l.created_at else '' }}</td>
                 <td><span class="status-badge status-{{ l.status }}">{{ l.status|title }}</span></td>
                 <td>{{ l.rejection_reason or '' }}</td>
+                <td class="leave-actions" style="white-space: nowrap;" onclick="event.stopPropagation();">
+                  {% if l.id in (leave_actionable_ids or []) %}
+                  <form method="POST" action="{{ url_for('routes.leave_approve', id=l.id) }}" style="display:inline;">
+                    <button type="submit" class="btn-action">Approve</button>
+                  </form>
+                  <form method="POST" action="{{ url_for('routes.leave_disapprove', id=l.id) }}" style="display:inline;">
+                    <input type="hidden" name="manager_remarks" value="Dis-approved">
+                    <button type="submit" class="btn-action">Disapprove</button>
+                  </form>
+                  {% endif %}
+                  {% if l.id in (leave_editable_ids or []) %}
+                  <a href="{{ url_for('routes.leave_edit', id=l.id) }}" class="btn-action">Edit</a>
+                  {% endif %}
+                  {% if l.id in (leave_cancellable_ids or []) %}
+                  <form method="POST" action="{{ url_for('routes.leave_cancel', id=l.id) }}" style="display:inline;" onsubmit="return confirm('Cancel this leave application?');">
+                    <button type="submit" class="btn-action">Cancel</button>
+                  </form>
+                  {% endif %}
+                  {% if l.id in (leave_printable_ids or []) %}
+                  <a href="{{ url_for('routes.leave_detail', id=l.id, print=1) }}" class="btn-action">Print</a>
+                  {% endif %}
+                  <a href="{{ url_for('routes.leave_detail', id=l.id) }}" class="btn-action">View</a>
+                </td>
               </tr>
             {% else %}
-              <tr><td colspan="6" class="no-data">No leave applications found.</td></tr>
+              <tr><td colspan="{{ 8 if show_employee_column else 7 }}" class="no-data">No leave applications found.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -68,7 +103,10 @@
 <script>
 document.querySelectorAll('.leave-row').forEach(r => {
   r.style.cursor = 'pointer';
-  r.addEventListener('click', () => window.location.href = r.dataset.href);
+  r.addEventListener('click', (e) => {
+    if (e.target.closest('.leave-actions')) return;
+    window.location.href = r.dataset.href;
+  });
 });
 document.getElementById('leaveSearch')?.addEventListener('input', function(){
   const q = this.value.toLowerCase();
@@ -79,4 +117,3 @@ document.getElementById('leaveSearch')?.addEventListener('input', function(){
 });
 </script>
 {% endblock %}
-

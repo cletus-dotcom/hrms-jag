@@ -11,6 +11,9 @@ from flask import g
 from app import db
 from app.models import DtrWorkArrangementSetting, Employee, FlexibleWorktime
 
+# Stored/displayed DTR remarks for scheduled off days (4-day Friday, flexi rest).
+DTR_NON_WORKING_DAY_REMARK = 'NON-WORKING DAY'
+
 def flexi_coverage_keys(
     employee_ids: Iterable[int],
     period_start: date,
@@ -202,10 +205,10 @@ def apply_workweek_segments_to_dtr(
     skip_duty_stamp: Callable | None = None,
     is_jo_only: Callable | None = None,
 ) -> None:
-    """Apply REST DAY (4-day Fridays) from workweek segments. Does not stamp In/Out times.
+    """Apply NON-WORKING DAY (4-day Fridays) from workweek segments. Does not stamp In/Out times.
 
     Default 8:00/17:00 and 7:00/18:00 present-day times are not written; biometric
-    upload supplies actual punches. Flexible Worktime list dates skip Friday REST DAY.
+    upload supplies actual punches. Flexible Worktime list dates skip Friday NON-WORKING DAY.
     ``skip_duty_stamp`` / ``is_jo_only`` are ignored (kept for callers).
     """
     _ = skip_duty_stamp or is_jo_only
@@ -236,12 +239,13 @@ def _apply_4day_segment(
     skip_duty_stamp: Callable | None = None,
     flexi_covered: set[tuple[int, date]] | None = None,
 ) -> None:
+    from app.workweek_calendar_service import nwd_weekday_for_date
     _ = skip_duty_stamp
     flexi_covered = flexi_covered or set()
     db.session.flush()
     d = seg.start_date
     while d <= seg.end_date:
-        if d.weekday() == 4 and d not in special_dates:
+        if d.weekday() == nwd_weekday_for_date(d) and d not in special_dates:
             for emp in employees:
                 if not matches_applies(emp, seg.applies_to):
                     continue
@@ -251,7 +255,7 @@ def _apply_4day_segment(
                 if not rec or skip_stamp(rec, d, special_dates):
                     continue
                 if not any([rec.am_in, rec.am_out, rec.pm_in, rec.pm_out]):
-                    rec.remarks = 'REST DAY'
+                    rec.remarks = DTR_NON_WORKING_DAY_REMARK
         d += timedelta(days=1)
 
 
@@ -328,3 +332,36 @@ def arrangement_model_code_for_date(emp: Employee, d: date) -> str:
         if applies == 'all' or (applies == 'regular' and is_regular) or (applies == 'jo_cos' and not is_regular):
             return ((row.model_code or '5day').strip().lower() or '5day')
     return '5day'
+
+
+def apply_calendar_nwd_to_dtr(
+    employees: list[Employee],
+    period_start: date,
+    period_end: date,
+    special_dates: set[date],
+    *,
+    find_row: Callable,
+    skip_stamp: Callable,
+) -> int:
+    """Stamp NON-WORKING DAY from the saved workweek calendar (incl. transferred rest day)."""
+    from app.workweek_calendar_service import calendar_model_code_for_date, is_compressed_nwd_date
+
+    flexi_covered = flexi_coverage_keys(
+        [e.id for e in employees], period_start, period_end
+    )
+    marked = 0
+    d = period_start
+    while d <= period_end:
+        model = calendar_model_code_for_date(d)
+        if model == '4day' and is_compressed_nwd_date(d, model) and d not in special_dates:
+            for emp in employees:
+                if (emp.id, d) in flexi_covered or getattr(emp, 'flexible_worktime', False):
+                    continue
+                rec = find_row(emp, d)
+                if not rec or skip_stamp(rec, d, special_dates):
+                    continue
+                if not any([rec.am_in, rec.am_out, rec.pm_in, rec.pm_out]):
+                    rec.remarks = DTR_NON_WORKING_DAY_REMARK
+                    marked += 1
+        d += timedelta(days=1)
+    return marked

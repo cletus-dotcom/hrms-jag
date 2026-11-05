@@ -14,6 +14,9 @@ from app.config import (
     DTR_JUSTIFICATION_REASONS,
     EMPLOYEE_SEPARATION_TYPES,
     EMPLOYEE_STATUSES,
+    PAYROLL_FUND_RELEASE_ATM,
+    PAYROLL_FUND_RELEASE_NON_ATM,
+    PAYROLL_FUND_RELEASE_OPTIONS,
 )
 from app.leave_ledger_service import (
     LEAVE_CREDITS_STATUSES,
@@ -25,8 +28,12 @@ from app.leave_ledger_service import (
 )
 from app.leave_utils import minutes_to_day_equivalent, leave_day_credit_for_workweek
 from app.workweek_calendar_service import (
+    build_quincena_workweek_preview,
     build_year_view,
     calendar_model_code_for_date,
+    is_compressed_nwd_date,
+    month_workweek_calendar_saved,
+    save_quincena_nwd_weekdays,
     save_year_calendar,
 )
 from app.lwop_ledger_service import (
@@ -449,6 +456,17 @@ def _require_admin_or_hr():
     return redirect(url_for(_dashboard_for_user(current_user)))
 
 
+def normalize_payroll_fund_release(raw) -> str:
+    text = (raw or '').strip().upper().replace('_', '-').replace(' ', '-')
+    if text in ('NON-ATM', 'NONATM', 'CASH', 'CHECK', 'CHEQUE'):
+        return PAYROLL_FUND_RELEASE_NON_ATM
+    return PAYROLL_FUND_RELEASE_ATM
+
+
+def employee_payroll_fund_release(emp) -> str:
+    return normalize_payroll_fund_release(getattr(emp, 'payroll_fund_release', None))
+
+
 def _can_edit_employee_id() -> bool:
     """Only Admin (and Portal Admin) may change an existing employee_id."""
     from app.portal_config import is_admin_role
@@ -491,6 +509,432 @@ def _managed_department_ids_for_manager():
         return []
     rows = Department.query.filter_by(manager_id=mgr_emp.id).all()
     return [d.id for d in rows if d and d.id]
+
+
+def _department_head_employee_ids():
+    """Employee PKs assigned as Department.manager_id (office department heads)."""
+    rows = (
+        Department.query
+        .with_entities(Department.manager_id)
+        .filter(Department.manager_id.isnot(None))
+        .all()
+    )
+    return {mid for (mid,) in rows if mid}
+
+
+def _employee_is_department_head(emp) -> bool:
+    if not emp or not getattr(emp, 'id', None):
+        return False
+    return emp.id in _department_head_employee_ids()
+
+
+def _leave_actor_role() -> str:
+    return (getattr(current_user, 'role', None) or '').strip().lower()
+
+
+def _special_leave_approver_departments():
+    """MO, HRMDO/HRMO, and MADO department rows used for special leave routing."""
+    from sqlalchemy import func as sql_func
+    mo_dept = (Department.query
+               .filter(sql_func.lower(Department.name).in_(
+                   ['mo', "mayor's office", 'mayors office', 'municipal mayor']
+               ))
+               .first())
+    if not mo_dept:
+        mo_dept = Department.query.filter(sql_func.lower(Department.name).like('%mayor%')).first()
+    hrmdo_dept = (Department.query
+                  .filter(sql_func.lower(Department.name).like('%hrmdo%'))
+                  .first())
+    if not hrmdo_dept:
+        hrmdo_dept = Department.query.filter(sql_func.lower(Department.name).like('%hrmo%')).first()
+    mado_dept = Department.query.filter(sql_func.lower(Department.name).like('%mado%')).first()
+    return mo_dept, hrmdo_dept, mado_dept
+
+
+def _current_user_is_special_leave_approver() -> bool:
+    emp = getattr(current_user, 'employee', None)
+    if not emp:
+        return False
+    mo_dept, hrmdo_dept, mado_dept = _special_leave_approver_departments()
+    return bool(
+        (mo_dept and mo_dept.manager_id == emp.id)
+        or (hrmdo_dept and hrmdo_dept.manager_id == emp.id)
+        or (mado_dept and mado_dept.manager_id == emp.id)
+    )
+
+
+def _leave_is_special_routed(lr) -> bool:
+    reason = lr.reason or ''
+    if '__META__SPECIAL_APPROVAL=1' in reason:
+        return True
+    emp = getattr(lr, 'employee', None)
+    if _employee_is_department_head(emp):
+        return True
+    user = getattr(emp, 'user', None) if emp else None
+    applicant_role = ((getattr(user, 'role', None) or '') if user else '').strip().lower()
+    if applicant_role in ('manager', 'admin', 'hr'):
+        return True
+    dept_name = ''
+    if emp and getattr(emp, 'department', None) and emp.department.name:
+        dept_name = emp.department.name.strip().lower()
+    return dept_name in ('mo', "mayor's office", 'mayors office', 'municipal mayor') or 'mayor' in dept_name
+
+
+def _special_leave_match_clause():
+    """SQL filter for leaves that HR/Admin (and MO/HRMDO/MADO heads) must act on."""
+    from sqlalchemy import func as sql_func
+    head_ids = list(_department_head_employee_ids())
+    cond = (
+        (LeaveRequest.reason.ilike('%__META__SPECIAL_APPROVAL=1%')) |
+        (sql_func.lower(User.role).in_(['manager', 'admin', 'hr'])) |
+        (sql_func.lower(Department.name).in_(['mo', "mayor's office", 'mayors office', 'municipal mayor'])) |
+        (sql_func.lower(Department.name).like('%mayor%'))
+    )
+    if head_ids:
+        cond = cond | Employee.id.in_(head_ids)
+    return cond
+
+
+def _can_act_on_leave_request(lr) -> bool:
+    """Department Head, Admin, and HR may approve/disapprove.
+
+    Department-head applicants cannot act on their own leave; HR/Admin do that.
+    Nobody may act on their own application.
+    """
+    role = _leave_actor_role()
+    if role not in ('manager', 'admin', 'hr'):
+        return False
+    my_emp = getattr(current_user, 'employee', None)
+    if my_emp and lr.employee_id == my_emp.id:
+        return False
+    if role in ('admin', 'hr'):
+        return True
+    dept_ids = _managed_department_ids_for_manager()
+    emp = getattr(lr, 'employee', None) or (Employee.query.get(lr.employee_id) if lr.employee_id else None)
+    if dept_ids and emp and emp.department_id in dept_ids:
+        return True
+    return _leave_is_special_routed(lr) and _current_user_is_special_leave_approver()
+
+
+def _leave_form_printable(lr) -> bool:
+    """CSC Form 6 may be printed after HR/Department Head approval or disapproval."""
+    return (getattr(lr, 'status', None) or '').strip().lower() in ('approved', 'rejected')
+
+
+def _leave_status(lr) -> str:
+    return (getattr(lr, 'status', None) or '').strip().lower()
+
+
+def _user_can_cancel_leave(lr) -> bool:
+    """Employee may cancel own pending/approved leave. HR/Admin may cancel any pending/approved."""
+    if _leave_status(lr) not in ('pending', 'approved'):
+        return False
+    role = _leave_actor_role()
+    if role in ('admin', 'hr'):
+        return True
+    my_emp = getattr(current_user, 'employee', None)
+    return bool(my_emp and lr.employee_id == my_emp.id)
+
+
+def _user_can_edit_leave(lr) -> bool:
+    """HR/Admin may edit pending or approved applications (dates, reason, type)."""
+    if _leave_status(lr) not in ('pending', 'approved'):
+        return False
+    return _leave_actor_role() in ('admin', 'hr')
+
+
+def _leave_list_action_ids(leaves):
+    """Return (actionable_ids, printable_ids, cancellable_ids, editable_ids)."""
+    actionable = set()
+    printable = set()
+    cancellable = set()
+    editable = set()
+    for lr in leaves or []:
+        st = _leave_status(lr)
+        if st == 'pending' and _can_act_on_leave_request(lr):
+            actionable.add(lr.id)
+        if _leave_form_printable(lr):
+            printable.add(lr.id)
+        if _user_can_cancel_leave(lr):
+            cancellable.add(lr.id)
+        if _user_can_edit_leave(lr):
+            editable.add(lr.id)
+    return actionable, printable, cancellable, editable
+
+
+def _remarks_belong_to_leave_request(remarks, lr_id) -> bool:
+    token = f'leave_request_id={int(lr_id)}'
+    first = ((remarks or '').strip().split(';')[0] or '').strip()
+    return first == token
+
+
+def _void_online_leave_ledger(lr) -> None:
+    """Remove ledger deduction posted for this online leave (audit snapshot first)."""
+    rows = (
+        LeaveLedger.query
+        .filter(LeaveLedger.employee_id == lr.employee_id)
+        .filter(LeaveLedger.remarks.ilike(f'%leave_request_id={lr.id}%'))
+        .all()
+    )
+    touched = False
+    actor = getattr(current_user, 'username', None) or 'system'
+    uid = getattr(current_user, 'id', None)
+    for row in rows:
+        if not _remarks_belong_to_leave_request(row.remarks, lr.id):
+            continue
+        record_leave_ledger_deletion(
+            row,
+            deleted_by_user_id=uid if isinstance(uid, int) else None,
+            deleted_by_username=str(actor)[:80],
+            source='leave_request_cancel_edit',
+        )
+        db.session.delete(row)
+        touched = True
+    if touched:
+        db.session.flush()
+        recompute_leave_ledger_balances(lr.employee_id)
+
+
+def _post_online_leave_ledger(lr) -> None:
+    """Post (or refresh) the leave-ledger deduction for an approved online application."""
+    _void_online_leave_ledger(lr)
+    leave_code = (lr.leave_type or '').strip().upper()
+    key = _leave_code_to_balance_key(leave_code)
+    col_by_key = {
+        'vl': 'vl_applied',
+        'sl': 'sl_applied',
+        'spl': 'spl_used',
+        'wl': 'wl_used',
+        'cto': 'cto_used',
+        'ml': 'ml_used',
+        'pl': 'pl_used',
+        'sp': 'sp_used',
+        'avaw': 'avaw_used',
+        'study': 'study_used',
+        'rehab': 'rehab_used',
+        'slbw': 'slbw_used',
+        'se_calamity': 'se_calamity_used',
+        'adopt': 'adopt_used',
+    }
+    target_col = col_by_key.get(key)
+    if not target_col:
+        return
+    try:
+        days = Decimal(str(lr.total_days)) if lr.total_days is not None else None
+    except Exception:
+        days = None
+    if days is None:
+        try:
+            days = Decimal(str((lr.end_date - lr.start_date).days + 1))
+        except Exception:
+            days = Decimal('1')
+    tag = f'leave_request_id={lr.id}'
+    particulars = (
+        f'Online Leave Approved - {leave_code} '
+        f'({lr.start_date.isoformat()} to {lr.end_date.isoformat()})'
+    )
+    row = LeaveLedger(
+        employee_id=lr.employee_id,
+        transaction_date=lr.start_date,
+        particulars=particulars,
+        remarks=tag,
+        created_by=getattr(current_user, 'id', None),
+    )
+    setattr(row, target_col, days)
+    db.session.add(row)
+    db.session.flush()
+    recompute_leave_ledger_balances(lr.employee_id)
+
+
+def _parse_leave_reason_fields(raw: str) -> dict:
+    special = False
+    sl_case = ''
+    sl_illness = ''
+    vl_location = ''
+    vl_abroad = ''
+    dates_meta = []
+    commutation = ''
+    public_lines = []
+    for line in (raw or '').splitlines():
+        s = line.strip()
+        if s.startswith('__META__SPECIAL_APPROVAL='):
+            special = True
+            continue
+        if s.startswith('__META__SL_CASE='):
+            sl_case = s.split('=', 1)[1].strip().upper()
+            continue
+        if s.startswith('__META__SL_ILLNESS='):
+            sl_illness = s.split('=', 1)[1].strip()
+            continue
+        if s.startswith('__META__VL_LOCATION='):
+            val = s.split('=', 1)[1].strip()
+            if val.upper().startswith('ABROAD:'):
+                vl_location = 'ABROAD'
+                vl_abroad = val.split(':', 1)[1].strip()
+            else:
+                vl_location = val.upper()
+            continue
+        if s.startswith('__META__DATES='):
+            dates_meta = [p.strip() for p in s.split('=', 1)[1].split(',') if p.strip()]
+            continue
+        if s.lower().startswith('commutation:'):
+            commutation = s.split(':', 1)[1].strip()
+            continue
+        if s.lower().startswith('in case of sick leave:'):
+            continue
+        if s.lower().startswith('manager remarks:'):
+            continue
+        public_lines.append(line)
+    return {
+        'reason': '\n'.join(public_lines).strip(),
+        'special': special,
+        'sl_case': sl_case,
+        'sl_illness': sl_illness,
+        'vl_location': vl_location,
+        'vl_abroad': vl_abroad,
+        'dates_meta': dates_meta,
+        'commutation': commutation,
+    }
+
+
+def _selected_dates_for_leave(lr) -> list[str]:
+    parsed = _parse_leave_reason_fields(lr.reason or '')
+    if parsed['dates_meta']:
+        return parsed['dates_meta']
+    if lr.start_date and lr.end_date:
+        out = []
+        cur = lr.start_date
+        while cur <= lr.end_date:
+            out.append(cur.isoformat())
+            cur += timedelta(days=1)
+        return out
+    if lr.start_date:
+        return [lr.start_date.isoformat()]
+    return []
+
+
+def _parse_online_leave_form(emp, applicant_role: str, *, keep_special: bool = False, relax_advance_rule: bool = False):
+    """Read leave apply/edit form. Returns (payload dict, error message)."""
+    leave_code = (request.form.get('leave_type') or '').strip().upper()
+    reason = (request.form.get('reason') or '').strip()
+    selected_dates_raw = (request.form.get('selected_dates') or '').strip()
+    commutation = (request.form.get('commutation') or '').strip()
+    extra_details = (request.form.get('extra_details') or '').strip()
+    if not leave_code:
+        return None, 'Please select a type of leave.'
+    selected_dates = []
+    if selected_dates_raw:
+        for part in selected_dates_raw.split(','):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                selected_dates.append(datetime.strptime(part, '%Y-%m-%d').date())
+            except ValueError:
+                pass
+    if not selected_dates:
+        return None, 'Please select at least one date to apply for.'
+    selected_dates = sorted(set(selected_dates))
+    if leave_code == 'WL':
+        streak = 1
+        max_streak = 1
+        for i in range(1, len(selected_dates)):
+            if selected_dates[i] == selected_dates[i - 1] + timedelta(days=1):
+                streak += 1
+            else:
+                max_streak = max(max_streak, streak)
+                streak = 1
+        max_streak = max(max_streak, streak)
+        if max_streak > 3:
+            return None, 'Wellness Leave allows a maximum of 3 consecutive days per application.'
+    if not relax_advance_rule and leave_code != 'SL':
+        min_d = date.today() + timedelta(days=6)
+        if any(d < min_d for d in selected_dates):
+            return None, 'Non-sick leave must be filed at least 6 days in advance.'
+    full_reason = reason
+    dept_name = (emp.department.name if emp and emp.department and emp.department.name else '').strip().lower()
+    is_mo_dept = (dept_name in ('mo', "mayor's office", 'mayors office', 'municipal mayor') or 'mayor' in dept_name)
+    is_dept_head = _employee_is_department_head(emp)
+    special_route = keep_special or is_mo_dept or is_dept_head or ((applicant_role or '').strip().lower() in ('manager', 'admin', 'hr'))
+    if special_route:
+        full_reason = (full_reason + '\n__META__SPECIAL_APPROVAL=1').strip()
+    if leave_code == 'SL':
+        sl_case = (request.form.get('sl_case') or '').strip().upper()
+        if sl_case not in ('IN_HOSPITAL', 'OUT_PATIENT'):
+            return None, 'For Sick Leave, please select In-Hospital or Out-Patient.'
+        sl_illness = (request.form.get('sl_illness') or '').strip()
+        case_line = (
+            'In case of sick leave: In-Hospital'
+            if sl_case == 'IN_HOSPITAL'
+            else 'In case of sick leave: Out-Patient'
+        )
+        full_reason = (full_reason + '\n\n' + case_line).strip()
+        full_reason = (full_reason + f'\n__META__SL_CASE={sl_case}').strip()
+        if sl_illness:
+            full_reason = (full_reason + f'\n__META__SL_ILLNESS={sl_illness}').strip()
+    if leave_code in ('VL', 'SPL'):
+        loc = (request.form.get('vl_location') or '').strip().upper()
+        abroad_place = (request.form.get('vl_abroad_place') or '').strip()
+        if loc == 'WITHIN_PH':
+            full_reason = (full_reason + '\n__META__VL_LOCATION=WITHIN_PH').strip()
+        elif loc == 'ABROAD':
+            if not abroad_place:
+                return None, 'For VL/SPL Abroad, please specify the place.'
+            full_reason = (full_reason + f'\n__META__VL_LOCATION=ABROAD:{abroad_place}').strip()
+    if extra_details:
+        full_reason = (full_reason + '\n\n' + extra_details).strip()
+    if commutation:
+        full_reason = (full_reason + f'\n\nCommutation: {commutation}').strip()
+    date_csv = ','.join(d.isoformat() for d in selected_dates)
+    full_reason = (full_reason + f'\n__META__DATES={date_csv}').strip()
+    return {
+        'leave_code': leave_code,
+        'start_date': selected_dates[0],
+        'end_date': selected_dates[-1],
+        'total_days': Decimal(str(len(selected_dates))),
+        'full_reason': full_reason,
+        'special_route': special_route,
+        'is_dept_head': is_dept_head,
+    }, None
+
+
+def _leave_type_options_for_employee(emp, *, include_code=None) -> list[tuple[str, str]]:
+    balances = _get_leave_balances_for_employee(emp)
+    hidden_codes = _apply_leave_hidden_codes(emp)
+    opts = []
+    have = set()
+    for code, label in LEAVE_TYPE_OPTIONS:
+        c = (code or '').strip().upper()
+        if c in hidden_codes:
+            continue
+        key = _leave_code_to_balance_key(c)
+        amt = balances.get(key, Decimal('0'))
+        try:
+            amt = Decimal(str(amt))
+        except Exception:
+            amt = Decimal('0')
+        if amt > Decimal('0'):
+            opts.append((code, label))
+            have.add(c)
+    inc = (include_code or '').strip().upper()
+    if inc and inc not in have:
+        for code, label in LEAVE_TYPE_OPTIONS:
+            if (code or '').strip().upper() == inc:
+                opts.append((code, label))
+                break
+    return opts
+
+
+def _special_routed_leave_requests(status=None):
+    """Leaves routed to HR/Admin and MO / HRMDO / MADO heads (any leave type)."""
+    q = (LeaveRequest.query
+         .join(Employee, Employee.id == LeaveRequest.employee_id)
+         .outerjoin(Department, Department.id == Employee.department_id)
+         .outerjoin(User, User.id == Employee.user_id)
+         .filter(_special_leave_match_clause()))
+    if status:
+        q = q.filter(LeaveRequest.status == status)
+    return q.order_by(LeaveRequest.created_at.desc()).all()
 
 
 def _public_landing_stats():
@@ -582,14 +1026,12 @@ def _public_personnel_breakdown() -> dict:
     }
 
 
-def _public_birthdays_this_week(limit: int = 12) -> dict:
+def _public_birthdays_this_week(limit: int | None = None) -> dict:
     """
     Public landing helper: return employees with birthdays in the current week.
     Week is Monday..Sunday in local server time. Uses EmployeePDS.date_of_birth
-    and ignores the year component.
+    and ignores the year component. Lists every active celebrant unless ``limit`` is set.
     """
-    from sqlalchemy import or_
-
     today = date.today()
     week_start = today - timedelta(days=today.weekday())  # Monday
     week_end = week_start + timedelta(days=6)            # Sunday
@@ -633,10 +1075,13 @@ def _public_birthdays_this_week(limit: int = 12) -> dict:
         # Best-effort only; landing page should still render.
         results = []
 
-    items = results[: max(0, int(limit))]
+    items = results
+    if limit is not None:
+        items = results[: max(0, int(limit))]
     return {
         'week_start': week_start,
         'week_end': week_end,
+        'count': len(results),
         'items': items,
     }
 
@@ -999,8 +1444,6 @@ def _service_record_pdf_bytes(
     c.drawCentredString(center_x, sep_y - 18, 'EMPLOYEE SERVICE RECORD')
 
     name = emp.directory_name
-    if emp.middle_name:
-        name = f'{name} {emp.middle_name}'
     c.setFont('Helvetica', 7.5)
     one_liner = (
         f'Emp ID: {emp.employee_id or "—"}'
@@ -1774,8 +2217,13 @@ def _worked_minutes_within_flexi_schedule(rec, schedule) -> int:
 def _dtr_normalize_remarks(remarks: str | None) -> str:
     """Map DTR remark variants to canonical labels used in worktime rules."""
     r = (remarks or '').strip()
-    if r.upper() == 'LEAVE':
+    if not r:
+        return ''
+    compact = ' '.join(r.upper().replace('-', ' ').split())
+    if compact == 'LEAVE':
         return 'APPROVED LEAVE'
+    if compact in ('REST DAY', 'RESTDAY', 'NON WORKING DAY'):
+        return dtr_wa.DTR_NON_WORKING_DAY_REMARK
     return r
 
 
@@ -1789,7 +2237,7 @@ def _dtr_gross_minutes_for_flexi_day(rec, schedule, remarks: str) -> int:
     if _duty_schedule_is_rest(schedule):
         return 0
     r = _dtr_normalize_remarks(remarks).strip().upper()
-    if r == 'REST DAY':
+    if r == dtr_wa.DTR_NON_WORKING_DAY_REMARK:
         return 0
     full_sched = _scheduled_shift_minutes_from_duty_schedule(schedule)
     if r in ('APPROVED LEAVE', 'HOLIDAY', 'WORK SUSPENSION'):
@@ -1901,7 +2349,7 @@ def _dtr_gross_minutes_for_day(
     Scheduled duty minutes credited for one calendar day (gross worktime base).
 
     Present days, approved leave, holidays, and work suspensions receive full or
-    half-day scheduled credit. REST DAY and weekends receive 0. Unexcused absences
+    half-day scheduled credit. NON-WORKING DAY and weekends receive 0. Unexcused absences
     receive 0 here and are deducted separately via absence_mins.
     4-day REST Friday holidays/leave/suspensions without punches start at 0 here and
     receive 8-hour credit via `_dtr_rebalance_fourday_rest_friday_holiday_credits`.
@@ -1911,7 +2359,7 @@ def _dtr_gross_minutes_for_day(
     if is_weekend or not schedule:
         return 0
     r = _dtr_normalize_remarks(remarks).strip().upper()
-    if r == 'REST DAY':
+    if r == dtr_wa.DTR_NON_WORKING_DAY_REMARK:
         return 0
     full_sched = _scheduled_shift_minutes_from_duty_schedule(schedule)
     if r in ('APPROVED LEAVE', 'HOLIDAY', 'WORK SUSPENSION'):
@@ -2292,17 +2740,17 @@ def _dtr_effective_remarks_for_day(emp: Employee, rec, curr: date, approved_date
         remarks = 'APPROVED LEAVE'
     elif (
         not remarks
-        and curr.weekday() == 4
         and _arrangement_model_code_for_date(emp, curr) == '4day'
+        and is_compressed_nwd_date(curr, '4day')
         and not (rec and any([rec.am_in, rec.am_out, rec.pm_in, rec.pm_out]))
         and not (rec and _dtr_is_special_day_remark(rec.remarks))
     ):
-        remarks = 'REST DAY'
+        remarks = dtr_wa.DTR_NON_WORKING_DAY_REMARK
     else:
         flexi_sched = _flexible_worktime_duty_schedule_for_date(emp, curr)
         if flexi_sched and _duty_schedule_is_rest(flexi_sched):
             if not remarks or remarks in ('SATURDAY', 'SUNDAY'):
-                remarks = 'REST DAY'
+                remarks = dtr_wa.DTR_NON_WORKING_DAY_REMARK
     return remarks
 
 
@@ -2394,12 +2842,15 @@ def _flexible_worktime_schedule_by_date(
 
 def _dtr_standard_non_countable_day(emp: Employee, curr: date, remarks: str) -> bool:
     """
-    Weekends and 4-day REST DAY Fridays are not counted during quincena regeneration
+    Weekends and 4-day NON-WORKING DAY Fridays are not counted during quincena regeneration
     for employees not on the flexible_worktime list (even when DTR has punches).
     """
     if curr.weekday() >= 5:
         return True
-    if curr.weekday() == 4 and _arrangement_model_code_for_date(emp, curr) == '4day':
+    if (
+        _arrangement_model_code_for_date(emp, curr) == '4day'
+        and is_compressed_nwd_date(curr, '4day')
+    ):
         if _dtr_is_special_day_remark(remarks):
             return False
         return True
@@ -3067,7 +3518,7 @@ def _employee_dtr_worktime_day_rows(
                 if _dtr_is_special_day_remark(remarks) or _dtr_is_paid_leave_remark(remarks):
                     rest_remarks = remarks
                 else:
-                    rest_remarks = 'REST DAY'
+                    rest_remarks = dtr_wa.DTR_NON_WORKING_DAY_REMARK
                 if persist_row_undertime and rec:
                     rec.undertime_hrs = 0
                     rec.undertime_mins = 0
@@ -3203,7 +3654,7 @@ def _dtr_special_dates_from_entries(
 
 
 def _dtr_skip_arrangement_stamp_for_row(rec, d: date, special_dates: set[date]) -> bool:
-    """Do not apply REST DAY or default duty times on holidays / work suspensions."""
+    """Do not apply NON-WORKING DAY or default duty times on holidays / work suspensions."""
     if d in special_dates:
         return True
     if rec and _dtr_is_special_day_remark(rec.remarks):
@@ -3406,9 +3857,9 @@ def _dtr_rows_for_employee(emp: Employee, start_d: date, end_d: date):
 
 
 def _employee_directory_label(last_name, first_name, middle_name, name_extension=None) -> str:
-    last = (last_name or '').strip()
-    first = (first_name or '').strip()
-    middle = (middle_name or '').strip()
+    last = Employee.normalize_name_part(last_name)
+    first = Employee.normalize_name_part(first_name)
+    middle = Employee.normalize_name_part(middle_name)
     ext = Employee.normalize_name_extension(name_extension)
     given_parts = []
     if first:
@@ -3537,6 +3988,60 @@ def _payroll_maker_department_id(user=None):
         return None
     viewer_emp = _current_employee_for_user()
     return getattr(viewer_emp, 'department_id', None) if viewer_emp else None
+
+
+def _require_payroll_access():
+    """Admin/HR any department; Payroll Maker only their linked department."""
+    if _user_is_admin_or_hr():
+        return None
+    role = (getattr(current_user, 'role', None) or '').strip().lower()
+    if role == 'payroll_maker':
+        if _payroll_maker_department_id():
+            return None
+        flash('No department is linked to your account.', 'error')
+        return redirect(url_for(_dashboard_for_user(current_user)))
+    flash('Access denied. This section is for Admin, HR, and Payroll Maker.', 'error')
+    return redirect(url_for(_dashboard_for_user(current_user)))
+
+
+def _require_jo_cos_payroll_access():
+    return _require_payroll_access()
+
+
+def _payroll_department_allowed(dept_id) -> bool:
+    maker_dept = _payroll_maker_department_id()
+    if not maker_dept:
+        return True
+    try:
+        return int(dept_id) == int(maker_dept)
+    except (TypeError, ValueError):
+        return False
+
+
+def _jo_cos_payroll_department_allowed(dept_id) -> bool:
+    return _payroll_department_allowed(dept_id)
+
+
+def _scope_filters_to_payroll_maker(filters: dict) -> int | None:
+    """Lock department_id for payroll_maker. Returns maker department id or None."""
+    maker_dept_id = _payroll_maker_department_id()
+    if maker_dept_id:
+        filters['department_id'] = str(maker_dept_id)
+    return maker_dept_id
+
+
+def _departments_for_payroll_viewer(departments):
+    maker_dept_id = _payroll_maker_department_id()
+    if not maker_dept_id:
+        return departments
+    return [d for d in departments if d.id == maker_dept_id]
+
+
+def _user_is_payroll_staff(user=None) -> bool:
+    if _user_is_admin_or_hr(user):
+        return True
+    role = (getattr(user or current_user, 'role', None) or '').strip().lower()
+    return role == 'payroll_maker'
 
 
 def _user_can_access_punch_flag_employee(emp, user=None) -> bool:
@@ -4385,6 +4890,25 @@ def dtr_upload_save():
         return redirect(url_for('routes.dtr_upload'))
 
 
+@bp.route('/dtr/generate/workweek-preview')
+@login_required
+def dtr_generate_workweek_preview():
+    if not _user_is_admin_or_hr():
+        return jsonify(ok=False, error='Access denied.'), 403
+    today = date.today()
+    try:
+        year = int((request.args.get('year') or str(today.year)).strip())
+        month = int((request.args.get('month') or str(today.month)).strip())
+    except ValueError:
+        return jsonify(ok=False, error='Invalid year or month.'), 400
+    quincena = (request.args.get('quincena') or '1').strip()
+    if quincena not in ('1', '2') or month < 1 or month > 12 or year < 2000 or year > 2100:
+        return jsonify(ok=False, error='Invalid period.'), 400
+    preview = build_quincena_workweek_preview(year, month, quincena)
+    preview['calendar_url'] = url_for('routes.leave_credits_workweek', year=year)
+    return jsonify(ok=True, **preview)
+
+
 @bp.route('/dtr/generate', methods=['POST'])
 @login_required
 def dtr_generate():
@@ -4408,16 +4932,23 @@ def dtr_generate():
         start_d, end_d = _quincena_date_range(year, month, quincena)
         employees = Employee.query.filter_by(status='active').all()
 
-        workweek_segments, seg_err = dtr_wa.parse_segments_from_form(request.form, start_d, end_d)
-        if seg_err:
-            flash(seg_err, 'error')
-            return redirect(url_for('routes.dashboard'))
-
-        if workweek_segments:
-            dtr_wa.save_workweek_segments(
-                workweek_segments,
-                current_user.id if current_user and getattr(current_user, 'id', None) else None,
+        calendar_saved = month_workweek_calendar_saved(year, month)
+        workweek_segments = []
+        if calendar_saved:
+            save_quincena_nwd_weekdays(
+                request.form,
+                user_id=current_user.id if current_user and getattr(current_user, 'id', None) else None,
             )
+        else:
+            workweek_segments, seg_err = dtr_wa.parse_segments_from_form(request.form, start_d, end_d)
+            if seg_err:
+                flash(seg_err, 'error')
+                return redirect(url_for('routes.dashboard'))
+            if workweek_segments:
+                dtr_wa.save_workweek_segments(
+                    workweek_segments,
+                    current_user.id if current_user and getattr(current_user, 'id', None) else None,
+                )
 
         # One entry per employee id (avoids duplicate INSERT same key in one batch).
         employees = list({e.id: e for e in employees}.values())
@@ -4440,7 +4971,16 @@ def dtr_generate():
                         created += 1
                 curr += timedelta(days=1)
 
-        if workweek_segments:
+        if calendar_saved:
+            dtr_wa.apply_calendar_nwd_to_dtr(
+                employees,
+                start_d,
+                end_d,
+                special_dates,
+                find_row=_dtr_find_row_by_employee_day_readonly,
+                skip_stamp=_dtr_skip_arrangement_stamp_for_row,
+            )
+        elif workweek_segments:
             dtr_wa.apply_workweek_segments_to_dtr(
                 workweek_segments,
                 employees,
@@ -4485,9 +5025,12 @@ def dtr_generate():
             f'{start_d.strftime("%Y-%m-%d")} to {end_d.strftime("%Y-%m-%d")}). '
             f'New rows created: {created}.'
         )
-        seg_msg = dtr_wa.format_segments_flash_message(workweek_segments)
-        if seg_msg:
-            msg += f' {seg_msg}'
+        if calendar_saved:
+            msg += ' Workweek taken from the year calendar.'
+        else:
+            seg_msg = dtr_wa.format_segments_flash_message(workweek_segments)
+            if seg_msg:
+                msg += f' {seg_msg}'
         if holiday_entries:
             msg += f' Holidays marked: {len(holiday_entries)} entry/entries, {holiday_marked} row(s).'
         if suspension_entries:
@@ -4522,17 +5065,20 @@ def _build_dtr_view_rows(emp: Employee, start_d: date, end_d: date) -> tuple[lis
         rec = by_date.get(curr)
         dow = curr.weekday()
         is_weekend = dow >= 5
-        remarks = (rec.remarks if rec and rec.remarks else ('SATURDAY' if dow == 5 else ('SUNDAY' if dow == 6 else '')))
+        remarks = (
+            _dtr_normalize_remarks(rec.remarks) if rec and rec.remarks
+            else ('SATURDAY' if dow == 5 else ('SUNDAY' if dow == 6 else ''))
+        )
         if curr in approved_leave_dates and not remarks:
             remarks = 'APPROVED LEAVE'
         elif (
             not remarks
-            and curr.weekday() == 4
             and _arrangement_model_code_for_date(emp, curr) == '4day'
+            and is_compressed_nwd_date(curr, '4day')
             and not (rec and any([rec.am_in, rec.am_out, rec.pm_in, rec.pm_out]))
             and not (rec and _dtr_is_special_day_remark(rec.remarks))
         ):
-            remarks = 'REST DAY'
+            remarks = dtr_wa.DTR_NON_WORKING_DAY_REMARK
         late = False
         undertime = False
         absent = False
@@ -4551,7 +5097,7 @@ def _build_dtr_view_rows(emp: Employee, start_d: date, end_d: date) -> tuple[lis
         if flexi_list_sched and _duty_schedule_is_rest(flexi_list_sched):
             flexi_rest_day = True
             if not remarks or remarks in ('SATURDAY', 'SUNDAY'):
-                remarks = 'REST DAY'
+                remarks = dtr_wa.DTR_NON_WORKING_DAY_REMARK
             show_flexi_slots = True
         elif not is_weekend or flexi_list_sched:
             # Weekdays always; weekends only when a flexi duty schedule covers the date.
@@ -4626,9 +5172,9 @@ def _build_dtr_view_rows(emp: Employee, start_d: date, end_d: date) -> tuple[lis
 
 
 def _csc_dtr_employee_name(emp: Employee) -> str:
-    first = (emp.first_name or '').strip()
-    mid = (emp.middle_name or '').strip()
-    last = (emp.last_name or '').strip()
+    first = Employee.normalize_name_part(emp.first_name)
+    mid = Employee.normalize_name_part(emp.middle_name)
+    last = Employee.normalize_name_part(emp.last_name)
     if mid:
         return f'{first} {mid[0].upper()}. {last}'.upper()
     return f'{first} {last}'.upper().strip()
@@ -4756,10 +5302,14 @@ def dtr_punch_time_filter(t) -> str:
 
 def _csc_dtr_span_status(remarks: str) -> str | None:
     """Weekends / holidays / rest show as centered text across AM/PM columns."""
-    r = (remarks or '').strip().upper()
+    r = _dtr_normalize_remarks(remarks).strip().upper()
     if not r:
         return None
-    if r in ('SATURDAY', 'SUNDAY', 'HOLIDAY', 'REST DAY', 'APPROVED LEAVE', 'WORK SUSPENSION'):
+    if r in (
+        'SATURDAY', 'SUNDAY', 'HOLIDAY',
+        dtr_wa.DTR_NON_WORKING_DAY_REMARK,
+        'APPROVED LEAVE', 'WORK SUSPENSION',
+    ):
         return r
     if r.startswith('HOLIDAY') or r.startswith('WORK SUSPENSION'):
         return r
@@ -4861,7 +5411,7 @@ def _dtr_csc_form48_pdf_bytes(
     # Leave room for certification + signature; size rows to fit remaining height
     footer_reserve = 108 if compact else 145
     if plantilla_print:
-        footer_reserve += 42 if compact else 52
+        footer_reserve += 58 if compact else 72
     table_top = y
     header_bottom = table_top - header_h
     available = max(header_bottom - footer_reserve, n_rows * 8.5)
@@ -5009,12 +5559,13 @@ def _dtr_csc_form48_pdf_bytes(
         y -= 16 if compact else 22
         c.setFont('Helvetica', cert_size)
         c.drawCentredString(width / 2, y, 'Verified as to prescribed office hours')
-        y -= 28 if compact else 36
+        y -= 36 if compact else 48
+        c.line(width / 2 - sig_w / 2, y, width / 2 + sig_w / 2, y)
+        y -= 11 if compact else 13
         head_name = _csc_dtr_supervisor_name(emp)
         if head_name:
-            c.setFont('Helvetica-Bold', 9 if compact else 10)
-            c.drawCentredString(width / 2, y + 3, head_name)
-        c.line(width / 2 - sig_w / 2, y, width / 2 + sig_w / 2, y)
+            c.setFont('Helvetica-Bold', 10 if compact else 12)
+            c.drawCentredString(width / 2, y, head_name)
         y -= 11 if compact else 13
         c.setFont('Helvetica-Bold', 8 if compact else 9)
         c.drawCentredString(width / 2, y, 'Supervisor')
@@ -5386,12 +5937,17 @@ def dtr_records_save():
 @bp.route('/attendance', methods=['GET'])
 @login_required
 def event_attendance_list():
-    """HR/Admin: view Flag Raising / Flag Retreat / Meeting attendance."""
+    """HR/Admin: view event attendance (preset or custom category)."""
     if not _user_is_admin_or_hr():
         flash('Access denied. This section is for Admin and HR.', 'error')
         return redirect(url_for(_dashboard_for_user(current_user)))
 
-    from app.event_attendance_service import category_label, fill_missing_locations, normalize_category
+    from app.event_attendance_service import (
+        attendance_category_choices,
+        category_label,
+        fill_missing_locations,
+        normalize_category,
+    )
 
     today = date.today()
     category = normalize_category(request.args.get('category')) or ''
@@ -5465,8 +6021,7 @@ def event_attendance_list():
             'date_from': date_from.isoformat() if date_from else '',
             'date_to': date_to.isoformat() if date_to else '',
         },
-        categories=EVENT_ATTENDANCE_CATEGORIES,
-        category_labels=EVENT_ATTENDANCE_CATEGORY_LABELS,
+        category_choices=attendance_category_choices(),
         category_label=category_label,
         default_event_date=today.isoformat(),
         employee=employee,
@@ -5482,7 +6037,11 @@ def event_attendance_upload():
 
     from app.event_attendance_service import category_label, normalize_category, upload_event_attendance
 
-    category = (request.form.get('category') or '').strip()
+    category = (
+        (request.form.get('category_custom') or '').strip()
+        or (request.form.get('category_select') or '').strip()
+        or (request.form.get('category') or '').strip()
+    )
     date_raw = (request.form.get('event_date') or '').strip()
     file = request.files.get('attendance_file')
     try:
@@ -8238,12 +8797,29 @@ def _payroll_quincena_parse_filters(args) -> dict:
         year = today.year
     dept_raw = (args.get('department_id') or '').strip()
     loaded = (args.get('load') or '').strip().lower() in ('1', 'true', 'yes')
+    fund_raw = (args.get('fund_release') or 'all').strip().upper().replace('_', '-')
+    if fund_raw in ('NON ATM',):
+        fund_raw = PAYROLL_FUND_RELEASE_NON_ATM
+    if fund_raw not in ('ALL', PAYROLL_FUND_RELEASE_ATM, PAYROLL_FUND_RELEASE_NON_ATM):
+        fund_raw = 'ALL'
     return {
         'year': year,
         'month': month,
         'quincena': quincena,
         'department_id': dept_raw,
         'loaded': loaded,
+        'fund_release': fund_raw,
+    }
+
+
+def _jo_cos_payroll_list_kwargs(filters: dict) -> dict:
+    return {
+        'year': filters['year'],
+        'month': filters['month'],
+        'quincena': filters['quincena'],
+        'department_id': filters.get('department_id') or '',
+        'fund_release': filters.get('fund_release') or 'ALL',
+        'load': 1,
     }
 
 
@@ -8339,12 +8915,28 @@ def _jo_cos_payroll_rows(filters: dict) -> tuple[list[dict], dict]:
             'pagibig_display': _money_str(pagibig) if pagibig else '',
             'net_amount': net,
             'net_amount_display': _money_str(net),
-            'search_text': f'{name} {_jo_cos_employee_designation(emp)}'.lower(),
+            'fund_release': employee_payroll_fund_release(emp),
+            'search_text': f'{name} {_jo_cos_employee_designation(emp)} {employee_payroll_fund_release(emp)}'.lower(),
         })
         totals['gross_salary'] += gross
         totals['late'] += late_deduct
         totals['pagibig'] += pagibig
         totals['net'] += net
+
+    fund_filter = (filters.get('fund_release') or 'ALL').strip().upper()
+    if fund_filter in (PAYROLL_FUND_RELEASE_ATM, PAYROLL_FUND_RELEASE_NON_ATM):
+        rows = [r for r in rows if r.get('fund_release') == fund_filter]
+        totals = {
+            'gross_salary': Decimal('0'),
+            'late': Decimal('0'),
+            'pagibig': Decimal('0'),
+            'net': Decimal('0'),
+        }
+        for r in rows:
+            totals['gross_salary'] += r['gross_salary']
+            totals['late'] += r['late_deduction']
+            totals['pagibig'] += r['pagibig']
+            totals['net'] += r['net_amount']
 
     for key in totals:
         totals[key] = totals[key].quantize(Decimal('0.01'))
@@ -8352,11 +8944,24 @@ def _jo_cos_payroll_rows(filters: dict) -> tuple[list[dict], dict]:
     return rows, totals_display
 
 
+def _jo_cos_payroll_payment_banner(rows: list[dict], filters: dict | None = None) -> str:
+    chosen = ((filters or {}).get('fund_release') or 'ALL').strip().upper()
+    if chosen in (PAYROLL_FUND_RELEASE_ATM, PAYROLL_FUND_RELEASE_NON_ATM):
+        return chosen
+    kinds = {r.get('fund_release') or PAYROLL_FUND_RELEASE_ATM for r in (rows or [])}
+    if len(kinds) == 1:
+        return next(iter(kinds))
+    if not kinds:
+        return PAYROLL_FUND_RELEASE_ATM
+    return 'ATM / NON-ATM'
+
+
 def _jo_cos_payroll_pdf_bytes(
     rows: list[dict],
     totals: dict,
     period_label: str,
     department_name: str,
+    payment_banner: str | None = None,
 ) -> io.BytesIO:
     from reportlab.lib.pagesizes import legal, landscape
     from reportlab.pdfgen import canvas
@@ -8375,7 +8980,7 @@ def _jo_cos_payroll_pdf_bytes(
         y -= 16
         c.setFont('Helvetica', 9)
         c.drawString(36, y, f'For labor on {department_name.upper()}, at JAGNA, BOHOL')
-        c.drawRightString(width - 36, y, 'ATM')
+        c.drawRightString(width - 36, y, payment_banner or _jo_cos_payroll_payment_banner(rows))
         y -= 14
         c.drawString(36, y, f'Period: {period_label}')
         return y - 8
@@ -8412,7 +9017,8 @@ def _jo_cos_payroll_pdf_bytes(
             y = draw_table_header(y)
             c.setFont('Helvetica', 6.5)
         xs = [36, 150, 210, 252, 292, 332, 372, 402, 432, 462, 502, 542, 582]
-        c.drawString(xs[0], y, str(r.get('employee_name', ''))[:22])
+        pay_tag = r.get('fund_release') or PAYROLL_FUND_RELEASE_ATM
+        c.drawString(xs[0], y, f"{str(r.get('employee_name', ''))[:18]} [{pay_tag}]")
         c.drawString(xs[1], y, str(r.get('designation', ''))[:16])
         c.drawRightString(xs[2] + 22, y, str(r.get('days_worked_display', '')))
         c.drawRightString(xs[3] + 22, y, str(r.get('overtime_hours_display', '')))
@@ -8485,6 +9091,7 @@ def _jo_cos_payslip_view_dict(slip: JoCosPayslip) -> dict:
         'late_deduction_display': _money_str(late_d) if late_d else '',
         'hdmf_display': _money_str(hdmf) if hdmf else '',
         'net_amount_display': _money_str(net),
+        'fund_release': normalize_payroll_fund_release(getattr(slip, 'fund_release', None)),
         'generated_at': slip.generated_at,
     }
 
@@ -8513,6 +9120,7 @@ def _jo_cos_payslip_from_payroll_row(
         late_deduction=row['late_deduction'],
         hdmf_deduction=row['pagibig'],
         net_amount=row['net_amount'],
+        fund_release=normalize_payroll_fund_release(row.get('fund_release')),
         generated_by_user_id=generated_by_user_id,
     )
 
@@ -8550,6 +9158,7 @@ def _jo_cos_payslips_generate(filters: dict, department_name: str, generated_by_
             slip.late_deduction = row['late_deduction']
             slip.hdmf_deduction = row['pagibig']
             slip.net_amount = row['net_amount']
+            slip.fund_release = normalize_payroll_fund_release(row.get('fund_release'))
             slip.generated_at = datetime.utcnow()
             slip.generated_by_user_id = generated_by_user_id
             notify_rows.append((slip.employee_id, slip.id))
@@ -8583,8 +9192,10 @@ def _jo_cos_payslips_generate(filters: dict, department_name: str, generated_by_
 
 
 def _can_view_jo_cos_payslip(slip: JoCosPayslip) -> bool:
+    if _user_is_admin_or_hr():
+        return True
     role = (getattr(current_user, 'role', None) or '').strip().lower()
-    if role in ('admin', 'hr'):
+    if role == 'payroll_maker' and _payroll_department_allowed(slip.department_id):
         return True
     emp = _current_employee_for_user()
     return emp is not None and emp.id == slip.employee_id
@@ -8597,8 +9208,10 @@ def _plantilla_payslip_period_label(year: int, month: int, quincena: str) -> str
 
 
 def _can_view_plantilla_payslip(slip: PlantillaPayslip) -> bool:
+    if _user_is_admin_or_hr():
+        return True
     role = (getattr(current_user, 'role', None) or '').strip().lower()
-    if role in ('admin', 'hr'):
+    if role == 'payroll_maker' and _payroll_department_allowed(slip.department_id):
         return True
     emp = _current_employee_for_user()
     return emp is not None and emp.id == slip.employee_id
@@ -8664,7 +9277,7 @@ def _jo_cos_draw_payslip_on_canvas(
     c.drawString(inner_l, y, f"Dept.: {_clip(data.get('department_name', ''), 24)}")
     c.drawRightString(inner_r, y, _clip(data.get('period_label', ''), 22))
     y -= 8
-    c.drawString(inner_l, y, 'Payment: ATM')
+    c.drawString(inner_l, y, f"Payment: {data.get('fund_release') or PAYROLL_FUND_RELEASE_ATM}")
     y -= 9
     c.line(inner_l, y, inner_r, y)
     y -= 8
@@ -12946,11 +13559,14 @@ def payroll_deductions_hdmf_loans_deductions_submit(scope):
 @bp.route('/payroll/worktime-summary')
 @login_required
 def payroll_worktime_summary():
-    denied = _require_admin_or_hr()
+    denied = _require_payroll_access()
     if denied:
         return denied
     filters = _worktime_summary_parse_filters(request.args)
-    departments = Department.query.order_by(Department.name.asc()).all()
+    _scope_filters_to_payroll_maker(filters)
+    departments = _departments_for_payroll_viewer(
+        Department.query.order_by(Department.name.asc()).all()
+    )
     dept_by_id = {d.id: d for d in departments}
     employees = _worktime_summary_eligible_employees(filters)
     result = _worktime_summary_result(filters)
@@ -12967,16 +13583,18 @@ def payroll_worktime_summary():
         filter_label=filter_label,
         total_net=_mins_to_hhmm(result['total_net_mins']),
         row_count=len(result['rows']),
+        lock_department=bool(_payroll_maker_department_id()),
     )
 
 
 @bp.route('/payroll/worktime-summary/export')
 @login_required
 def payroll_worktime_summary_export():
-    denied = _require_admin_or_hr()
+    denied = _require_payroll_access()
     if denied:
         return denied
     filters = _worktime_summary_parse_filters(request.args)
+    _scope_filters_to_payroll_maker(filters)
     fmt = (request.args.get('format') or 'csv').strip().lower()
     dept_by_id = {d.id: d for d in Department.query.all()}
     period_label = _worktime_summary_filter_label(filters, dept_by_id)
@@ -13017,11 +13635,16 @@ def payroll_worktime_summary_export():
 @bp.route('/payroll/jo-cos')
 @login_required
 def payroll_jo_cos():
-    denied = _require_admin_or_hr()
+    denied = _require_jo_cos_payroll_access()
     if denied:
         return denied
     filters = _jo_cos_payroll_parse_filters(request.args)
+    maker_dept_id = _payroll_maker_department_id()
+    if maker_dept_id:
+        filters['department_id'] = str(maker_dept_id)
     departments = Department.query.order_by(Department.name.asc()).all()
+    if maker_dept_id:
+        departments = [d for d in departments if d.id == maker_dept_id]
     dept_by_id = {d.id: d for d in departments}
     employee = current_user.employee if current_user.employee else None
 
@@ -13072,13 +13695,16 @@ def payroll_jo_cos():
         dept_selected=dept_selected,
         row_count=len(rows),
         payslip_count=payslip_count,
+        fund_release_options=PAYROLL_FUND_RELEASE_OPTIONS,
+        can_edit_fund_release=True,
+        payment_banner=_jo_cos_payroll_payment_banner(rows, filters) if dept_selected else '',
     )
 
 
 @bp.route('/payroll/jo-cos/export')
 @login_required
 def payroll_jo_cos_export():
-    denied = _require_admin_or_hr()
+    denied = _require_jo_cos_payroll_access()
     if denied:
         return denied
     filters = _jo_cos_payroll_parse_filters(request.args)
@@ -13091,6 +13717,9 @@ def payroll_jo_cos_export():
         dept_id = int(filters['department_id'])
     except ValueError:
         flash('Select a valid department.', 'error')
+        return redirect(url_for('routes.payroll_jo_cos'))
+    if not _jo_cos_payroll_department_allowed(dept_id):
+        flash('Access denied. You may only export JO/COS payroll for your department.', 'error')
         return redirect(url_for('routes.payroll_jo_cos'))
     dept = Department.query.get(dept_id)
     if not dept:
@@ -13106,7 +13735,10 @@ def payroll_jo_cos_export():
     )
 
     if fmt == 'pdf':
-        buf = _jo_cos_payroll_pdf_bytes(rows, totals, period_label, department_name)
+        buf = _jo_cos_payroll_pdf_bytes(
+            rows, totals, period_label, department_name,
+            payment_banner=_jo_cos_payroll_payment_banner(rows, filters),
+        )
         return send_file(
             buf,
             mimetype='application/pdf',
@@ -13114,20 +13746,38 @@ def payroll_jo_cos_export():
             download_name=f'{base}.pdf',
         )
     flash('Invalid export format. Use pdf.', 'error')
-    return redirect(url_for(
-        'routes.payroll_jo_cos',
-        year=filters['year'],
-        month=filters['month'],
-        quincena=filters['quincena'],
-        department_id=filters['department_id'],
-        load=1,
-    ))
+    return redirect(url_for('routes.payroll_jo_cos', **_jo_cos_payroll_list_kwargs(filters)))
+
+
+@bp.route('/payroll/jo-cos/fund-release', methods=['POST'])
+@login_required
+def payroll_jo_cos_fund_release():
+    """HR/Admin/Payroll Maker: set an employee's ATM vs NON-ATM funds release."""
+    denied = _require_jo_cos_payroll_access()
+    if denied:
+        return denied
+    filters = _jo_cos_payroll_parse_filters(request.form)
+    try:
+        emp_id = int((request.form.get('employee_id') or '').strip())
+    except (TypeError, ValueError):
+        flash('Select a valid employee.', 'error')
+        return redirect(url_for('routes.payroll_jo_cos', **_jo_cos_payroll_list_kwargs(filters)))
+    emp = Employee.query.get_or_404(emp_id)
+    if not _jo_cos_payroll_department_allowed(emp.department_id):
+        flash('Access denied. You may only update employees in your department.', 'error')
+        return redirect(url_for('routes.payroll_jo_cos'))
+    emp.payroll_fund_release = normalize_payroll_fund_release(request.form.get('fund_release_value'))
+    db.session.commit()
+    flash(f'{emp.directory_name_mi}: funds release set to {emp.payroll_fund_release}.', 'success')
+    if not filters.get('department_id') and emp.department_id:
+        filters['department_id'] = str(emp.department_id)
+    return redirect(url_for('routes.payroll_jo_cos', **_jo_cos_payroll_list_kwargs(filters)))
 
 
 @bp.route('/payroll/jo-cos/payslips/generate', methods=['POST'])
 @login_required
 def payroll_jo_cos_payslips_generate():
-    denied = _require_admin_or_hr()
+    denied = _require_jo_cos_payroll_access()
     if denied:
         return denied
     filters = _jo_cos_payroll_parse_filters(request.form)
@@ -13144,6 +13794,9 @@ def payroll_jo_cos_payslips_generate():
     if not dept:
         flash('Department not found.', 'error')
         return redirect(url_for('routes.payroll_jo_cos'))
+    if not _jo_cos_payroll_department_allowed(dept_id):
+        flash('Access denied. You may only generate JO/COS payslips for your department.', 'error')
+        return redirect(url_for('routes.payroll_jo_cos'))
     department_name = dept.name or f'Department #{dept_id}'
     try:
         count = _jo_cos_payslips_generate(
@@ -13152,26 +13805,18 @@ def payroll_jo_cos_payslips_generate():
     except Exception as e:
         db.session.rollback()
         flash(f'Error generating payslips: {e}', 'error')
-        return redirect(url_for(
-            'routes.payroll_jo_cos',
-            year=filters['year'], month=filters['month'],
-            quincena=filters['quincena'], department_id=filters['department_id'], load=1,
-        ))
+        return redirect(url_for('routes.payroll_jo_cos', **_jo_cos_payroll_list_kwargs(filters)))
     if count:
         flash(f'Generated {count} payslip(s) for {_jo_cos_payslip_period_label(filters["year"], filters["month"], filters["quincena"])}.', 'success')
     else:
         flash('No payroll rows to generate payslips from. Load payroll first.', 'warning')
-    return redirect(url_for(
-        'routes.payroll_jo_cos',
-        year=filters['year'], month=filters['month'],
-        quincena=filters['quincena'], department_id=filters['department_id'], load=1,
-    ))
+    return redirect(url_for('routes.payroll_jo_cos', **_jo_cos_payroll_list_kwargs(filters)))
 
 
 @bp.route('/payroll/jo-cos/payslips/export')
 @login_required
 def payroll_jo_cos_payslips_export():
-    denied = _require_admin_or_hr()
+    denied = _require_jo_cos_payroll_access()
     if denied:
         return denied
     filters = _jo_cos_payroll_parse_filters(request.args)
@@ -13182,6 +13827,9 @@ def payroll_jo_cos_payslips_export():
         dept_id = int(filters['department_id'])
     except ValueError:
         flash('Select a valid department.', 'error')
+        return redirect(url_for('routes.payroll_jo_cos'))
+    if not _jo_cos_payroll_department_allowed(dept_id):
+        flash('Access denied. You may only export JO/COS payslips for your department.', 'error')
         return redirect(url_for('routes.payroll_jo_cos'))
     slips = (
         JoCosPayslip.query.filter_by(
@@ -13194,13 +13842,15 @@ def payroll_jo_cos_payslips_export():
         .order_by(Employee.last_name.asc(), Employee.first_name.asc())
         .all()
     )
+    fund_filter = (filters.get('fund_release') or 'ALL').strip().upper()
+    if fund_filter in (PAYROLL_FUND_RELEASE_ATM, PAYROLL_FUND_RELEASE_NON_ATM):
+        slips = [
+            s for s in slips
+            if normalize_payroll_fund_release(getattr(s, 'fund_release', None)) == fund_filter
+        ]
     if not slips:
         flash('No payslips found for this period. Click Generate Payslip first.', 'warning')
-        return redirect(url_for(
-            'routes.payroll_jo_cos',
-            year=filters['year'], month=filters['month'],
-            quincena=filters['quincena'], department_id=filters['department_id'], load=1,
-        ))
+        return redirect(url_for('routes.payroll_jo_cos', **_jo_cos_payroll_list_kwargs(filters)))
     buf = _jo_cos_payslip_pdf_bytes(slips)
     base = (
         f'jo_cos_payslips_{filters["year"]}_{filters["month"]:02d}_'
@@ -13269,7 +13919,7 @@ def payroll_jo_cos_payslip_view(payslip_id: int):
         employee=employee,
         payslip=_jo_cos_payslip_view_dict(slip),
         slip_id=slip.id,
-        is_admin_view=(getattr(current_user, 'role', None) or '').strip().lower() in ('admin', 'hr'),
+        is_admin_view=_user_is_payroll_staff(),
     )
 
 
@@ -13291,11 +13941,14 @@ def payroll_jo_cos_payslip_pdf(payslip_id: int):
 @bp.route('/payroll/plantilla')
 @login_required
 def payroll_plantilla():
-    denied = _require_admin_or_hr()
+    denied = _require_payroll_access()
     if denied:
         return denied
     filters = _payroll_quincena_parse_filters(request.args)
-    departments = Department.query.order_by(Department.name.asc()).all()
+    _scope_filters_to_payroll_maker(filters)
+    departments = _departments_for_payroll_viewer(
+        Department.query.order_by(Department.name.asc()).all()
+    )
     dept_by_id = {d.id: d for d in departments}
     employee = current_user.employee if current_user.employee else None
 
@@ -13351,11 +14004,12 @@ def payroll_plantilla():
 @bp.route('/payroll/plantilla/export')
 @login_required
 def payroll_plantilla_export():
-    denied = _require_admin_or_hr()
+    denied = _require_payroll_access()
     if denied:
         return denied
     filters = _payroll_quincena_parse_filters(request.args)
     filters['loaded'] = True
+    _scope_filters_to_payroll_maker(filters)
     fmt = (request.args.get('format') or 'pdf').strip().lower()
     if not filters['department_id']:
         flash('Select a department before exporting payroll.', 'error')
@@ -13364,6 +14018,9 @@ def payroll_plantilla_export():
         dept_id = int(filters['department_id'])
     except ValueError:
         flash('Select a valid department.', 'error')
+        return redirect(url_for('routes.payroll_plantilla'))
+    if not _payroll_department_allowed(dept_id):
+        flash('Access denied. You may only export payroll for your department.', 'error')
         return redirect(url_for('routes.payroll_plantilla'))
     dept = Department.query.get(dept_id)
     if not dept:
@@ -13456,11 +14113,12 @@ def _plantilla_payslip_upsert_from_payroll_row(
 @bp.route('/payroll/plantilla/payslips/generate', methods=['POST'])
 @login_required
 def payroll_plantilla_payslips_generate():
-    denied = _require_admin_or_hr()
+    denied = _require_payroll_access()
     if denied:
         return denied
     filters = _payroll_quincena_parse_filters(request.form)
     filters['loaded'] = True
+    _scope_filters_to_payroll_maker(filters)
     if not filters['department_id']:
         flash('Select a department before generating payslips.', 'error')
         return redirect(url_for('routes.payroll_plantilla'))
@@ -13468,6 +14126,9 @@ def payroll_plantilla_payslips_generate():
         dept_id = int(filters['department_id'])
     except ValueError:
         flash('Select a valid department.', 'error')
+        return redirect(url_for('routes.payroll_plantilla'))
+    if not _payroll_department_allowed(dept_id):
+        flash('Access denied. You may only generate payslips for your department.', 'error')
         return redirect(url_for('routes.payroll_plantilla'))
     dept = Department.query.get(dept_id)
     if not dept:
@@ -13687,7 +14348,7 @@ def payroll_plantilla_payslip_view(payslip_id: int):
         'payroll/plantilla_payslip_view.html',
         employee=current_user.employee if current_user.employee else None,
         payslip=payload,
-        is_admin_view=(getattr(current_user, 'role', None) or '').strip().lower() in ('admin', 'hr'),
+        is_admin_view=_user_is_payroll_staff(),
     )
 
 
@@ -14420,8 +15081,6 @@ def _leave_credits_pdf_bytes(
     c.drawCentredString(center_x, sep_y - 16, 'EMPLOYEE LEAVE CREDITS')
 
     name = emp.directory_name
-    if emp.middle_name:
-        name = f'{name} {emp.middle_name}'
     c.setFont('Helvetica', 8)
     one_liner = (
         f'Emp ID: {emp.employee_id or "—"}'
@@ -14748,134 +15407,33 @@ def leave_apply():
     balances = _get_leave_balances_for_employee(emp)
     credit_groups = _leave_apply_credit_groups(emp, balances)
     credit_month_label = date.today().strftime('%B %Y')
-    hidden_codes = _apply_leave_hidden_codes(emp)
-
-    def _available_leave_type_options() -> list[tuple[str, str]]:
-        opts = []
-        for code, label in LEAVE_TYPE_OPTIONS:
-            c = (code or '').strip().upper()
-            if c in hidden_codes:
-                continue
-            key = _leave_code_to_balance_key(c)
-            amt = balances.get(key, Decimal('0'))
-            try:
-                amt = Decimal(str(amt))
-            except Exception:
-                amt = Decimal('0')
-            if amt > Decimal('0'):
-                opts.append((code, label))
-        return opts
-
-    available_leave_type_options = _available_leave_type_options()
+    available_leave_type_options = _leave_type_options_for_employee(emp)
 
     if request.method == 'POST':
-        leave_code = (request.form.get('leave_type') or '').strip().upper()
-        reason = (request.form.get('reason') or '').strip()
-        selected_dates_raw = (request.form.get('selected_dates') or '').strip()
-        commutation = (request.form.get('commutation') or '').strip()
-        extra_details = (request.form.get('extra_details') or '').strip()
-
-        if not leave_code:
-            flash('Please select a type of leave.', 'error')
+        role = (getattr(current_user, 'role', None) or '').strip().lower()
+        payload, err = _parse_online_leave_form(emp, role)
+        if err:
+            flash(err, 'error')
             return redirect(url_for('routes.leave_apply'))
-
-        selected_dates = []
-        if selected_dates_raw:
-            for part in selected_dates_raw.split(','):
-                part = part.strip()
-                if not part:
-                    continue
-                try:
-                    selected_dates.append(datetime.strptime(part, '%Y-%m-%d').date())
-                except ValueError:
-                    pass
-
-        if not selected_dates:
-            flash('Please select at least one date to apply for.', 'error')
-            return redirect(url_for('routes.leave_apply'))
-
-        selected_dates = sorted(set(selected_dates))
-        start_date = selected_dates[0]
-        end_date = selected_dates[-1]
-        total_days = Decimal(str(len(selected_dates)))
-
-        # Wellness Leave: max 3 consecutive days per application
-        if leave_code == 'WL':
-            # check max consecutive streak
-            streak = 1
-            max_streak = 1
-            for i in range(1, len(selected_dates)):
-                if selected_dates[i] == selected_dates[i - 1] + timedelta(days=1):
-                    streak += 1
-                else:
-                    max_streak = max(max_streak, streak)
-                    streak = 1
-            max_streak = max(max_streak, streak)
-            if max_streak > 3:
-                flash('Wellness Leave allows a maximum of 3 consecutive days per application.', 'error')
-                return redirect(url_for('routes.leave_apply'))
-
-        # Store extra details appended to reason for now (keeps schema unchanged)
-        full_reason = reason
-
-        # Special routing: If applicant is MO department OR user role is manager/admin,
-        # route approvals to MO dept head + HRMDO/MADO dept head (in addition to normal manager queue).
-        _dept_name = (emp.department.name if emp and emp.department and emp.department.name else '').strip().lower()
-        _is_mo_dept = (_dept_name in ('mo', "mayor's office", 'mayors office', 'municipal mayor') or 'mayor' in _dept_name)
-        _role = (getattr(current_user, 'role', None) or '').strip().lower()
-        _special_route = _is_mo_dept or (_role in ('manager', 'admin'))
-        if _special_route:
-            full_reason = (full_reason + "\n__META__SPECIAL_APPROVAL=1").strip()
-
-        if leave_code == 'SL':
-            sl_case = (request.form.get('sl_case') or '').strip().upper()
-            if sl_case not in ('IN_HOSPITAL', 'OUT_PATIENT'):
-                flash('For Sick Leave, please select In-Hospital or Out-Patient.', 'error')
-                return redirect(url_for('routes.leave_apply'))
-            sl_illness = (request.form.get('sl_illness') or '').strip()
-            case_line = (
-                'In case of sick leave: In-Hospital'
-                if sl_case == 'IN_HOSPITAL'
-                else 'In case of sick leave: Out-Patient'
-            )
-            full_reason = (full_reason + '\n\n' + case_line).strip()
-            full_reason = (full_reason + f"\n__META__SL_CASE={sl_case}").strip()
-            if sl_illness:
-                full_reason = (full_reason + f"\n__META__SL_ILLNESS={sl_illness}").strip()
-
-        if leave_code in ('VL', 'SPL'):
-            loc = (request.form.get('vl_location') or '').strip().upper()
-            abroad_place = (request.form.get('vl_abroad_place') or '').strip()
-            if loc == 'WITHIN_PH':
-                full_reason = (full_reason + "\n__META__VL_LOCATION=WITHIN_PH").strip()
-            elif loc == 'ABROAD':
-                if not abroad_place:
-                    flash('For VL/SPL Abroad, please specify the place.', 'error')
-                    return redirect(url_for('routes.leave_apply'))
-                full_reason = (full_reason + f"\n__META__VL_LOCATION=ABROAD:{abroad_place}").strip()
-
-        if extra_details:
-            full_reason = (full_reason + "\n\n" + extra_details).strip()
-        if commutation:
-            full_reason = (full_reason + f"\n\nCommutation: {commutation}").strip()
-
         try:
             lr = LeaveRequest(
                 employee_id=emp.id,
-                leave_type=leave_code,
-                start_date=start_date,
-                end_date=end_date,
-                total_days=total_days,
-                reason=full_reason,
+                leave_type=payload['leave_code'],
+                start_date=payload['start_date'],
+                end_date=payload['end_date'],
+                total_days=payload['total_days'],
+                reason=payload['full_reason'],
                 status='pending',
                 created_at=datetime.utcnow(),
             )
             db.session.add(lr)
             db.session.commit()
-            if _special_route:
+            if payload['is_dept_head']:
+                flash('Leave application submitted. Waiting for HR / Admin approval or disapproval.', 'success')
+            elif payload['special_route']:
                 flash('Leave application submitted. Notified MO and HRMDO/MADO department heads for approval/disapproval.', 'success')
             else:
-                flash('Leave application submitted. Waiting for Manager approval.', 'success')
+                flash('Leave application submitted. Waiting for Department Head / HR approval.', 'success')
             return redirect(url_for('routes.leave_list'))
         except Exception as e:
             db.session.rollback()
@@ -14903,7 +15461,17 @@ def leave_list():
             flash('No managed department is linked to your account.', 'error')
             leaves = []
             employee = current_user.employee if current_user.employee else None
-            return render_template('leave_online/list.html', leaves=leaves, employee=employee)
+            return render_template(
+                'leave_online/list.html',
+                leaves=leaves,
+                employee=employee,
+                leave_actionable_ids=set(),
+                leave_printable_ids=set(),
+                leave_cancellable_ids=set(),
+                leave_editable_ids=set(),
+                show_employee_column=True,
+                department_head_employee_ids=_department_head_employee_ids(),
+            )
         q = (q.join(Employee, Employee.id == LeaveRequest.employee_id)
                .filter(Employee.department_id.in_(dept_ids)))
     elif role not in ('admin', 'hr', 'manager'):
@@ -14912,14 +15480,34 @@ def leave_list():
             return redirect(url_for('routes.dashboard'))
         q = q.filter(LeaveRequest.employee_id == emp.id)
     leaves = q.order_by(LeaveRequest.created_at.desc()).all()
+    if role == 'manager' and _current_user_is_special_leave_approver():
+        try:
+            by_id = {l.id: l for l in (leaves or [])}
+            for l in _special_routed_leave_requests():
+                by_id[l.id] = l
+            leaves = list(by_id.values())
+            leaves.sort(key=lambda x: x.created_at or datetime.min, reverse=True)
+        except Exception:
+            pass
     employee = current_user.employee if current_user.employee else None
-    return render_template('leave_online/list.html', leaves=leaves, employee=employee)
+    leave_actionable_ids, leave_printable_ids, leave_cancellable_ids, leave_editable_ids = _leave_list_action_ids(leaves)
+    return render_template(
+        'leave_online/list.html',
+        leaves=leaves,
+        employee=employee,
+        leave_actionable_ids=leave_actionable_ids,
+        leave_printable_ids=leave_printable_ids,
+        leave_cancellable_ids=leave_cancellable_ids,
+        leave_editable_ids=leave_editable_ids,
+        show_employee_column=role in ('admin', 'hr', 'manager'),
+        department_head_employee_ids=_department_head_employee_ids(),
+    )
 
 
 @bp.route('/leave/<int:id>')
 @login_required
 def leave_detail(id):
-    """View a leave application detail; print enabled if approved."""
+    """View a leave application detail; print enabled after approval or disapproval."""
     role = (getattr(current_user, 'role', None) or '').strip().lower()
     emp = current_user.employee
     lr = LeaveRequest.query.get_or_404(id)
@@ -15014,240 +15602,84 @@ def leave_detail(id):
         mado_signatory=mado_signatory,
         applicant_is_manager=applicant_is_manager,
         applicant_is_department_manager=applicant_is_department_manager,
+        can_act_on_leave=_can_act_on_leave_request(lr) and (lr.status or '').strip().lower() == 'pending',
+        can_print_leave=_leave_form_printable(lr),
+        can_cancel_leave=_user_can_cancel_leave(lr),
+        can_edit_leave=_user_can_edit_leave(lr),
+        auto_print=_leave_form_printable(lr) and (request.args.get('print') or '').strip() == '1',
     )
 
 
 @bp.route('/leave-approvals')
 @login_required
 def leave_approvals():
-    """Manager approvals list (pending leave requests)."""
-    role = (getattr(current_user, 'role', None) or '').strip().lower()
-    if role not in ('manager', 'admin'):
-        flash('Access denied. This page is for Managers/Admin only.', 'error')
+    """Pending leave requests for Department Head, Admin, and HR action."""
+    role = _leave_actor_role()
+    if role not in ('manager', 'admin', 'hr'):
+        flash('Access denied. This page is for Department Heads, Admin, and HR.', 'error')
         return redirect(url_for('routes.dashboard'))
 
-    def _is_special_approver_manager() -> bool:
-        """True if current manager is MO or HRMDO/HRMO or MADO department head."""
-        emp = current_user.employee
-        if not emp:
-            return False
-        try:
-            from sqlalchemy import func as sql_func
-            # MO / Mayor's Office
-            mo_dept = (Department.query
-                       .filter(sql_func.lower(Department.name).in_(['mo', "mayor's office", 'mayors office', 'municipal mayor']))
-                       .first())
-            if not mo_dept:
-                mo_dept = Department.query.filter(sql_func.lower(Department.name).like('%mayor%')).first()
-            # HRMDO / HRMO
-            hrmdo_dept = (Department.query
-                          .filter(sql_func.lower(Department.name).like('%hrmdo%'))
-                          .first())
-            if not hrmdo_dept:
-                hrmdo_dept = Department.query.filter(sql_func.lower(Department.name).like('%hrmo%')).first()
-            # MADO (separate; do NOT fallback-chain behind HRMDO)
-            mado_dept = Department.query.filter(sql_func.lower(Department.name).like('%mado%')).first()
-            return (
-                (mo_dept and mo_dept.manager_id == emp.id) or
-                (hrmdo_dept and hrmdo_dept.manager_id == emp.id) or
-                (mado_dept and mado_dept.manager_id == emp.id)
-            )
-        except Exception:
-            return False
-
-    def _is_special_approver_admin() -> bool:
-        """True if current admin is MO or HRMDO/HRMO or MADO department head."""
-        emp = current_user.employee
-        if not emp:
-            return False
-        try:
-            from sqlalchemy import func as sql_func
-            mo_dept = (Department.query
-                       .filter(sql_func.lower(Department.name).in_(['mo', "mayor's office", 'mayors office', 'municipal mayor']))
-                       .first())
-            if not mo_dept:
-                mo_dept = Department.query.filter(sql_func.lower(Department.name).like('%mayor%')).first()
-            hrmdo_dept = (Department.query
-                          .filter(sql_func.lower(Department.name).like('%hrmdo%'))
-                          .first())
-            if not hrmdo_dept:
-                hrmdo_dept = Department.query.filter(sql_func.lower(Department.name).like('%hrmo%')).first()
-            mado_dept = Department.query.filter(sql_func.lower(Department.name).like('%mado%')).first()
-            return (
-                (mo_dept and mo_dept.manager_id == emp.id) or
-                (hrmdo_dept and hrmdo_dept.manager_id == emp.id) or
-                (mado_dept and mado_dept.manager_id == emp.id)
-            )
-        except Exception:
-            return False
-
-    dept_ids = _managed_department_ids_for_manager()
     pending = []
-    if role == 'manager':
+    if role in ('admin', 'hr'):
+        pending = (LeaveRequest.query
+                   .filter(LeaveRequest.status == 'pending')
+                   .order_by(LeaveRequest.created_at.desc())
+                   .all())
+    elif role == 'manager':
+        dept_ids = _managed_department_ids_for_manager()
         if not dept_ids:
             flash('No managed department is linked to your account.', 'error')
         else:
-            q = (LeaveRequest.query
-                 .join(Employee, Employee.id == LeaveRequest.employee_id)
-                 .filter(LeaveRequest.status == 'pending'))
-            # Normal scope: managed departments
-            q = q.filter(Employee.department_id.in_(dept_ids))
-            pending = q.order_by(LeaveRequest.created_at.desc()).all()
+            pending = (LeaveRequest.query
+                       .join(Employee, Employee.id == LeaveRequest.employee_id)
+                       .filter(LeaveRequest.status == 'pending')
+                       .filter(Employee.department_id.in_(dept_ids))
+                       .order_by(LeaveRequest.created_at.desc())
+                       .all())
 
-    # Special approver scope: MO + HRMDO/HRMO + MADO dept heads see all special-routed leaves.
-    if role == 'manager' and _is_special_approver_manager():
-        try:
-            from sqlalchemy import func as sql_func
-            special = (
-                LeaveRequest.query
-                .join(Employee, Employee.id == LeaveRequest.employee_id)
-                .outerjoin(Department, Department.id == Employee.department_id)
-                .outerjoin(User, User.id == Employee.user_id)
-                .filter(LeaveRequest.status == 'pending')
-                .filter(
-                    (LeaveRequest.reason.ilike('%__META__SPECIAL_APPROVAL=1%')) |
-                    (sql_func.lower(User.role).in_(['manager', 'admin'])) |
-                    (sql_func.lower(Department.name).in_(['mo', "mayor's office", 'mayors office', 'municipal mayor'])) |
-                    (sql_func.lower(Department.name).like('%mayor%'))
+        # Special approver scope: MO + HRMDO/HRMO + MADO dept heads also see special-routed leaves.
+        if _current_user_is_special_leave_approver():
+            try:
+                from sqlalchemy import func as sql_func
+                special = (
+                    LeaveRequest.query
+                    .join(Employee, Employee.id == LeaveRequest.employee_id)
+                    .outerjoin(Department, Department.id == Employee.department_id)
+                    .outerjoin(User, User.id == Employee.user_id)
+                    .filter(LeaveRequest.status == 'pending')
+                    .filter(_special_leave_match_clause())
+                    .order_by(LeaveRequest.created_at.desc())
+                    .all()
                 )
-                .order_by(LeaveRequest.created_at.desc())
-                .all()
-            )
-            # Merge, keep unique by id
-            by_id = {l.id: l for l in (pending or [])}
-            for l in special:
-                by_id[l.id] = l
-            pending = list(by_id.values())
-            pending.sort(key=lambda x: x.created_at or datetime.min, reverse=True)
-        except Exception:
-            pass
+                by_id = {l.id: l for l in (pending or [])}
+                for l in special:
+                    by_id[l.id] = l
+                pending = list(by_id.values())
+                pending.sort(key=lambda x: x.created_at or datetime.min, reverse=True)
+            except Exception:
+                pass
 
-    # Admin approvals list:
-    # - If admin is a dept head (MO/HRMDO/HRMO/MADO), show special-routed pending leaves.
-    # - Otherwise, show pending leaves filed by users with role Manager (special approver behavior for admin role).
-    if role == 'admin':
-        try:
-            from sqlalchemy import func as sql_func
-            if _is_special_approver_admin():
-                pending = (LeaveRequest.query
-                           .join(Employee, Employee.id == LeaveRequest.employee_id)
-                           .outerjoin(Department, Department.id == Employee.department_id)
-                           .outerjoin(User, User.id == Employee.user_id)
-                           .filter(LeaveRequest.status == 'pending')
-                           .filter(
-                               (LeaveRequest.reason.ilike('%__META__SPECIAL_APPROVAL=1%')) |
-                               (sql_func.lower(User.role).in_(['manager', 'admin'])) |
-                               (sql_func.lower(Department.name).in_(['mo', "mayor's office", 'mayors office', 'municipal mayor'])) |
-                               (sql_func.lower(Department.name).like('%mayor%'))
-                           )
-                           .order_by(LeaveRequest.created_at.desc())
-                           .all())
-            else:
-                pending = (LeaveRequest.query
-                           .join(Employee, Employee.id == LeaveRequest.employee_id)
-                           .outerjoin(User, User.id == Employee.user_id)
-                           .filter(LeaveRequest.status == 'pending')
-                           .filter(sql_func.lower(User.role) == 'manager')
-                           .order_by(LeaveRequest.created_at.desc())
-                           .all())
-        except Exception:
-            # If anything goes wrong, fail closed (show nothing)
-            pending = []
-
-    # Managers must never be able to approve/disapprove their own leave applications.
-    # Manager-filed leaves are specially routed to MO + HRMDO/MADO department heads.
+    # Nobody may approve/disapprove their own leave application.
     try:
-        if role == 'manager' and current_user.employee:
+        if current_user.employee:
             pending = [l for l in (pending or []) if l.employee_id != current_user.employee.id]
     except Exception:
         pass
     employee = current_user.employee if current_user.employee else None
-    return render_template('leave_online/approvals.html', leaves=pending, employee=employee)
+    return render_template(
+        'leave_online/approvals.html',
+        leaves=pending,
+        employee=employee,
+        department_head_employee_ids=_department_head_employee_ids(),
+    )
 
 
 @bp.route('/leave/<int:id>/approve', methods=['POST'])
 @login_required
 def leave_approve(id):
-    role = (getattr(current_user, 'role', None) or '').strip().lower()
-    if role not in ('manager', 'admin'):
-        flash('Access denied.', 'error')
-        return redirect(url_for('routes.dashboard'))
     lr = LeaveRequest.query.get_or_404(id)
-    if role == 'manager' and current_user.employee and lr.employee_id == current_user.employee.id:
-        flash('Access denied. You cannot approve your own leave application.', 'error')
-        return redirect(url_for('routes.leave_approvals'))
-    if role == 'admin':
-        # Admin can act either as:
-        # - Dept head special approver (MO/HRMDO/HRMO/MADO) for special-routed leaves, OR
-        # - Special approver for Manager-filed leaves (fallback).
-        try:
-            from sqlalchemy import func as sql_func
-            emp = current_user.employee
-            # dept head check
-            mo_dept = (Department.query
-                       .filter(sql_func.lower(Department.name).in_(['mo', "mayor's office", 'mayors office', 'municipal mayor']))
-                       .first()) or Department.query.filter(sql_func.lower(Department.name).like('%mayor%')).first()
-            hrmdo_dept = (Department.query
-                          .filter(sql_func.lower(Department.name).like('%hrmdo%'))
-                          .first()) or Department.query.filter(sql_func.lower(Department.name).like('%hrmo%')).first()
-            mado_dept = Department.query.filter(sql_func.lower(Department.name).like('%mado%')).first()
-            is_dept_head = bool(emp and (
-                (mo_dept and mo_dept.manager_id == emp.id) or
-                (hrmdo_dept and hrmdo_dept.manager_id == emp.id) or
-                (mado_dept and mado_dept.manager_id == emp.id)
-            ))
-
-            reason = (lr.reason or '')
-            applicant_role = ((lr.employee.user.role if lr.employee and lr.employee.user else '') or '').strip().lower()
-            dept_name = ((lr.employee.department.name if lr.employee and lr.employee.department else '') or '').strip().lower()
-            is_mo_dept = (dept_name in ('mo', "mayor's office", 'mayors office', 'municipal mayor') or 'mayor' in dept_name)
-            is_special = ('__META__SPECIAL_APPROVAL=1' in reason) or (applicant_role in ('manager', 'admin')) or is_mo_dept
-
-            if is_dept_head:
-                if not is_special:
-                    flash('Access denied.', 'error')
-                    return redirect(url_for('routes.leave_approvals'))
-            else:
-                if applicant_role != 'manager':
-                    flash('Access denied.', 'error')
-                    return redirect(url_for('routes.leave_approvals'))
-        except Exception:
-            flash('Access denied.', 'error')
-            return redirect(url_for('routes.leave_approvals'))
-    dept_ids = _managed_department_ids_for_manager()
-    emp = Employee.query.get(lr.employee_id) if lr.employee_id else None
-    allowed = bool(dept_ids and emp and emp.department_id in dept_ids)
-    if not allowed:
-        # Allow MO / HRMDO/MADO department heads to act on specially routed leaves.
-        try:
-            reason = (lr.reason or '')
-            is_special = '__META__SPECIAL_APPROVAL=1' in reason
-            applicant_role = ((lr.employee.user.role if lr.employee and lr.employee.user else '') or '').strip().lower()
-            dept_name = ((lr.employee.department.name if lr.employee and lr.employee.department else '') or '').strip().lower()
-            is_mo_dept = (dept_name in ('mo', "mayor's office", 'mayors office', 'municipal mayor') or 'mayor' in dept_name)
-            is_special = is_special or (applicant_role in ('manager', 'admin')) or is_mo_dept
-            if is_special and current_user.employee:
-                from sqlalchemy import func as sql_func
-                mo_dept = (Department.query
-                           .filter(sql_func.lower(Department.name).in_(['mo', "mayor's office", 'mayors office', 'municipal mayor']))
-                           .first())
-                if not mo_dept:
-                    mo_dept = Department.query.filter(sql_func.lower(Department.name).like('%mayor%')).first()
-                hrmdo_dept = (Department.query
-                              .filter(sql_func.lower(Department.name).like('%hrmdo%'))
-                              .first())
-                if not hrmdo_dept:
-                    hrmdo_dept = Department.query.filter(sql_func.lower(Department.name).like('%hrmo%')).first()
-                if not hrmdo_dept:
-                    hrmdo_dept = Department.query.filter(sql_func.lower(Department.name).like('%mado%')).first()
-                allowed = (
-                    (mo_dept and mo_dept.manager_id == current_user.employee.id) or
-                    (hrmdo_dept and hrmdo_dept.manager_id == current_user.employee.id)
-                )
-        except Exception:
-            allowed = False
-    if not allowed:
-        flash('Access denied. You can only approve leave for employees in your department.', 'error')
+    if not _can_act_on_leave_request(lr):
+        flash('Access denied. You cannot approve this leave application.', 'error')
         return redirect(url_for('routes.leave_approvals'))
     remarks = (request.form.get('manager_remarks') or '').strip()
     try:
@@ -15262,59 +15694,7 @@ def leave_approve(id):
         lr.rejection_reason = None
         if remarks:
             lr.reason = (lr.reason or '').strip() + f"\n\nManager remarks: {remarks}"
-
-        # --- Post deduction to leave_ledger (idempotent via remarks tag) ---
-        tag = f'leave_request_id={lr.id}'
-        existing_post = LeaveLedger.query.filter_by(employee_id=lr.employee_id, remarks=tag).first()
-        if not existing_post:
-            leave_code = (lr.leave_type or '').strip().upper()
-            key = _leave_code_to_balance_key(leave_code)
-            col_by_key = {
-                'vl': 'vl_applied',
-                'sl': 'sl_applied',
-                'spl': 'spl_used',
-                'wl': 'wl_used',
-                'cto': 'cto_used',
-                'ml': 'ml_used',
-                'pl': 'pl_used',
-                'sp': 'sp_used',
-                'avaw': 'avaw_used',
-                'study': 'study_used',
-                'rehab': 'rehab_used',
-                'slbw': 'slbw_used',
-                'se_calamity': 'se_calamity_used',
-                'adopt': 'adopt_used',
-            }
-            target_col = col_by_key.get(key)
-            # Fallback: if unknown leave code, do not post ledger row
-            if target_col:
-                try:
-                    days = Decimal(str(lr.total_days)) if lr.total_days is not None else None
-                except Exception:
-                    days = None
-                if days is None:
-                    # inclusive day count
-                    try:
-                        days = Decimal(str((lr.end_date - lr.start_date).days + 1))
-                    except Exception:
-                        days = Decimal('1')
-
-                particulars = (
-                    f'Online Leave Approved - {leave_code} '
-                    f'({lr.start_date.isoformat()} to {lr.end_date.isoformat()})'
-                )
-                row = LeaveLedger(
-                    employee_id=lr.employee_id,
-                    transaction_date=lr.start_date,
-                    particulars=particulars,
-                    remarks=tag,
-                    created_by=current_user.id,
-                )
-                setattr(row, target_col, days)
-                db.session.add(row)
-                db.session.flush()
-                recompute_leave_ledger_balances(lr.employee_id)
-
+        _post_online_leave_ledger(lr)
         db.session.commit()
         flash('Leave application approved.', 'success')
     except Exception as e:
@@ -15326,85 +15706,9 @@ def leave_approve(id):
 @bp.route('/leave/<int:id>/disapprove', methods=['POST'])
 @login_required
 def leave_disapprove(id):
-    role = (getattr(current_user, 'role', None) or '').strip().lower()
-    if role not in ('manager', 'admin'):
-        flash('Access denied.', 'error')
-        return redirect(url_for('routes.dashboard'))
     lr = LeaveRequest.query.get_or_404(id)
-    if role == 'manager' and current_user.employee and lr.employee_id == current_user.employee.id:
-        flash('Access denied. You cannot dis-approve your own leave application.', 'error')
-        return redirect(url_for('routes.leave_approvals'))
-    if role == 'admin':
-        # Admin can act either as:
-        # - Dept head special approver (MO/HRMDO/HRMO/MADO) for special-routed leaves, OR
-        # - Special approver for Manager-filed leaves (fallback).
-        try:
-            from sqlalchemy import func as sql_func
-            emp = current_user.employee
-            mo_dept = (Department.query
-                       .filter(sql_func.lower(Department.name).in_(['mo', "mayor's office", 'mayors office', 'municipal mayor']))
-                       .first()) or Department.query.filter(sql_func.lower(Department.name).like('%mayor%')).first()
-            hrmdo_dept = (Department.query
-                          .filter(sql_func.lower(Department.name).like('%hrmdo%'))
-                          .first()) or Department.query.filter(sql_func.lower(Department.name).like('%hrmo%')).first()
-            mado_dept = Department.query.filter(sql_func.lower(Department.name).like('%mado%')).first()
-            is_dept_head = bool(emp and (
-                (mo_dept and mo_dept.manager_id == emp.id) or
-                (hrmdo_dept and hrmdo_dept.manager_id == emp.id) or
-                (mado_dept and mado_dept.manager_id == emp.id)
-            ))
-
-            reason = (lr.reason or '')
-            applicant_role = ((lr.employee.user.role if lr.employee and lr.employee.user else '') or '').strip().lower()
-            dept_name = ((lr.employee.department.name if lr.employee and lr.employee.department else '') or '').strip().lower()
-            is_mo_dept = (dept_name in ('mo', "mayor's office", 'mayors office', 'municipal mayor') or 'mayor' in dept_name)
-            is_special = ('__META__SPECIAL_APPROVAL=1' in reason) or (applicant_role in ('manager', 'admin')) or is_mo_dept
-
-            if is_dept_head:
-                if not is_special:
-                    flash('Access denied.', 'error')
-                    return redirect(url_for('routes.leave_approvals'))
-            else:
-                if applicant_role != 'manager':
-                    flash('Access denied.', 'error')
-                    return redirect(url_for('routes.leave_approvals'))
-        except Exception:
-            flash('Access denied.', 'error')
-            return redirect(url_for('routes.leave_approvals'))
-    dept_ids = _managed_department_ids_for_manager()
-    emp = Employee.query.get(lr.employee_id) if lr.employee_id else None
-    allowed = bool(dept_ids and emp and emp.department_id in dept_ids)
-    if not allowed:
-        # Allow MO / HRMDO/MADO department heads to act on specially routed leaves.
-        try:
-            reason = (lr.reason or '')
-            is_special = '__META__SPECIAL_APPROVAL=1' in reason
-            applicant_role = ((lr.employee.user.role if lr.employee and lr.employee.user else '') or '').strip().lower()
-            dept_name = ((lr.employee.department.name if lr.employee and lr.employee.department else '') or '').strip().lower()
-            is_mo_dept = (dept_name in ('mo', "mayor's office", 'mayors office', 'municipal mayor') or 'mayor' in dept_name)
-            is_special = is_special or (applicant_role in ('manager', 'admin')) or is_mo_dept
-            if is_special and current_user.employee:
-                from sqlalchemy import func as sql_func
-                mo_dept = (Department.query
-                           .filter(sql_func.lower(Department.name).in_(['mo', "mayor's office", 'mayors office', 'municipal mayor']))
-                           .first())
-                if not mo_dept:
-                    mo_dept = Department.query.filter(sql_func.lower(Department.name).like('%mayor%')).first()
-                hrmdo_dept = (Department.query
-                              .filter(sql_func.lower(Department.name).like('%hrmdo%'))
-                              .first())
-                if not hrmdo_dept:
-                    hrmdo_dept = Department.query.filter(sql_func.lower(Department.name).like('%hrmo%')).first()
-                if not hrmdo_dept:
-                    hrmdo_dept = Department.query.filter(sql_func.lower(Department.name).like('%mado%')).first()
-                allowed = (
-                    (mo_dept and mo_dept.manager_id == current_user.employee.id) or
-                    (hrmdo_dept and hrmdo_dept.manager_id == current_user.employee.id)
-                )
-        except Exception:
-            allowed = False
-    if not allowed:
-        flash('Access denied. You can only dis-approve leave for employees in your department.', 'error')
+    if not _can_act_on_leave_request(lr):
+        flash('Access denied. You cannot dis-approve this leave application.', 'error')
         return redirect(url_for('routes.leave_approvals'))
     remarks = (request.form.get('manager_remarks') or '').strip()
     try:
@@ -15418,6 +15722,97 @@ def leave_disapprove(id):
         db.session.rollback()
         flash(f'Error dis-approving leave: {str(e)}', 'error')
     return redirect(url_for('routes.leave_approvals'))
+
+
+@bp.route('/leave/<int:id>/cancel', methods=['POST'])
+@login_required
+def leave_cancel(id):
+    lr = LeaveRequest.query.get_or_404(id)
+    if not _user_can_cancel_leave(lr):
+        flash('Access denied. This leave application cannot be cancelled.', 'error')
+        return redirect(url_for('routes.leave_detail', id=id))
+    note = (request.form.get('cancel_reason') or '').strip()
+    role = _leave_actor_role()
+    who = 'HR/Admin' if role in ('admin', 'hr') else 'employee'
+    try:
+        was_approved = _leave_status(lr) == 'approved'
+        if was_approved:
+            _void_online_leave_ledger(lr)
+        lr.status = 'cancelled'
+        lr.approved_by = getattr(current_user, 'id', None)
+        lr.approved_at = datetime.utcnow()
+        lr.rejection_reason = note or f'Cancelled by {who}'
+        db.session.commit()
+        flash('Leave application cancelled.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error cancelling leave: {str(e)}', 'error')
+    if role in ('admin', 'hr', 'manager'):
+        return redirect(url_for('routes.leave_list'))
+    return redirect(url_for('routes.leave_list'))
+
+
+@bp.route('/leave/<int:id>/edit', methods=['GET', 'POST'])
+@login_required
+def leave_edit(id):
+    lr = LeaveRequest.query.get_or_404(id)
+    if not _user_can_edit_leave(lr):
+        flash('Access denied. Only HR/Admin can edit leave applications.', 'error')
+        return redirect(url_for('routes.leave_detail', id=id))
+    target_emp = Employee.query.get(lr.employee_id) if lr.employee_id else None
+    if not target_emp:
+        flash('Employee record for this leave was not found.', 'error')
+        return redirect(url_for('routes.leave_list'))
+
+    balances = _get_leave_balances_for_employee(target_emp)
+    credit_groups = _leave_apply_credit_groups(target_emp, balances)
+    credit_month_label = date.today().strftime('%B %Y')
+    leave_type_options = _leave_type_options_for_employee(target_emp, include_code=lr.leave_type)
+    parsed = _parse_leave_reason_fields(lr.reason or '')
+    applicant_role = ''
+    if getattr(target_emp, 'user', None):
+        applicant_role = (target_emp.user.role or '').strip().lower()
+
+    if request.method == 'POST':
+        payload, err = _parse_online_leave_form(
+            target_emp,
+            applicant_role,
+            keep_special=parsed['special'],
+            relax_advance_rule=True,
+        )
+        if err:
+            flash(err, 'error')
+            return redirect(url_for('routes.leave_edit', id=id))
+        try:
+            was_approved = _leave_status(lr) == 'approved'
+            lr.leave_type = payload['leave_code']
+            lr.start_date = payload['start_date']
+            lr.end_date = payload['end_date']
+            lr.total_days = payload['total_days']
+            lr.reason = payload['full_reason']
+            lr.updated_at = datetime.utcnow()
+            if was_approved:
+                _post_online_leave_ledger(lr)
+            db.session.commit()
+            flash('Leave application updated.', 'success')
+            return redirect(url_for('routes.leave_detail', id=id))
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Error updating leave: {str(e)}', 'error')
+            return redirect(url_for('routes.leave_edit', id=id))
+
+    return render_template(
+        'leave_online/apply.html',
+        employee=target_emp,
+        balances=balances,
+        credit_groups=credit_groups,
+        credit_month_label=credit_month_label,
+        leave_type_options=leave_type_options,
+        edit_leave=lr,
+        edit_fields=parsed,
+        edit_selected_dates=_selected_dates_for_leave(lr),
+        relax_date_rules=True,
+    )
 
 
 @bp.route('/dashboard')
@@ -15470,7 +15865,6 @@ def dashboard():
                              .join(Employee, Employee.id == LeaveRequest.employee_id)
                              .filter(Employee.department_id.in_(dept_ids))
                              .order_by(LeaveRequest.created_at.desc())
-                             .limit(10)
                              .all())
             # Special approver scope: MO + HRMDO/HRMO/MADO dept heads also see specially routed leaves.
             try:
@@ -15496,12 +15890,7 @@ def dashboard():
                     )
                     if is_special_approver:
                         # Backward-compatible special routing: meta tag OR applicant role manager/admin OR MO dept.
-                        special_cond = (
-                            (LeaveRequest.reason.ilike('%__META__SPECIAL_APPROVAL=1%')) |
-                            (sql_func.lower(User.role).in_(['manager', 'admin'])) |
-                            (sql_func.lower(Department.name).in_(['mo', "mayor's office", 'mayors office', 'municipal mayor'])) |
-                            (sql_func.lower(Department.name).like('%mayor%'))
-                        )
+                        special_cond = _special_leave_match_clause()
 
                         special_pending = (LeaveRequest.query
                                            .join(Employee, Employee.id == LeaveRequest.employee_id)
@@ -15538,7 +15927,6 @@ def dashboard():
                             by_id[l.id] = l
                         recent_leaves = list(by_id.values())
                         recent_leaves.sort(key=lambda x: x.created_at or datetime.min, reverse=True)
-                        recent_leaves = recent_leaves[:10]
             except Exception:
                 pass
         else:
@@ -15570,12 +15958,7 @@ def dashboard():
                                .all())
 
             # Special-routed leaves (for "recent" table)
-            special_cond = (
-                (LeaveRequest.reason.ilike('%__META__SPECIAL_APPROVAL=1%')) |
-                (sql_func.lower(User.role).in_(['manager', 'admin'])) |
-                (sql_func.lower(Department.name).in_(['mo', "mayor's office", 'mayors office', 'municipal mayor'])) |
-                (sql_func.lower(Department.name).like('%mayor%'))
-            )
+            special_cond = _special_leave_match_clause()
             special_recent = (LeaveRequest.query
                               .join(Employee, Employee.id == LeaveRequest.employee_id)
                               .outerjoin(Department, Department.id == Employee.department_id)
@@ -15639,10 +16022,24 @@ def dashboard():
                 by_id[l.id] = l
             recent_leaves = list(by_id.values())
             recent_leaves.sort(key=lambda x: x.created_at or datetime.min, reverse=True)
-            recent_leaves = recent_leaves[:10]
         except Exception:
             pending_approvals = pending_approvals if pending_approvals is not None else 0
             # leave recent_leaves as-is if something fails
+
+    # Admin/HR: every leave application (pending first), not a 10-row slice.
+    if role in ('admin', 'hr'):
+        pending_approvals = pending_leaves
+        pending_rows = (LeaveRequest.query
+                        .filter(LeaveRequest.status == 'pending')
+                        .order_by(LeaveRequest.created_at.desc())
+                        .all())
+        other_rows = (LeaveRequest.query
+                      .filter(LeaveRequest.status != 'pending')
+                      .order_by(LeaveRequest.created_at.desc())
+                      .all())
+        recent_leaves = list(pending_rows) + list(other_rows)
+
+    leave_actionable_ids, leave_printable_ids, leave_cancellable_ids, leave_editable_ids = _leave_list_action_ids(recent_leaves)
     
     return render_template('dashboard.html',
                          total_employees=total_employees,
@@ -15652,6 +16049,11 @@ def dashboard():
                          on_leave_today=on_leave_today,
                          step_increment_due_count=step_increment_due_count,
                          recent_leaves=recent_leaves,
+                         leave_actionable_ids=leave_actionable_ids,
+                         leave_printable_ids=leave_printable_ids,
+                         leave_cancellable_ids=leave_cancellable_ids,
+                         leave_editable_ids=leave_editable_ids,
+                         department_head_employee_ids=_department_head_employee_ids(),
                          manager_leave_scope=manager_leave_scope,
                          employee=employee,
                          has_id_photo=employee_has_id_photo(employee) if employee else False)
@@ -15682,6 +16084,23 @@ def users_manual():
         employee=employee,
         viewer_role=role,
         viewer_role_label=role_label,
+    )
+
+
+@bp.route('/about/users-manual/download')
+@login_required
+def users_manual_download():
+    """Download the current User's Manual as Word."""
+    docs_dir = os.path.join(os.path.dirname(__file__), 'static', 'docs')
+    path = os.path.join(docs_dir, 'HRMS_Users_Manual.docx')
+    if not os.path.isfile(path):
+        flash("User's Manual Word file is not available on the server.", 'error')
+        return redirect(url_for('routes.users_manual'))
+    return send_file(
+        path,
+        mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        as_attachment=True,
+        download_name='HRMS_Users_Manual.docx',
     )
 
 
@@ -15773,7 +16192,7 @@ def employee_add():
         try:
             first_name = request.form.get('first_name', '').strip()
             last_name = request.form.get('last_name', '').strip()
-            middle_name = request.form.get('middle_name', '').strip()
+            middle_name = Employee.normalize_name_part(request.form.get('middle_name'))
             department_id = request.form.get('department_id')
             status_of_appointment = request.form.get('status_of_appointment', '').strip()
             position_raw = request.form.get('position', '').strip()
@@ -15855,6 +16274,9 @@ def employee_add():
                 status=status,
                 separation_date=separation_date if status == 'separated' else None,
                 separation_type=separation_type if status == 'separated' else None,
+                payroll_fund_release=normalize_payroll_fund_release(
+                    request.form.get('payroll_fund_release')
+                ),
             )
 
             try:
@@ -15947,7 +16369,7 @@ def employee_edit(id):
             employee_id = request.form.get('employee_id', '').strip()
             first_name = request.form.get('first_name', '').strip()
             last_name = request.form.get('last_name', '').strip()
-            middle_name = request.form.get('middle_name', '').strip()
+            middle_name = Employee.normalize_name_part(request.form.get('middle_name'))
             department_id = request.form.get('department_id')
             status_of_appointment = request.form.get('status_of_appointment', '').strip()
             position_raw = request.form.get('position', '').strip()
@@ -16078,6 +16500,10 @@ def employee_edit(id):
             emp.salary_tranche = salary_tranche if salary_tranche else None
             emp.salary_grade = int(salary_grade_val) if salary_grade_val else None
             emp.salary_step = int(salary_step_val) if salary_step_val else None
+            if _is_jo_cos_employee(emp):
+                emp.payroll_fund_release = normalize_payroll_fund_release(
+                    request.form.get('payroll_fund_release')
+                )
             emp.flexible_worktime = False
             emp.flexible_start_time = None
             emp.flexible_end_time = None

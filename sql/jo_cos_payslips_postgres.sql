@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS jo_cos_payslips (
     late_deduction NUMERIC(12, 2) NOT NULL DEFAULT 0,
     hdmf_deduction NUMERIC(12, 2) NOT NULL DEFAULT 0,
     net_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    fund_release VARCHAR(20) NOT NULL DEFAULT 'ATM',
     generated_at TIMESTAMP NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
     generated_by_user_id INTEGER REFERENCES users(id),
     CONSTRAINT uq_jo_cos_payslip_emp_ymq UNIQUE (employee_id, year, month, quincena_half)

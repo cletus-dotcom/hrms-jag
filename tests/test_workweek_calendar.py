@@ -14,7 +14,11 @@ from app.ph_holidays import (
     iso_week_monday,
     philippines_holidays_for_year,
 )
-from app.workweek_calendar_service import apply_five_day_remark, rescale_full_day_charge
+from app.workweek_calendar_service import (
+    apply_five_day_remark,
+    normalize_nwd_weekday,
+    rescale_full_day_charge,
+)
 
 
 class IsoWeekAndHolidayTests(unittest.TestCase):
@@ -52,6 +56,19 @@ class WorkweekCalendarRoleTests(unittest.TestCase):
             self.assertFalse(is_admin_or_hr_role('employee'))
             self.assertFalse(is_admin_or_hr_role('payroll_maker'))
             self.assertFalse(is_admin_or_hr_role('dtr_uploader'))
+
+
+class CompressedNwdWeekdayTests(unittest.TestCase):
+    def test_normalize_defaults_to_friday(self):
+        self.assertEqual(normalize_nwd_weekday(None), 4)
+        self.assertEqual(normalize_nwd_weekday(''), 4)
+        self.assertEqual(normalize_nwd_weekday(9), 4)
+        self.assertEqual(normalize_nwd_weekday(-1), 4)
+
+    def test_normalize_weekdays(self):
+        self.assertEqual(normalize_nwd_weekday(0), 0)
+        self.assertEqual(normalize_nwd_weekday('2'), 2)
+        self.assertEqual(normalize_nwd_weekday(4), 4)
 
 
 class LeaveChargeRemarkTests(unittest.TestCase):

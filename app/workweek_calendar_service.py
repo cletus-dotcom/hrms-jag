@@ -23,6 +23,8 @@ from app.ph_holidays import (
 FIVE_DAY_REMARK = '5-day workweek'
 _REMARK_STRIP = re.compile(r'(?:^|;\s*)5-day workweek(?=\s*;|$)', re.IGNORECASE)
 _FULL_DAY = {LEAVE_DAY_CREDIT_5DAY, LEAVE_DAY_CREDIT_4DAY}
+DEFAULT_NWD_WEEKDAY = 4  # Friday
+NWD_WEEKDAY_LABELS = ('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday')
 
 
 def assert_workweek_calendar_editor() -> None:
@@ -88,6 +90,150 @@ def _model_from_maps(
     if code in ('4day', '5day'):
         return code
     return None
+
+
+def normalize_nwd_weekday(raw) -> int:
+    """Compressed rest day: 0=Mon … 4=Fri. Invalid values fall back to Friday."""
+    if raw is None or raw == '':
+        return DEFAULT_NWD_WEEKDAY
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_NWD_WEEKDAY
+    if n < 0 or n > 4:
+        return DEFAULT_NWD_WEEKDAY
+    return n
+
+
+def month_workweek_calendar_saved(year: int, month: int) -> bool:
+    try:
+        return (year, month) in _month_plans_cached()
+    except Exception:
+        return False
+
+
+def nwd_weekday_for_date(d: date) -> int:
+    """Office rest weekday for the ISO week containing ``d`` (default Friday)."""
+    if d is None:
+        return DEFAULT_NWD_WEEKDAY
+    try:
+        week = _weeks_cached().get(iso_week_monday(d))
+    except Exception:
+        return DEFAULT_NWD_WEEKDAY
+    if week is None:
+        return DEFAULT_NWD_WEEKDAY
+    return normalize_nwd_weekday(getattr(week, 'nwd_weekday', None))
+
+
+def is_compressed_nwd_date(d: date, model_code: str | None = None) -> bool:
+    """True when ``d`` is the 4-day rest day (default Friday, or a transferred weekday)."""
+    if d is None or d.weekday() > 4:
+        return False
+    model = (model_code or calendar_model_code_for_date(d) or '').strip().lower()
+    if model != '4day':
+        return False
+    return d.weekday() == nwd_weekday_for_date(d)
+
+
+def _quincena_bounds(year: int, month: int, quincena: str) -> tuple[date, date]:
+    last = calendar.monthrange(year, month)[1]
+    if str(quincena) == '2':
+        return date(year, month, 16), date(year, month, last)
+    return date(year, month, 1), date(year, month, min(15, last))
+
+
+def build_quincena_workweek_preview(year: int, month: int, quincena: str) -> dict[str, Any]:
+    """Workweek calendar slice for Generate DTR (saved month plan vs fallback segments)."""
+    start_d, end_d = _quincena_bounds(year, month, quincena)
+    saved = month_workweek_calendar_saved(year, month)
+    plan = _month_plans_cached().get((year, month))
+    month_model = (plan.default_model if plan else None)
+    if month_model not in ('4day', '5day'):
+        month_model = None
+    mondays: list[date] = []
+    seen: set[date] = set()
+    d = start_d
+    while d <= end_d:
+        monday = iso_week_monday(d)
+        if monday not in seen:
+            seen.add(monday)
+            mondays.append(monday)
+        d += timedelta(days=1)
+    weeks = []
+    for monday in mondays:
+        friday = iso_week_friday(monday)
+        sunday = monday + timedelta(days=6)
+        week = _weeks_cached().get(monday)
+        flagged = bool(week.flagged_5day) if week else False
+        model = calendar_model_code_for_date(friday) or calendar_model_code_for_date(monday)
+        if flagged:
+            model = '5day'
+        nwd = nwd_weekday_for_date(monday)
+        holiday_name = (week.holiday_name if week else '') or ''
+        weeks.append({
+            'week_start': monday.isoformat(),
+            'label': f'{monday.strftime("%b %d")} – {sunday.strftime("%b %d, %Y")}',
+            'friday': friday.isoformat(),
+            'flagged': flagged,
+            'effective_model': model if model in ('4day', '5day') else (month_model or '5day'),
+            'nwd_weekday': nwd,
+            'nwd_label': NWD_WEEKDAY_LABELS[nwd],
+            'holiday_name': holiday_name,
+            'allow_nwd_transfer': (model or month_model) == '4day' and not flagged,
+        })
+    q_label = '1st' if str(quincena) != '2' else '2nd'
+    return {
+        'calendar_saved': saved,
+        'year': year,
+        'month': month,
+        'quincena': str(quincena),
+        'period_start': start_d.isoformat(),
+        'period_end': end_d.isoformat(),
+        'period_label': f'{q_label} quincena · {start_d.strftime("%d %b")}–{end_d.strftime("%d %b %Y")}',
+        'month_model': month_model,
+        'month_model_label': (
+            'Compressed (4-day / 10h)' if month_model == '4day'
+            else ('Regular (5-day / 8h)' if month_model == '5day' else 'Not saved')
+        ),
+        'weeks': weeks,
+        'nwd_weekday_options': [
+            {'value': i, 'label': NWD_WEEKDAY_LABELS[i]} for i in range(5)
+        ],
+        'calendar_url': '/leave/workweek',
+    }
+
+
+def save_quincena_nwd_weekdays(form, *, user_id: int | None) -> int:
+    """Persist transferred rest weekdays from Generate DTR (`nwd_YYYY-MM-DD`)."""
+    updated = 0
+    for key, raw in (form or {}).items():
+        if not str(key).startswith('nwd_'):
+            continue
+        iso = str(key)[4:].strip()
+        try:
+            monday = date.fromisoformat(iso)
+        except ValueError:
+            continue
+        if monday.weekday() != 0:
+            monday = iso_week_monday(monday)
+        nwd = normalize_nwd_weekday(raw)
+        row = WorkweekWeek.query.filter_by(week_start=monday).first()
+        if not row:
+            row = WorkweekWeek(week_start=monday, flagged_5day=False, nwd_weekday=nwd)
+            db.session.add(row)
+            row.updated_by_user_id = user_id
+            row.updated_at = datetime.utcnow()
+            updated += 1
+            continue
+        if normalize_nwd_weekday(row.nwd_weekday) != nwd:
+            row.nwd_weekday = nwd
+            row.updated_by_user_id = user_id
+            row.updated_at = datetime.utcnow()
+            updated += 1
+    if updated:
+        db.session.flush()
+        _clear_calendar_request_cache()
+    return updated
 
 
 def calendar_model_code_for_date(d: date) -> str | None:
@@ -375,6 +521,8 @@ def recompute_leave_charges_for_dates(dates: list[date]) -> tuple[int, int]:
         if d.weekday() > 4:
             continue
         model = calendar_model_code_for_date(d) or '5day'
+        if model == '4day' and is_compressed_nwd_date(d, model):
+            continue
         charge = leave_day_credit_for_workweek(model)
         week = _weeks_cached().get(iso_week_monday(d))
         flagged = bool(week.flagged_5day) if week else False

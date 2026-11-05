@@ -26,7 +26,7 @@
         <h1 class="page-title" style="margin:0;">Leave Approvals</h1>
         <p style="margin:0.25rem 0 0; color: var(--medium-gray, #666); font-size: 0.9rem;">Pending leave applications waiting for your action.</p>
       </div>
-      {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+      {% if (current_user.role or '')|lower in ('admin', 'hr', 'manager') %}
       <a href="{{ url_for('routes.leave_list') }}" class="btn-secondary">View All Leave</a>
       {% endif %}
     </div>
@@ -48,7 +48,12 @@
             {% for l in leaves %}
             <tr>
               <td>{{ l.id }}</td>
-              <td>{{ l.employee.full_name if l.employee else '' }}</td>
+              <td>
+                {{ l.employee.full_name if l.employee else '' }}
+                {% if l.employee_id in (department_head_employee_ids or []) %}
+                <span class="muted" style="display:block; font-size:0.75rem;">Department Head — HR/Admin action</span>
+                {% endif %}
+              </td>
               <td>{{ l.leave_type }}</td>
               <td>{{ l.start_date.strftime('%Y-%m-%d') }}{% if l.end_date and l.end_date != l.start_date %} to {{ l.end_date.strftime('%Y-%m-%d') }}{% endif %}</td>
               <td>{{ l.created_at.strftime('%Y-%m-%d %H:%M') if l.created_at else '' }}</td>
@@ -65,6 +70,12 @@
                   <input type="hidden" name="manager_remarks" value="Dis-approved">
                   <button type="submit" class="btn-secondary" style="height: 32px;">Dis-approve</button>
                 </form>
+                {% if (current_user.role or '')|lower in ('admin', 'hr') %}
+                <a href="{{ url_for('routes.leave_edit', id=l.id) }}" class="btn-secondary" style="height: 32px; display:inline-flex; align-items:center; margin-left: 0.35rem;">Edit</a>
+                <form method="POST" action="{{ url_for('routes.leave_cancel', id=l.id) }}" style="display:inline; margin-left: 0.35rem;" onsubmit="return confirm('Cancel this leave application?');">
+                  <button type="submit" class="btn-secondary" style="height: 32px;">Cancel</button>
+                </form>
+                {% endif %}
                 <a href="{{ url_for('routes.leave_detail', id=l.id) }}" class="btn-secondary" style="height: 32px; display:inline-flex; align-items:center; margin-left: 0.35rem;">View</a>
                 {% endif %}
               </td>

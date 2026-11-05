@@ -793,6 +793,11 @@ body {
     color: #721c24;
 }
 
+.status-cancelled {
+    background-color: #e2e8f0;
+    color: #334155;
+}
+
 .status-active {
     background-color: #d4edda;
     color: #155724;
@@ -1033,6 +1038,39 @@ body {
     grid-template-columns: 1fr 1fr;
     gap: 1rem;
     margin-bottom: 0.25rem;
+}
+
+.generate-dtr-workweek-calendar-panel {
+    margin-bottom: 0.85rem;
+}
+.generate-dtr-workweek-calendar-host {
+    overflow-x: auto;
+    margin: 0.4rem 0 0.5rem;
+}
+.generate-dtr-workweek-cal-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+}
+.generate-dtr-workweek-cal-table th,
+.generate-dtr-workweek-cal-table td {
+    border-bottom: 1px solid #eef2f7;
+    padding: 0.4rem 0.35rem;
+    text-align: left;
+    vertical-align: middle;
+}
+.generate-dtr-workweek-cal-table th {
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--primary-blue, #013a63);
+}
+.generate-dtr-workweek-cal-table tr.is-flagged {
+    background: #fff8e1;
+}
+.generate-dtr-workweek-cal-table select.form-control {
+    min-width: 8.5rem;
+    font-size: 0.78rem;
 }
 
 .generate-dtr-workweek-segments-wrap {

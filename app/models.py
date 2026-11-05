@@ -71,6 +71,8 @@ class Employee(db.Model):
     salary_tranche = db.Column(db.String(20), nullable=True)  # 1st, 2nd, 3rd, 4th
     salary_grade = db.Column(db.Integer, nullable=True)  # sg value from salary_grade table
     salary_step = db.Column(db.Integer, nullable=True)  # 1-8
+    # JO/COS payroll: ATM bank credit vs NON-ATM (cash/check) funds release
+    payroll_fund_release = db.Column(db.String(20), nullable=False, default='ATM')
     flexible_worktime = db.Column(db.Boolean, default=False, nullable=False)
     flexible_start_time = db.Column(db.Time, nullable=True)
     flexible_end_time = db.Column(db.Time, nullable=True)
@@ -91,14 +93,21 @@ class Employee(db.Model):
     leave_requests = db.relationship('LeaveRequest', backref='employee', lazy='dynamic')
 
     @staticmethod
+    def normalize_name_part(raw) -> str:
+        """Return a clean name token, ignoring empty / placeholder values such as None."""
+        if raw is None:
+            return ''
+        text = str(raw).strip()
+        if not text:
+            return ''
+        if text.lower() in ('none', 'n/a', 'na', '-', '.', 'null'):
+            return ''
+        return text
+
+    @staticmethod
     def normalize_name_extension(raw) -> str:
         """Return a clean name extension, ignoring empty / placeholder values."""
-        ext = (raw or '').strip()
-        if not ext:
-            return ''
-        if ext.lower() in ('none', 'n/a', 'na', '-', '.', 'null'):
-            return ''
-        return ext
+        return Employee.normalize_name_part(raw)
 
     @property
     def name_extension(self) -> str:
@@ -112,9 +121,9 @@ class Employee(db.Model):
     def full_name(self):
         """Given-name order: First [Middle] Last [Extension]."""
         parts = []
-        first = (self.first_name or '').strip()
-        middle = (self.middle_name or '').strip()
-        last = (self.last_name or '').strip()
+        first = self.normalize_name_part(self.first_name)
+        middle = self.normalize_name_part(self.middle_name)
+        last = self.normalize_name_part(self.last_name)
         ext = self.name_extension
         if first:
             parts.append(first)
@@ -133,9 +142,9 @@ class Employee(db.Model):
 
         Extension sits after the first name (not after the surname).
         """
-        last = (self.last_name or '').strip()
-        first = (self.first_name or '').strip()
-        middle = (self.middle_name or '').strip()
+        last = self.normalize_name_part(self.last_name)
+        first = self.normalize_name_part(self.first_name)
+        middle = self.normalize_name_part(self.middle_name)
         ext = self.name_extension
         given_parts = []
         if first:
@@ -152,9 +161,9 @@ class Employee(db.Model):
     @property
     def directory_name_mi(self):
         """Directory order with middle initial: Last, First [Extension] M."""
-        last = (self.last_name or '').strip()
-        first = (self.first_name or '').strip()
-        middle = (self.middle_name or '').strip()
+        last = self.normalize_name_part(self.last_name)
+        first = self.normalize_name_part(self.first_name)
+        middle = self.normalize_name_part(self.middle_name)
         ext = self.name_extension
         given_parts = []
         if first:
@@ -357,6 +366,7 @@ EVENT_ATTENDANCE_CATEGORY_LABELS = {
     'flag_retreat': 'Flag Retreat',
     'meeting': 'Meeting',
 }
+EVENT_ATTENDANCE_CATEGORY_MAX_LEN = 80
 
 
 class EventAttendanceBatch(db.Model):
@@ -364,7 +374,7 @@ class EventAttendanceBatch(db.Model):
     __tablename__ = 'event_attendance_batches'
 
     id = db.Column(db.Integer, primary_key=True)
-    category = db.Column(db.String(40), nullable=False)
+    category = db.Column(db.String(80), nullable=False)
     event_date = db.Column(db.Date, nullable=False)
     filename = db.Column(db.String(255), nullable=False, default='')
     row_count = db.Column(db.Integer, nullable=False, default=0)
@@ -410,7 +420,7 @@ class EventAttendance(db.Model):
         db.Integer, db.ForeignKey('employees.id', ondelete='SET NULL'), nullable=True
     )
     badge_employee_id = db.Column(db.String(50), nullable=False, default='')
-    category = db.Column(db.String(40), nullable=False)
+    category = db.Column(db.String(80), nullable=False)
     event_date = db.Column(db.Date, nullable=False)
     punched_at = db.Column(db.DateTime, nullable=False)
     timestamp_ms = db.Column(db.BigInteger, nullable=False)
@@ -1915,6 +1925,8 @@ class WorkweekWeek(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     week_start = db.Column(db.Date, nullable=False, unique=True)
     flagged_5day = db.Column(db.Boolean, nullable=False, default=False)
+    # 4-day compressed rest day: 0=Mon … 4=Fri (default Friday). Ignored on 5-day weeks.
+    nwd_weekday = db.Column(db.SmallInteger, nullable=False, default=4)
     holiday_date = db.Column(db.Date, nullable=True)
     holiday_name = db.Column(db.String(180), nullable=True)
     holiday_kind = db.Column(db.String(40), nullable=True)
@@ -2779,6 +2791,7 @@ class JoCosPayslip(db.Model):
     late_deduction = db.Column(db.Numeric(12, 2), nullable=False, default=0)
     hdmf_deduction = db.Column(db.Numeric(12, 2), nullable=False, default=0)
     net_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    fund_release = db.Column(db.String(20), nullable=False, default='ATM')
     generated_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     generated_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
 

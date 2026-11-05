@@ -29,6 +29,11 @@ DTR_JUSTIFICATION_REASONS = (
 )
 DTR_JUSTIFICATION_REASON_OTHERS = 'Others'
 
+# JO/COS daily-wage payroll: how wages are released
+PAYROLL_FUND_RELEASE_ATM = 'ATM'
+PAYROLL_FUND_RELEASE_NON_ATM = 'NON-ATM'
+PAYROLL_FUND_RELEASE_OPTIONS = (PAYROLL_FUND_RELEASE_ATM, PAYROLL_FUND_RELEASE_NON_ATM)
+
 def _parse_max_content_length():
     """Bytes or None (no limit). Env MAX_CONTENT_LENGTH: integer or none/unlimited/empty."""
     raw = (os.environ.get('MAX_CONTENT_LENGTH') or '').strip()

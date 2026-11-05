@@ -186,7 +186,7 @@
                 <article class="landing-stat-card landing-birthday-card" aria-labelledby="landing-bdays-title">
                     {% set bdays_items = (birthdays['items'] if birthdays and 'items' in birthdays else []) %}
                     <div class="landing-birthday-head">
-                        <h3 id="landing-bdays-title" class="landing-birthday-title">Birthdays this week</h3>
+                        <h3 id="landing-bdays-title" class="landing-birthday-title">Birthdays this week{% if birthdays and birthdays.get('count') %} ({{ birthdays['count'] }}){% endif %}</h3>
                         {% if birthdays and ('week_start' in birthdays) and ('week_end' in birthdays) and birthdays['week_start'] and birthdays['week_end'] %}
                         <div class="landing-birthday-range">
                             {{ birthdays['week_start'].strftime('%b %d') }}–{{ birthdays['week_end'].strftime('%b %d') }}

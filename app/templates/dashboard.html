@@ -26,7 +26,7 @@
                 <div class="stat-value">{{ total_users }}</div>
             </a>
             
-            {% if (current_user.role or '')|lower in ('manager', 'admin') %}
+            {% if (current_user.role or '')|lower in ('manager', 'admin', 'hr') %}
             <a href="{{ url_for('routes.leave_approvals') }}" class="stat-card stat-card-warning stat-card-link">
                 <div class="stat-label">Pending Approvals</div>
                 <div class="stat-value">{{ pending_approvals if pending_approvals is not none else pending_leaves }}</div>
@@ -51,7 +51,7 @@
         </div>
         
         <div class="recent-section">
-            <h2 class="section-title">Recent Leave Requests</h2>
+            <h2 class="section-title">Leave Applications</h2>
             <div class="table-container">
                 <table class="data-table">
                     <thead>
@@ -70,7 +70,12 @@
                             {% for leave in recent_leaves %}
                             <tr>
                                 <td>{{ leave.id }}</td>
-                                <td>{{ leave.employee.full_name if leave.employee else 'N/A' }}</td>
+                                <td>
+                                    {{ leave.employee.full_name if leave.employee else 'N/A' }}
+                                    {% if leave.employee and leave.employee_id in (department_head_employee_ids or []) %}
+                                    <span class="muted" style="display:block; font-size:0.75rem;">Department Head — HR/Admin action</span>
+                                    {% endif %}
+                                </td>
                                 <td>{{ leave.leave_type|title }}</td>
                                 <td>{{ leave.start_date.strftime('%Y-%m-%d') }}</td>
                                 <td>{{ leave.end_date.strftime('%Y-%m-%d') }}</td>
@@ -79,7 +84,27 @@
                                         {{ leave.status|title }}
                                     </span>
                                 </td>
-                                <td>
+                                <td style="white-space: nowrap;">
+                                    {% if leave.id in (leave_actionable_ids or []) %}
+                                    <form method="POST" action="{{ url_for('routes.leave_approve', id=leave.id) }}" style="display:inline;">
+                                      <button type="submit" class="btn-action">Approve</button>
+                                    </form>
+                                    <form method="POST" action="{{ url_for('routes.leave_disapprove', id=leave.id) }}" style="display:inline;">
+                                      <input type="hidden" name="manager_remarks" value="Dis-approved">
+                                      <button type="submit" class="btn-action">Disapprove</button>
+                                    </form>
+                                    {% endif %}
+                                    {% if leave.id in (leave_editable_ids or []) %}
+                                    <a href="{{ url_for('routes.leave_edit', id=leave.id) }}" class="btn-action">Edit</a>
+                                    {% endif %}
+                                    {% if leave.id in (leave_cancellable_ids or []) %}
+                                    <form method="POST" action="{{ url_for('routes.leave_cancel', id=leave.id) }}" style="display:inline;" onsubmit="return confirm('Cancel this leave application?');">
+                                      <button type="submit" class="btn-action">Cancel</button>
+                                    </form>
+                                    {% endif %}
+                                    {% if leave.id in (leave_printable_ids or []) %}
+                                    <a href="{{ url_for('routes.leave_detail', id=leave.id, print=1) }}" class="btn-action">Print</a>
+                                    {% endif %}
                                     <a href="{{ url_for('routes.leave_detail', id=leave.id) }}" class="btn-action">View</a>
                                 </td>
                             </tr>

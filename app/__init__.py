@@ -62,6 +62,14 @@ def create_app(config_class=Config):
             LeaveLedgerDeletion.__table__.create(db.engine, checkfirst=True)
             WorkweekMonthPlan.__table__.create(db.engine, checkfirst=True)
             WorkweekWeek.__table__.create(db.engine, checkfirst=True)
+            try:
+                db.session.execute(text(
+                    "ALTER TABLE workweek_week ADD COLUMN IF NOT EXISTS "
+                    "nwd_weekday SMALLINT DEFAULT 4 NOT NULL"
+                ))
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
             JoCosDesignation.__table__.create(db.engine, checkfirst=True)
             JoCosRate.__table__.create(db.engine, checkfirst=True)
             FlexiTimeSchedule.__table__.create(db.engine, checkfirst=True)
@@ -85,6 +93,8 @@ def create_app(config_class=Config):
                     'ALTER TABLE event_attendance ADD COLUMN IF NOT EXISTS municipality VARCHAR(120)',
                     'ALTER TABLE event_attendance ADD COLUMN IF NOT EXISTS province VARCHAR(120)',
                     'ALTER TABLE event_attendance ADD COLUMN IF NOT EXISTS location_text VARCHAR(255)',
+                    'ALTER TABLE event_attendance ALTER COLUMN category TYPE VARCHAR(80)',
+                    'ALTER TABLE event_attendance_batches ALTER COLUMN category TYPE VARCHAR(80)',
                 ):
                     db.session.execute(text(stmt))
                 db.session.commit()
@@ -156,6 +166,7 @@ def create_app(config_class=Config):
                         ("separation_date", "DATE"),
                         ("separation_type", "VARCHAR(60)"),
                         ("id_photo_ermt_record_id", "INTEGER"),
+                        ("payroll_fund_release", "VARCHAR(20) DEFAULT 'ATM'"),
                     ]:
                         if name not in columns:
                             db.session.execute(text(f"ALTER TABLE employees ADD COLUMN IF NOT EXISTS {name} {typ}"))
@@ -190,6 +201,19 @@ def create_app(config_class=Config):
             except Exception as e:
                 db.session.rollback()
                 print(f"Warning: Could not add employee salary columns: {e}")
+            try:
+                inspector = inspect(db.engine)
+                if "jo_cos_payslips" in inspector.get_table_names():
+                    pcols = [c["name"] for c in inspector.get_columns("jo_cos_payslips")]
+                    if "fund_release" not in pcols:
+                        db.session.execute(text(
+                            "ALTER TABLE jo_cos_payslips ADD COLUMN IF NOT EXISTS "
+                            "fund_release VARCHAR(20) DEFAULT 'ATM' NOT NULL"
+                        ))
+                        db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                print(f"Warning: Could not add jo_cos_payslips.fund_release: {e}")
             try:
                 from app.employee_id_photo_service import ensure_temp_id_photo_link
                 msg = ensure_temp_id_photo_link()
@@ -292,6 +316,18 @@ def create_app(config_class=Config):
             except Exception as e:
                 db.session.rollback()
                 print(f'Warning: Could not add appointment history SI columns: {e}')
+            try:
+                dtr_inspector = inspect(db.engine)
+                if 'daily_time_record' in dtr_inspector.get_table_names():
+                    db.session.execute(text(
+                        "UPDATE daily_time_record SET remarks = 'NON-WORKING DAY' "
+                        "WHERE remarks IS NOT NULL AND UPPER(REPLACE(TRIM(remarks), '-', ' ')) "
+                        "IN ('REST DAY', 'RESTDAY')"
+                    ))
+                    db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                print(f'Warning: Could not rename DTR REST DAY remarks: {e}')
             # Default admin (username=admin / employee ADMIN001) is NOT auto-created
             # on every startup — that re-added deleted records. Use setup_db.py once
             # for intentional bootstrap.

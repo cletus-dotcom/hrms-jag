@@ -181,6 +181,74 @@ document.addEventListener('DOMContentLoaded', function () {
     renderHolidayMiniCal();
   }
 
+  var genFormEl = document.getElementById('generateDtrForm');
+  var wwPreviewUrl = genFormEl ? genFormEl.getAttribute('data-workweek-preview-url') : '';
+  var calPanel = document.getElementById('dtrWorkweekCalendarPanel');
+  var calHost = document.getElementById('dtrWorkweekCalendarHost');
+  var calNote = document.getElementById('dtrWorkweekCalendarNote');
+  var segPanel = document.getElementById('dtrWorkweekSegmentsPanel');
+  var workweekCalendarSaved = false;
+
+  function dtrRenderWorkweekPreview(data) {
+    workweekCalendarSaved = !!(data && data.ok !== false && data.calendar_saved);
+    if (calPanel) calPanel.hidden = !workweekCalendarSaved;
+    if (segPanel) segPanel.hidden = workweekCalendarSaved;
+    if (!workweekCalendarSaved || !calHost) {
+      if (calHost) calHost.innerHTML = '';
+      return;
+    }
+    if (calNote) {
+      var note = (data.month_model_label || '') + ' · ' + (data.period_label || '');
+      if (data.calendar_url) {
+        note += ' · <a href="' + data.calendar_url + '" target="_blank" rel="noopener">Open year calendar</a>';
+      }
+      calNote.innerHTML = note;
+    }
+    var opts = data.nwd_weekday_options || [];
+    var html = '<table class="generate-dtr-workweek-cal-table"><thead><tr>' +
+      '<th>Week</th><th>Scheme</th><th>Holiday</th><th>Rest day (NON-WORKING DAY)</th>' +
+      '</tr></thead><tbody>';
+    (data.weeks || []).forEach(function (w) {
+      var model = w.effective_model === '4day' ? 'Compressed (4-day)' : 'Regular (5-day)';
+      html += '<tr class="' + (w.flagged ? 'is-flagged' : '') + '">';
+      html += '<td>' + (w.label || w.week_start) + '</td>';
+      html += '<td>' + model + (w.flagged ? ' <span class="muted">Friday holiday week</span>' : '') + '</td>';
+      html += '<td>' + (w.holiday_name ? w.holiday_name : '—') + '</td><td>';
+      if (w.allow_nwd_transfer) {
+        html += '<select class="form-control" name="nwd_' + w.week_start + '">';
+        opts.forEach(function (opt) {
+          html += '<option value="' + opt.value + '"' +
+            (String(opt.value) === String(w.nwd_weekday) ? ' selected' : '') + '>' +
+            opt.label + '</option>';
+        });
+        html += '</select>';
+      } else {
+        html += '<span class="muted">—</span>';
+        html += '<input type="hidden" name="nwd_' + w.week_start + '" value="' + (w.nwd_weekday || 4) + '">';
+      }
+      html += '</td></tr>';
+    });
+    html += '</tbody></table>';
+    calHost.innerHTML = html;
+  }
+
+  function dtrLoadWorkweekPreview() {
+    if (!wwPreviewUrl || !yearEl || !monthEl) return;
+    var y = yearEl.value;
+    var m = monthEl.value;
+    var q = (quincenaEl && quincenaEl.value) || '1';
+    fetch(wwPreviewUrl + '?year=' + encodeURIComponent(y) + '&month=' + encodeURIComponent(m) +
+      '&quincena=' + encodeURIComponent(q), { credentials: 'same-origin' })
+      .then(function (res) { return res.json(); })
+      .then(dtrRenderWorkweekPreview)
+      .catch(function () { dtrRenderWorkweekPreview({ calendar_saved: false }); });
+  }
+  [monthEl, yearEl, quincenaEl].forEach(function (el) {
+    if (el) el.addEventListener('change', dtrLoadWorkweekPreview);
+  });
+  if (yearEl) yearEl.addEventListener('input', dtrLoadWorkweekPreview);
+  dtrLoadWorkweekPreview();
+
   var wsList = document.getElementById('dtrWorkweekSegmentsList');
   var wsAddBtn = document.getElementById('dtrAddWorkweekSegment');
   var wsJsonEl = document.getElementById('dtrWorkweekSegmentsJson');
@@ -310,7 +378,9 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     genForm.addEventListener('submit', function (e) {
       e.preventDefault();
-      if (typeof dtrSyncWorkweekSegmentsJson === 'function') {
+      if (workweekCalendarSaved) {
+        if (wsJsonEl) wsJsonEl.value = '[]';
+      } else if (typeof dtrSyncWorkweekSegmentsJson === 'function') {
         var wsErr = dtrValidateWorkweekSegments();
         if (wsErr) {
           alert(wsErr);
